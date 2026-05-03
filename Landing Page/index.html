@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Run AI Agents That Actually Do Work</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <button id="theme-toggle" class="dark-mode-toggle" aria-label="Toggle dark mode">
+        <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+        <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: none;"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+    </button>
+    
+    <!-- Hero Wrapper mimicking the original body layout -->
+    <div class="hero-wrapper">
+        <div class="card">
+            <!-- Background Blurs -->
+            <div class="blur-bot">
+                <svg width="100%" height="100%" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M5 40 v20 a10 10 0 0 0 10 10 h10 v-40 h-10 a10 10 0 0 0 -10 10 z" fill="#cbd5e1" />
+                  <path d="M95 40 v20 a10 10 0 0 1 -10 10 h-10 v-40 h10 a10 10 0 0 1 10 10 z" fill="#cbd5e1" />
+                  <rect x="20" y="25" width="60" height="50" rx="15" fill="#f8fafc"/>
+                  <rect x="30" y="35" width="40" height="30" rx="8" fill="#1e293b"/>
+                  <circle cx="42" cy="50" r="4.5" fill="#f8fafc"/>
+                  <circle cx="58" cy="50" r="4.5" fill="#f8fafc"/>
+                </svg>
+            </div>
+            <svg class="blur-wave" viewBox="0 0 100 100">
+                <path d="M 0 80 Q 20 20 40 50 T 80 10 T 100 40" stroke="#bae6fd" stroke-width="12" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+
+            <!-- Avatars -->
+            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Annie&backgroundColor=d4e157" alt="Avatar 1" class="avatar avatar-1">
+            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Buster&backgroundColor=ce93d8" alt="Avatar 2" class="avatar avatar-2">
+            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Charlie&backgroundColor=81c784" alt="Avatar 3" class="avatar avatar-3">
+            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Dave&backgroundColor=80deea" alt="Avatar 4" class="avatar avatar-4">
+            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Eve&backgroundColor=aed581" alt="Avatar 5" class="avatar avatar-5">
+
+            <!-- Main Content -->
+            <div class="content">
+                <h1 class="title">
+                    <div class="line1-wrapper">
+                        Run AI Agents
+                        <svg class="green-lines" viewBox="0 0 230 40">
+                            <path d="M 5 15 Q 110 5 220 22" stroke="#7eb943" stroke-width="4" fill="none" stroke-linecap="round"/>
+                            <path d="M 30 25 Q 120 15 200 28" stroke="#5d962a" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+                        </svg>
+                    </div>
+                    <div class="line2">That Actually Do Work</div>
+                </h1>
+                
+                <p class="description">
+                    Build and run AI agents for your business — support, sales, operations, and more.<br>
+                    No complex setup. No locked systems. You stay in control.
+                </p>
+                
+                <div class="hero-buttons">
+                    <a href="#pricing" class="btn">
+                        <div class="btn-icon-wrapper">
+                            <svg width="24" height="24" viewBox="0 0 24 24">
+                                <path d="M1 10 v4 a2 2 0 0 0 2 2 h1 v-8 h-1 a2 2 0 0 0 -2 2 z" fill="#8bc34a" />
+                                <path d="M23 10 v4 a2 2 0 0 1 -2 2 h-1 v-8 h1 a2 2 0 0 1 2 2 z" fill="#8bc34a" />
+                                <rect x="4" y="5" width="16" height="14" rx="4" fill="#f0f0f0"/>
+                                <rect x="6" y="7" width="12" height="10" rx="2" fill="#1c1c1c"/>
+                                <circle cx="9" cy="12" r="1.5" fill="#8bc34a"/>
+                                <circle cx="15" cy="12" r="1.5" fill="#8bc34a"/>
+                            </svg>
+                        </div>
+                        Get Started
+                    </a>
+                    <a href="#demo" class="btn btn-secondary">Book a Demo</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- What This Is -->
+    <section class="section" id="what-it-is">
+        <div style="text-align: center; max-width: 800px; margin: 0 auto;">
+            <h2 class="section-title" style="margin-bottom: 1.5rem;">What This Is</h2>
+            <p style="font-size: 28px; color: #3b3d3e; line-height: 1.4; font-weight: 500;">
+                This is a platform to create and run AI agents.<br>
+                You tell them what to do. They handle the work.
+            </p>
+            <p style="color: #8c8f91; font-size: 18px; margin-top: 1.5rem;">
+                From answering customers to running internal workflows — all in one place.
+            </p>
+        </div>
+    </section>
+
+    <!-- What You Can Do -->
+    <section class="section bg-light" id="capabilities">
+        <h2 class="section-title">What You Can Do</h2>
+        <div class="features-grid">
+            <div class="feature-card">
+                <h3>Automate Tasks</h3>
+                <ul>
+                    <li>Process data</li>
+                    <li>Move information between tools</li>
+                    <li>Handle repetitive work</li>
+                </ul>
+            </div>
+            <div class="feature-card">
+                <h3>Talk to Customers</h3>
+                <ul>
+                    <li>Answer questions</li>
+                    <li>Manage tickets</li>
+                    <li>Provide 24/7 support</li>
+                </ul>
+            </div>
+            <div class="feature-card">
+                <h3>Run Operations</h3>
+                <ul>
+                    <li>Monitor systems</li>
+                    <li>Trigger actions</li>
+                    <li>Keep things running smoothly</li>
+                </ul>
+            </div>
+            <div class="feature-card">
+                <h3>Generate Content</h3>
+                <ul>
+                    <li>Write blogs, emails, posts</li>
+                    <li>Maintain content pipelines</li>
+                </ul>
+            </div>
+            <div class="feature-card">
+                <h3>Grow Sales</h3>
+                <ul>
+                    <li>Find leads</li>
+                    <li>Send outreach</li>
+                    <li>Update your CRM</li>
+                </ul>
+            </div>
+            <div class="feature-card">
+                <h3>Build Custom Workflows</h3>
+                <ul>
+                    <li>Combine multiple steps</li>
+                    <li>Connect your tools</li>
+                    <li>Design your own logic</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works -->
+    <section class="section" id="how-it-works">
+        <h2 class="section-title">How It Works</h2>
+        <div class="steps-grid">
+            <div class="step">
+                <div class="step-num">1</div>
+                <div class="step-text">Choose what you want to automate</div>
+            </div>
+            <div class="step">
+                <div class="step-num">2</div>
+                <div class="step-text">Set up your agent</div>
+            </div>
+            <div class="step">
+                <div class="step-num">3</div>
+                <div class="step-text">Connect your tools</div>
+            </div>
+            <div class="step">
+                <div class="step-num">4</div>
+                <div class="step-text">Let it run</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Why People Use This -->
+    <section class="section bg-light" id="benefits">
+        <h2 class="section-title">Why People Use This</h2>
+        <div class="features-grid">
+            <div class="feature-card">
+                <h3>Simple to Start</h3>
+                <p>No AI or engineering background needed.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Flexible</h3>
+                <p>You decide what your agents do.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Scales With You</h3>
+                <p>Start small, handle more as you grow.</p>
+            </div>
+            <div class="feature-card">
+                <h3>All In One Place</h3>
+                <p>No need to stitch together multiple tools.</p>
+            </div>
+            <div class="feature-card" style="grid-column: 1 / -1; text-align: center; background: linear-gradient(90deg, #f3fbef, #eaf5fb);">
+                <h3>You Stay in Control</h3>
+                <p>Your workflows. Your data. Your rules.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing -->
+    <section class="section" id="pricing">
+        <div style="text-align: center; margin-bottom: 3rem;">
+            <h2 class="section-title" style="margin-bottom: 1rem;">Simple Pricing</h2>
+            <p style="font-size: 18px; color: #646769;">
+                You’re not paying per “agent”. You’re paying for how much work your system can handle.
+            </p>
+            <p style="font-size: 16px; color: #8c8f91; margin-top: 1rem;">
+                More capacity means: <strong>More tasks processed</strong> • <strong>Faster execution</strong> • <strong>More complex workflows</strong>
+            </p>
+        </div>
+
+        <div class="pricing-grid">
+            <div class="pricing-card">
+                <div class="price-name">Starter</div>
+                <div class="price-desc">For getting started</div>
+                <div class="price-cost">$79<span style="font-size: 18px; color: #8c8f91;">/mo</span></div>
+                <ul class="check-list">
+                    <li>Handles light workloads</li>
+                    <li>Good for simple automations</li>
+                </ul>
+            </div>
+            <div class="pricing-card highlight">
+                <div class="price-name">Operator</div>
+                <div class="price-desc">For growing usage</div>
+                <div class="price-cost">$199<span style="font-size: 18px; color: #8c8f91;">/mo</span></div>
+                <ul class="check-list">
+                    <li>Handles more tasks at once</li>
+                    <li>Faster performance</li>
+                    <li>Supports real business workflows</li>
+                </ul>
+            </div>
+            <div class="pricing-card">
+                <div class="price-name">Scale</div>
+                <div class="price-desc">For heavy usage</div>
+                <div class="price-cost">$399<span style="font-size: 18px; color: #8c8f91;">/mo</span></div>
+                <ul class="check-list">
+                    <li>High workload capacity</li>
+                    <li>Handles complex workflows</li>
+                    <li>Built for consistent performance</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <!-- Built for Real Use -->
+    <section class="section bg-light">
+        <h2 class="section-title">Built for Real Use</h2>
+        <div class="use-cases">
+            <div class="use-case">
+                <h3>E-commerce</h3>
+                <p>Automate support and increase conversions.</p>
+            </div>
+            <div class="use-case">
+                <h3>SaaS</h3>
+                <p>Reduce manual work and keep systems stable.</p>
+            </div>
+            <div class="use-case">
+                <h3>Agencies</h3>
+                <p>Run AI systems for multiple clients.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="section">
+        <h2 class="section-title">FAQ</h2>
+        <div class="faq-grid">
+            <div class="faq-item">
+                <div class="faq-q">Do I need technical skills?</div>
+                <div class="faq-a">No. You can start simple and grow over time.</div>
+            </div>
+            <div class="faq-item">
+                <div class="faq-q">What can agents do?</div>
+                <div class="faq-a">Anything from replying to customers to running workflows.</div>
+            </div>
+            <div class="faq-item">
+                <div class="faq-q">What am I paying for?</div>
+                <div class="faq-a">The system that runs your agents — not individual agents.</div>
+            </div>
+            <div class="faq-item">
+                <div class="faq-q">Can I run multiple agents?</div>
+                <div class="faq-a">Yes. As many as your setup can handle.</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Final CTA & Footer -->
+    <section class="section" style="text-align: center; padding-bottom: 2rem;">
+        <h2 style="font-size: 36px; color: #3b3d3e; margin-bottom: 1rem; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;">Stop doing repetitive work manually.</h2>
+        <p style="font-size: 20px; color: #646769; margin-bottom: 2rem;">Start running AI agents that do it for you.</p>
+        <div class="hero-buttons" style="justify-content: center; margin-bottom: 4rem;">
+            <a href="#pricing" class="btn">Deploy Now</a>
+            <a href="#demo" class="btn btn-secondary">Book a Demo</a>
+        </div>
+        <div style="border-top: 1px solid #eaeaea; padding-top: 2rem; color: #8c8f91; font-size: 14px;">
+            © 2026 SovereignML
+        </div>
+    </section>
+
+    <script src="script.js"></script>
+</body>
+</html>

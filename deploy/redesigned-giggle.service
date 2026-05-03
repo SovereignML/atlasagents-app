@@ -1,0 +1,46 @@
+; systemd unit for bare-metal VPS deploy (alternative to pm2).
+;
+; Install:
+;   sudo cp deploy/redesigned-giggle.service /etc/systemd/system/
+;   sudo systemctl daemon-reload
+;   sudo systemctl enable --now redesigned-giggle
+;   journalctl -u redesigned-giggle -f
+;
+; Assumes:
+;   - App checked out at /opt/redesigned-giggle (adjust WorkingDirectory below)
+;   - `npm ci && npm run build` already run there
+;   - `npm run db:push` has been run to sync the Drizzle schema
+;   - /etc/redesigned-giggle.env contains DATABASE_URL, AUTH_SECRET,
+;     NEXTAUTH_URL, etc. (chmod 600, owned by the app user)
+
+[Unit]
+Description=redesigned-giggle (Next.js standalone)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nextjs
+Group=nextjs
+WorkingDirectory=/opt/redesigned-giggle
+EnvironmentFile=/etc/redesigned-giggle.env
+Environment=NODE_ENV=production
+Environment=HOSTNAME=0.0.0.0
+Environment=PORT=3000
+Environment=NEXT_TELEMETRY_DISABLED=1
+ExecStart=/usr/bin/node .next/standalone/server.js
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=15
+LimitNOFILE=65536
+
+; Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/redesigned-giggle /var/log/redesigned-giggle
+
+[Install]
+WantedBy=multi-user.target

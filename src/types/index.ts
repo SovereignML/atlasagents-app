@@ -1,0 +1,5 @@
+export type UserRole = "user" | "admin"
+export type InstanceStatus = "provisioning" | "running" | "stopped" | "failed" | "deleted"
+export type SubscriptionStatus = "active" | "past_due" | "canceled" | "incomplete" | "trialing"
+export type BillingInterval = "month" | "year"
+export type LogLevel = "info" | "warn" | "error"

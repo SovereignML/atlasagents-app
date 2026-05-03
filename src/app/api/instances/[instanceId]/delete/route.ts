@@ -1,0 +1,82 @@
+import { NextRequest, NextResponse } from "next/server"
+import { auth } from "@/auth"
+import { db, instances, subscriptions, eq } from "@/db"
+import { deleteBot } from "@/lib/provisioner"
+import { IllegalTransitionError } from "@/lib/instance-state"
+import { stripe, isStripeConfigured } from "@/lib/stripe"
+import { logAuditEvent } from "@/lib/audit"
+
+// POST /api/instances/:instanceId/delete
+//
+// Authoritative delete. On success returns:
+//   200 { status: "deleted" }  — Linode VM is gone, DB row is deleted.
+//   202 { status: "pending" }  — retries exhausted; reconciler will sweep.
+//
+// Errors are surfaced; we no longer silently mark the row deleted.
+export async function POST(
+  _req: NextRequest,
+  { params }: { params: Promise<{ instanceId: string }> },
+) {
+  const session = await auth()
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  const { instanceId } = await params
+  const isAdmin = (session.user as { role?: string }).role === "admin"
+
+  const instance = await db.query.instances.findFirst({
+    where: eq(instances.id, instanceId),
+  })
+  if (!instance) {
+    return NextResponse.json({ error: "Instance not found" }, { status: 404 })
+  }
+  if (!isAdmin && instance.userId !== session.user.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
+  let result
+  try {
+    result = await deleteBot(instance)
+  } catch (err) {
+    if (err instanceof IllegalTransitionError) {
+      // Row is already deleting/deleted — this is a double-click, treat as OK.
+      return NextResponse.json({ status: "already_deleting" }, { status: 200 })
+    }
+    console.error(`[delete] deleteBot failed for ${instanceId}:`, err)
+    return NextResponse.json(
+      { error: "Delete failed", detail: (err as Error).message },
+      { status: 500 },
+    )
+  }
+
+  // Cancel linked subscription regardless — the row is at least in `deleting`.
+  const sub = await db.query.subscriptions.findFirst({
+    where: eq(subscriptions.instanceId, instanceId),
+  })
+  if (sub) {
+    if (isStripeConfigured() && sub.stripeSubscriptionId) {
+      try {
+        await stripe.subscriptions.cancel(sub.stripeSubscriptionId)
+      } catch (err) {
+        console.warn(`[delete] stripe cancel failed:`, err)
+      }
+    }
+    await db
+      .update(subscriptions)
+      .set({ status: "canceled" })
+      .where(eq(subscriptions.id, sub.id))
+  }
+
+  await logAuditEvent({
+    userId: session.user.id,
+    action: "instance.delete",
+    targetType: "instance",
+    targetId: instanceId,
+    targetLabel: instance.name,
+  })
+
+  return NextResponse.json(result, {
+    status: result.status === "deleted" ? 200 : 202,
+  })
+}

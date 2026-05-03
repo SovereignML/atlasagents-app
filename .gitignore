@@ -1,0 +1,19 @@
+node_modules/
+.next/
+next-env.d.ts
+tsconfig.tsbuildinfo
+.cursor/
+**/.DS_Store
+# Single-env policy: only `.env` is loaded at runtime. `.env.local` and
+# `.env.production` are banned — pm2 refuses to start if they exist.
+# Listed here so they can't sneak in via git even if someone creates them.
+.env
+.env.local
+.env.production
+.env.production.local
+
+*.db
+*.db-journal
+
+graphify-out
+.opencode/
