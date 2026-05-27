@@ -1,7 +1,10 @@
 "use client"
 
-import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { useState } from "react"
+
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
 
 export function AcceptInviteClient({
   token,
@@ -37,16 +40,26 @@ export function AcceptInviteClient({
   }
 
   return (
-    <>
-      <p className="text-sm text-[var(--text-secondary)]">
-        <span className="text-[var(--text-primary)]">{inviterName}</span> invited you to join{" "}
-        <span className="text-[var(--text-primary)]">{teamName}</span> as{" "}
-        <span className="text-primary font-mono">{role}</span>.
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        <span className="text-foreground">{inviterName}</span> invited you to join{" "}
+        <span className="text-foreground">{teamName}</span> as{" "}
+        <span className="font-mono text-primary">{role}</span>.
       </p>
-      {error && <p className="text-xs font-mono text-red-400">{error}</p>}
-      <button onClick={accept} disabled={busy} className="btn-gradient !py-2.5 !px-5 !text-sm w-full">
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription className="font-mono text-xs">{error}</AlertDescription>
+        </Alert>
+      )}
+      <Button
+        onClick={accept}
+        disabled={busy}
+        variant="gradient"
+        size="pill"
+        className="w-full"
+      >
         {busy ? "Joining…" : "Accept invite"}
-      </button>
-    </>
+      </Button>
+    </div>
   )
 }

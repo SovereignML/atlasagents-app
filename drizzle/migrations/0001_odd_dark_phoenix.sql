@@ -1,0 +1,1 @@
+ALTER TABLE "Instance" ADD COLUMN "runtime" text DEFAULT 'openclaw';

@@ -1,37 +1,74 @@
 "use client"
 
+import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { signIn } from "next-auth/react"
-import { useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import Link from "next/link"
-import { signInWithGoogle } from "@/app/actions/auth"
 
-export function LoginForm({ showGoogleOAuth = false }: { showGoogleOAuth?: boolean }) {
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import {
+  Field,
+  FieldGroup,
+  FieldLabel,
+  FieldSeparator,
+} from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import { OAuthButtons, type OAuthAvailability } from "@/components/auth/oauth-buttons"
+
+export interface LoginFormProps {
+  /** Backwards-compatible flag — also enables Google if true. */
+  showGoogleOAuth?: boolean
+  providers?: OAuthAvailability
+}
+
+export function LoginForm({ showGoogleOAuth = false, providers }: LoginFormProps) {
   const router = useRouter()
+  const resolvedProviders: OAuthAvailability = providers ?? {
+    google: showGoogleOAuth,
+    twitter: false,
+    apple: false,
+  }
+
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
-  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    setLoading(true)
-    setError("")
+  // Cached credentials between the password step and the 2FA challenge — we
+  // need to re-submit the same email/password along with the TOTP code.
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [twoFactorRequired, setTwoFactorRequired] = useState(false)
+  const [code, setCode] = useState("")
 
-    const formData = new FormData(e.currentTarget)
-    const email = formData.get("email") as string
-    const password = formData.get("password") as string
-
+  async function submitCredentials(payload: {
+    email: string
+    password: string
+    code?: string
+  }) {
     const result = await signIn("credentials", {
-      email,
-      password,
+      ...payload,
       redirect: false,
     })
 
     if (result?.error) {
+      if (result.code === "TwoFactorRequired") {
+        setTwoFactorRequired(true)
+        setError("")
+        return
+      }
+      if (result.code === "TwoFactorInvalid") {
+        setError("Invalid 2FA code. Try again.")
+        return
+      }
       setError("Invalid email or password")
-      setLoading(false)
+      setTwoFactorRequired(false)
       return
     }
 
@@ -39,94 +76,160 @@ export function LoginForm({ showGoogleOAuth = false }: { showGoogleOAuth?: boole
     router.refresh()
   }
 
+  async function onCredentialsSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setLoading(true)
+    setError("")
+    try {
+      const formData = new FormData(e.currentTarget)
+      const nextEmail = (formData.get("email") as string)?.trim() ?? ""
+      const nextPassword = (formData.get("password") as string) ?? ""
+      setEmail(nextEmail)
+      setPassword(nextPassword)
+      await submitCredentials({ email: nextEmail, password: nextPassword })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function on2faSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!code) return
+    setLoading(true)
+    setError("")
+    try {
+      await submitCredentials({ email, password, code })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (twoFactorRequired) {
+    return (
+      <Card className="w-full">
+        <CardHeader className="text-center">
+          <CardTitle className="text-2xl font-bold">Two-Factor Verification</CardTitle>
+          <CardDescription>
+            Enter the 6-digit code from your authenticator app, or one of your backup codes.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={on2faSubmit} className="space-y-4">
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+            <Field>
+              <FieldLabel htmlFor="totp">Authentication code</FieldLabel>
+              <Input
+                id="totp"
+                name="totp"
+                inputMode="text"
+                autoComplete="one-time-code"
+                placeholder="123456 or backup code"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                autoFocus
+                required
+              />
+            </Field>
+            <Button
+              type="submit"
+              variant="gradient"
+              size="pill"
+              className="w-full"
+              disabled={loading || code.trim().length < 6}
+            >
+              {loading ? "Verifying..." : "Verify"}
+            </Button>
+            <button
+              type="button"
+              className="w-full text-center text-sm text-muted-foreground hover:underline"
+              onClick={() => {
+                setTwoFactorRequired(false)
+                setCode("")
+                setError("")
+              }}
+            >
+              Back to sign-in
+            </button>
+          </form>
+        </CardContent>
+      </Card>
+    )
+  }
+
   return (
-    <div className="w-full rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-md)] p-8">
-      <div className="text-center mb-6">
-        <h2 className="text-2xl font-bold text-[var(--text-primary)]">
-          Welcome Back
-        </h2>
-        <p className="text-[var(--text-secondary)] text-sm mt-1">Sign in to your account to continue</p>
-      </div>
+    <Card className="w-full">
+      <CardHeader className="text-center">
+        <CardTitle className="text-2xl font-bold">Welcome Back</CardTitle>
+        <CardDescription>Sign in to your account to continue</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <FieldGroup>
+          {(resolvedProviders.google ||
+            resolvedProviders.twitter ||
+            resolvedProviders.apple) && (
+            <>
+              <OAuthButtons providers={resolvedProviders} />
+              <FieldSeparator>or</FieldSeparator>
+            </>
+          )}
 
-      {showGoogleOAuth && (
-        <form action={signInWithGoogle}>
-          <button
-            type="submit"
-            className="w-full rounded-lg border border-[var(--border-color)] bg-transparent hover:bg-[var(--card-hover)] text-[var(--text-primary)] py-3 flex items-center justify-center gap-3 transition-all duration-200 text-sm font-medium"
-          >
-            <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
-              <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
-              <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
-              <path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
-              <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
-            </svg>
-            Continue with Google
-          </button>
-        </form>
-      )}
-
-      {showGoogleOAuth && (
-      <div className="relative my-6">
-        <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-[var(--border-color)]"></div>
-        </div>
-        <div className="relative flex justify-center text-xs">
-          <span className="bg-[var(--card-bg)] px-3 text-[var(--text-secondary)]">or</span>
-        </div>
-      </div>
-      )}
-
-      <form onSubmit={onSubmit} className="space-y-4">
-        {error && (
-          <div className="p-3 rounded-lg border border-red-500/30 bg-red-500/10 text-red-500 text-sm">
-            {error}
-          </div>
-        )}
-        <div className="space-y-2">
-          <Label htmlFor="email" className="text-[var(--text-secondary)] text-sm font-medium">
-            Email
-          </Label>
-          <Input
-            id="email"
-            name="email"
-            type="email"
-            placeholder="you@example.com"
-            required
-            className="bg-transparent border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]/50 focus:border-[var(--accent-color)]"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="password" className="text-[var(--text-secondary)] text-sm font-medium">
-            Password
-          </Label>
-          <Input
-            id="password"
-            name="password"
-            type="password"
-            placeholder="••••••••"
-            required
-            minLength={6}
-            className="bg-transparent border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]/50 focus:border-[var(--accent-color)]"
-          />
-        </div>
-        <div className="flex justify-end">
-          <Link
-            href="/forgot-password"
-            className="text-xs text-[var(--accent-color)] hover:underline"
-          >
-            Forgot password?
-          </Link>
-        </div>
-        <Button type="submit" variant="gradient" size="pill" className="w-full" disabled={loading}>
-          {loading ? "Signing in..." : "Sign In"}
-        </Button>
-        <p className="text-center text-sm text-[var(--text-secondary)]">
-          Don&apos;t have an account?{" "}
-          <Link href="/register" className="text-[var(--accent-color)] hover:underline">
-            Sign up
-          </Link>
-        </p>
-      </form>
-    </div>
+          <form onSubmit={onCredentialsSubmit} className="space-y-4">
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+            <Field>
+              <FieldLabel htmlFor="email">Email</FieldLabel>
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                placeholder="you@example.com"
+                required
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="password">Password</FieldLabel>
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                placeholder="••••••••"
+                required
+                minLength={6}
+              />
+            </Field>
+            <div className="flex justify-end">
+              <Link
+                href="/forgot-password"
+                className="text-xs text-primary hover:underline"
+              >
+                Forgot password?
+              </Link>
+            </div>
+            <Button
+              type="submit"
+              variant="gradient"
+              size="pill"
+              className="w-full"
+              disabled={loading}
+            >
+              {loading ? "Signing in..." : "Sign In"}
+            </Button>
+            <p className="text-center text-sm text-muted-foreground">
+              Don&apos;t have an account?{" "}
+              <Link href="/register" className="text-primary hover:underline">
+                Sign up
+              </Link>
+            </p>
+          </form>
+        </FieldGroup>
+      </CardContent>
+    </Card>
   )
 }

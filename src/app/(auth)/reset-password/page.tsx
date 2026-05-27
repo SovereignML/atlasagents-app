@@ -1,12 +1,20 @@
 "use client"
 
-import { useState, Suspense } from "react"
-import { useSearchParams, useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import Link from "next/link"
+import { useRouter, useSearchParams } from "next/navigation"
+import { Suspense, useState } from "react"
+
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
 
 function ResetPasswordForm() {
   const searchParams = useSearchParams()
@@ -19,19 +27,22 @@ function ResetPasswordForm() {
 
   if (!token || !email) {
     return (
-      <Card className="w-full bg-[var(--card-bg)] backdrop-blur-xl border-[var(--border-color)]">
-        <CardHeader className="text-center pb-4 pt-8 px-8">
-          <CardTitle className="text-2xl font-bold text-[var(--text-primary)]">Invalid Link</CardTitle>
-          <CardDescription className="text-[var(--text-secondary)]">
+      <Card className="w-full">
+        <CardHeader className="text-center">
+          <CardTitle className="text-2xl font-bold">Invalid Link</CardTitle>
+          <CardDescription>
             This password reset link is invalid or has expired.
           </CardDescription>
         </CardHeader>
-        <CardContent className="px-8 pb-8">
-          <Link href="/forgot-password">
-            <Button className="w-full bg-blue-600 hover:bg-blue-700">
-              Request a New Link
-            </Button>
-          </Link>
+        <CardContent>
+          <Button
+            variant="gradient"
+            size="pill"
+            className="w-full"
+            render={<Link href="/forgot-password" />}
+          >
+            Request a New Link
+          </Button>
         </CardContent>
       </Card>
     )
@@ -80,50 +91,54 @@ function ResetPasswordForm() {
   }
 
   return (
-    <Card className="w-full max-w-md bg-[var(--card-bg)] backdrop-blur-xl border-[var(--border-color)]">
+    <Card className="w-full">
       <CardHeader className="text-center">
-        <CardTitle className="text-2xl font-bold text-[var(--text-primary)]">Reset Password</CardTitle>
-        <CardDescription className="text-[var(--text-secondary)]">
-          Enter your new password below
-        </CardDescription>
+        <CardTitle className="text-2xl font-bold">Reset Password</CardTitle>
+        <CardDescription>Enter your new password below</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
           {error && (
-            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-              {error}
-            </div>
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           )}
-          <div className="space-y-2">
-            <Label htmlFor="password" className="text-[var(--text-primary)]">New Password</Label>
-            <Input
-              id="password"
-              name="password"
-              type="password"
-              placeholder="••••••••"
-              required
-              minLength={6}
-              className="bg-[var(--card-bg)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="confirmPassword" className="text-[var(--text-primary)]">Confirm Password</Label>
-            <Input
-              id="confirmPassword"
-              name="confirmPassword"
-              type="password"
-              placeholder="••••••••"
-              required
-              minLength={6}
-              className="bg-[var(--card-bg)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]"
-            />
-          </div>
-          <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700" disabled={loading}>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="password">New Password</FieldLabel>
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                placeholder="••••••••"
+                required
+                minLength={6}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="confirmPassword">Confirm Password</FieldLabel>
+              <Input
+                id="confirmPassword"
+                name="confirmPassword"
+                type="password"
+                placeholder="••••••••"
+                required
+                minLength={6}
+              />
+            </Field>
+          </FieldGroup>
+          <Button
+            type="submit"
+            variant="gradient"
+            size="pill"
+            className="w-full"
+            disabled={loading}
+          >
             {loading ? "Resetting..." : "Reset Password"}
           </Button>
-          <p className="text-center text-sm text-[var(--text-secondary)]">
+          <p className="text-center text-sm text-muted-foreground">
             Remember your password?{" "}
-            <Link href="/login" className="text-blue-400 hover:text-blue-300">
+            <Link href="/login" className="text-primary hover:underline">
               Sign in
             </Link>
           </p>

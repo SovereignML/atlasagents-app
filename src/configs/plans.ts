@@ -1,7 +1,13 @@
 // Subscription tier metadata. Drives pricing UI, landing sections, and DB seed.
 // Stripe price IDs are set via env when wiring Stripe checkout.
 
-export type PlanTier = "free" | "builder" | "operator" | "scale" | "enterprise"
+export type PlanTier =
+  | "free"
+  | "builder"
+  | "operator"
+  | "scale"
+  | "enterprise"
+  | "byos"
 
 export type PlanCTA = "start-free" | "get-started" | "contact-sales"
 
@@ -149,6 +155,34 @@ export const PLANS: readonly PlanConfig[] = [
     cta: "contact-sales",
     serverConfigSlug: "shared-16g",
   },
+  {
+    // Bring Your Own Server — Sovereign acts purely as the management panel
+    // for a server the customer already owns. Flat recurring management fee;
+    // no compute billing (we don't own the box). LLM usage is either metered
+    // against the credit wallet (pay-as-you-go) or paid directly via the
+    // customer's own API key. serverConfigSlug points at the `byos-managed`
+    // sentinel row so the Instance FKs are satisfied without a Linode plan.
+    slug: "byos",
+    tier: "byos",
+    name: "Bring Your Own Server",
+    description: "Manage your own server",
+    features: [
+      "Connect your own server",
+      "Full management panel",
+      "Deploy & monitor your agent",
+      "Use our OpenRouter credits or your own API key",
+      "Logs, restart, and config controls",
+    ],
+    stripePriceIdMonthly: process.env.STRIPE_PRICE_BYOS_MONTHLY ?? "",
+    stripePriceIdYearly: process.env.STRIPE_PRICE_BYOS_YEARLY ?? "",
+    isActive: true,
+    sortOrder: 50,
+    creditsPerPeriod: 0,
+    displayPriceMonthly: 29,
+    displayPriceYearly: 290,
+    cta: "get-started",
+    serverConfigSlug: "byos-managed",
+  },
 ] as const
 
 export const PRICING_POSITIONING = {
@@ -178,10 +212,20 @@ export function findPlanBySlug(slug: string): PlanConfig | undefined {
   return PLANS.find((p) => p.slug === slug)
 }
 
-/** Plans available for self-serve deployment (excludes enterprise / contact-sales) */
+/**
+ * Plans available for self-serve deployment in the standard managed-VPS deploy
+ * wizard (excludes enterprise / contact-sales and the BYOS plan, which has its
+ * own dedicated section + flow at /dashboard/byos).
+ */
 export const DEPLOYABLE_PLANS = PLANS.filter(
-  (p) => p.cta !== "contact-sales" && p.serverConfigSlug !== null,
+  (p) =>
+    p.cta !== "contact-sales" &&
+    p.serverConfigSlug !== null &&
+    p.tier !== "byos",
 )
+
+/** The Bring Your Own Server management-panel plan. */
+export const BYOS_PLAN = PLANS.find((p) => p.tier === "byos")!
 
 export function formatUsd(amount: number): string {
   return `$${amount.toLocaleString("en-US")}`

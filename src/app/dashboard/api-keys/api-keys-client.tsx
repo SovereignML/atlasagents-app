@@ -1,6 +1,44 @@
 "use client"
 
 import { useState } from "react"
+import { Copy, Plus } from "lucide-react"
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import { PageContainer, PageHeader } from "@/components/layout/page-container"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 
 type Key = {
   id: string
@@ -16,6 +54,7 @@ export function ApiKeysClient({ initial }: { initial: Key[] }) {
   const [creating, setCreating] = useState(false)
   const [newKeyName, setNewKeyName] = useState("")
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null)
+  const [revokeId, setRevokeId] = useState<string | null>(null)
 
   function handleCreate() {
     if (!newKeyName.trim()) return
@@ -37,137 +76,165 @@ export function ApiKeysClient({ initial }: { initial: Key[] }) {
     setCreating(false)
   }
 
-  function handleRevoke(id: string) {
-    if (!confirm("Revoke this key? Clients using it will stop working immediately.")) return
-    setKeys((prev) => prev.filter((k) => k.id !== id))
+  function handleConfirmRevoke() {
+    if (!revokeId) return
+    setKeys((prev) => prev.filter((k) => k.id !== revokeId))
+    setRevokeId(null)
   }
 
-  return (
-    <div className="space-y-8 max-w-5xl">
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h1
-            className="text-2xl font-bold uppercase tracking-[0.02em] text-[var(--text-primary)]"
-            style={{ fontFamily: "var(--font-display)" }}
-          >
-            API Keys
-          </h1>
-          <p className="text-[var(--text-secondary)] mt-1 text-sm">
-            Personal access tokens for the public API. Treat like passwords — never commit them.
-          </p>
-        </div>
-        <button
-          onClick={() => setCreating(true)}
-          className="btn-primary text-sm px-5 py-2.5"
-        >
-          + New Key
-        </button>
-      </div>
-
-      {creating && (
-        <div className="border border-[var(--accent-color)] bg-[var(--accent-dim)]/30 p-5 space-y-3">
-          <p className="text-[10px] uppercase tracking-[0.1em] font-mono text-[var(--accent-color)]">
+  const newKeyDialog = (
+    <Dialog open={creating} onOpenChange={setCreating}>
+      <DialogTrigger
+        render={
+          <Button variant="gradient" size="pill">
+            <Plus data-icon="inline-start" />
+            New Key
+          </Button>
+        }
+      />
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Create API key</DialogTitle>
+          <DialogDescription>
+            Pick a memorable name to identify where this key is used.
+          </DialogDescription>
+        </DialogHeader>
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="api-key-name">Name</FieldLabel>
+            <Input
+              id="api-key-name"
+              autoFocus
+              value={newKeyName}
+              onChange={(e) => setNewKeyName(e.target.value)}
+              placeholder="e.g. Production, CI, local-dev"
+              className="font-mono"
+            />
+          </Field>
+        </FieldGroup>
+        <DialogFooter>
+          <DialogClose render={<Button variant="outline">Cancel</Button>} />
+          <Button onClick={handleCreate} disabled={!newKeyName.trim()}>
             Create key
-          </p>
-          <input
-            type="text"
-            value={newKeyName}
-            onChange={(e) => setNewKeyName(e.target.value)}
-            placeholder="e.g. Production, CI, local-dev"
-            className="w-full bg-[var(--card-bg)] border border-[var(--border-color)] px-4 py-2 font-mono text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-color)]"
-            autoFocus
-          />
-          <div className="flex gap-2">
-            <button onClick={handleCreate} className="btn-primary text-xs px-4 py-2">Create</button>
-            <button
-              onClick={() => { setCreating(false); setNewKeyName("") }}
-              className="px-4 py-2 text-xs uppercase tracking-[0.08em] font-mono border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+
+  return (
+    <PageContainer>
+      <PageHeader
+        title="API Keys"
+        description="Personal access tokens for the public API. Treat like passwords — never commit them."
+        actions={newKeyDialog}
+      />
 
       {revealedSecret && (
-        <div className="border border-amber-500/40 bg-amber-500/5 p-5 space-y-3">
-          <p className="text-xs uppercase tracking-[0.1em] font-mono text-amber-400">
-            Copy now — you won&apos;t see this again
-          </p>
-          <div className="flex gap-2">
-            <code className="flex-1 bg-[var(--code-bg)] border border-[var(--border-color)] px-3 py-2 font-mono text-sm text-[var(--text-primary)] break-all">
-              {revealedSecret}
-            </code>
-            <button
-              onClick={() => { navigator.clipboard.writeText(revealedSecret); }}
-              className="px-4 py-2 text-xs uppercase tracking-[0.08em] font-mono border border-[var(--border-color)] text-[var(--text-primary)] hover:border-[var(--accent-color)]"
-            >
-              Copy
-            </button>
-            <button
-              onClick={() => setRevealedSecret(null)}
-              className="px-4 py-2 text-xs uppercase tracking-[0.08em] font-mono border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-            >
-              Done
-            </button>
-          </div>
-        </div>
+        <Alert className="border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-300">
+          <AlertTitle>Copy now — you won&apos;t see this again</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <code className="flex-1 break-all rounded-lg border bg-background/70 px-3 py-2 font-mono text-sm text-foreground">
+                {revealedSecret}
+              </code>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => navigator.clipboard.writeText(revealedSecret)}
+              >
+                <Copy data-icon="inline-start" />
+                Copy
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setRevealedSecret(null)}>
+                Done
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
       )}
 
-      <div className="border border-[var(--border-color)]">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)] font-mono border-b border-[var(--border-color)]">
-              <th className="text-left px-4 py-3">Name</th>
-              <th className="text-left px-4 py-3">Key</th>
-              <th className="text-left px-4 py-3">Scopes</th>
-              <th className="text-left px-4 py-3">Created</th>
-              <th className="text-left px-4 py-3">Last Used</th>
-              <th className="text-right px-4 py-3"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {keys.length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-sm text-[var(--text-secondary)]">
-                  No keys yet. Create one to get started.
-                </td>
-              </tr>
-            )}
-            {keys.map((k) => (
-              <tr key={k.id} className="border-b border-[var(--border-color)]/50">
-                <td className="px-4 py-3 text-[var(--text-primary)]">{k.name}</td>
-                <td className="px-4 py-3 font-mono text-xs text-[var(--text-secondary)]">
-                  {k.prefix}••••••••
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex gap-1 flex-wrap">
-                    {k.scopes.map((s) => (
-                      <span key={s} className="text-[10px] font-mono border border-[var(--border-color)] px-1.5 py-0.5 text-[var(--text-secondary)]">
-                        {s}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-4 py-3 font-mono text-xs text-[var(--text-secondary)]">{k.created}</td>
-                <td className="px-4 py-3 font-mono text-xs text-[var(--text-secondary)]">{k.lastUsed}</td>
-                <td className="px-4 py-3 text-right">
-                  <button
-                    onClick={() => handleRevoke(k.id)}
-                    className="text-xs uppercase tracking-[0.08em] font-mono text-red-400 hover:underline"
-                  >
-                    Revoke
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {keys.length === 0 ? (
+        <Card>
+          <CardContent className="py-12">
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle>No keys yet</EmptyTitle>
+                <EmptyDescription>Create one to get started.</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="overflow-hidden p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Key</TableHead>
+                <TableHead>Scopes</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead>Last Used</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {keys.map((k) => (
+                <TableRow key={k.id}>
+                  <TableCell className="font-medium text-foreground">{k.name}</TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {k.prefix}••••••••
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {k.scopes.map((s) => (
+                        <Badge key={s} variant="outline" className="font-mono text-[10px]">
+                          {s}
+                        </Badge>
+                      ))}
+                    </div>
+                  </TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {k.created}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {k.lastUsed}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setRevokeId(k.id)}
+                      className="text-destructive hover:text-destructive"
+                    >
+                      Revoke
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
 
-      <p className="text-[10px] font-mono text-amber-400/80">
+      <p className="font-mono text-[10px] text-amber-500/80">
         ⚠ local UI state only — ApiKey model + `/api/keys` endpoints pending
       </p>
-    </div>
+
+      <AlertDialog open={revokeId !== null} onOpenChange={(o) => !o && setRevokeId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revoke this key?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Clients using this key will stop working immediately. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmRevoke}>Revoke</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </PageContainer>
   )
 }

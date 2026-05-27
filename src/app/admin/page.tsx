@@ -1,5 +1,31 @@
-import { db, eq, sql, instances, users, subscriptions } from "@/db"
 import Link from "next/link"
+
+import { db, eq, sql, instances, users, subscriptions } from "@/db"
+import { Badge } from "@/components/ui/badge"
+import { runtimeLabel } from "@/lib/runtimes/labels"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { PageContainer, PageHeader, PageSection } from "@/components/layout/page-container"
+
+function statusBadgeVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
+  switch (status) {
+    case "running":
+      return "default"
+    case "failed":
+    case "failed_provisioning":
+      return "destructive"
+    case "provisioning":
+    case "pending":
+      return "outline"
+    default:
+      return "secondary"
+  }
+}
 
 export default async function AdminDashboard() {
   const [
@@ -39,83 +65,89 @@ export default async function AdminDashboard() {
   ]
 
   return (
-    <div className="space-y-8 max-w-6xl">
-      <h1 className="text-2xl font-bold text-[var(--text-primary)]">
-        Admin Dashboard
-      </h1>
+    <PageContainer>
+      <PageHeader title="Admin Dashboard" description="Operational overview of the platform." />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((stat) => (
-          <div key={stat.label} className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-6">
-            <p className="text-xs text-[var(--text-secondary)]">
-              {stat.label}
-            </p>
-            <p
-              className={`text-3xl font-bold mt-2 ${stat.accent ? "text-primary" : "text-[var(--text-primary)]"}`}
-            >
-              {stat.value}
-            </p>
-          </div>
+          <Card key={stat.label} size="sm">
+            <CardHeader>
+              <CardDescription className="text-xs">{stat.label}</CardDescription>
+              <CardTitle
+                className={
+                  stat.accent
+                    ? "text-3xl font-bold text-primary"
+                    : "text-3xl font-bold text-foreground"
+                }
+              >
+                {stat.value}
+              </CardTitle>
+            </CardHeader>
+          </Card>
         ))}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-6">
-          <p className="text-xs text-[var(--text-secondary)]">Stopped Instances</p>
-          <p className="text-3xl font-bold mt-2 text-[var(--text-secondary)]">{stoppedInstances}</p>
-        </div>
-        <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-6">
-          <p className="text-xs text-[var(--text-secondary)]">Banned Users</p>
-          <p className="text-3xl font-bold mt-2 text-red-400">{bannedUsers}</p>
-        </div>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <Card size="sm">
+          <CardHeader>
+            <CardDescription className="text-xs">Stopped Instances</CardDescription>
+            <CardTitle className="text-3xl font-bold text-muted-foreground">
+              {stoppedInstances}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card size="sm">
+          <CardHeader>
+            <CardDescription className="text-xs">Banned Users</CardDescription>
+            <CardTitle className="text-3xl font-bold text-destructive">{bannedUsers}</CardTitle>
+          </CardHeader>
+        </Card>
       </div>
 
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-[var(--text-primary)]">
-            Recent Instances
-          </h2>
-          <Link
-            href="/admin/instances"
-            className="text-sm text-primary hover:underline"
-          >
+      <PageSection
+        title="Recent Instances"
+        actions={
+          <Link href="/admin/instances" className="text-sm font-medium text-primary hover:underline">
             View All &rarr;
           </Link>
-        </div>
+        }
+      >
         {recentInstances.length === 0 ? (
-          <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-8 text-center">
-            <p className="text-[var(--text-secondary)]">No instances yet</p>
-          </div>
+          <Card>
+            <CardContent className="py-8 text-center">
+              <p className="text-muted-foreground">No instances yet</p>
+            </CardContent>
+          </Card>
         ) : (
           <div className="space-y-2">
             {recentInstances.map((instance) => (
-              <div key={instance.id} className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-4 flex items-center justify-between hover:bg-[var(--card-hover)] transition-colors">
-                <div>
-                  <p className="text-[var(--text-primary)] font-medium">{instance.name}</p>
-                  <p className="text-sm text-[var(--text-secondary)]">{instance.user.email}</p>
-                  <p className="text-xs text-[var(--text-secondary)] font-mono">{instance.slug}</p>
-                </div>
-                <div className="text-right">
-                  <p className={`text-sm font-bold font-mono ${
-                    instance.status === "running"
-                      ? "text-primary"
-                      : instance.status === "provisioning"
-                      ? "text-amber-400"
-                      : instance.status === "failed"
-                      ? "text-red-400"
-                      : "text-[var(--text-secondary)]"
-                  }`}>
-                    {instance.status}
-                  </p>
-                  <p className="text-xs text-[var(--text-secondary)]">
-                    {instance.region.flag} {instance.region.name} &middot; {instance.serverConfig.label}
-                  </p>
-                </div>
-              </div>
+              <Card key={instance.id} className="transition-colors hover:bg-accent/40">
+                <CardContent className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium text-foreground">{instance.name}</p>
+                    <p className="text-sm text-muted-foreground">{instance.user.email}</p>
+                    <p className="font-mono text-xs text-muted-foreground">{instance.slug}</p>
+                  </div>
+                  <div className="text-right">
+                    <Badge variant={statusBadgeVariant(instance.status)} className="font-mono">
+                      {instance.status}
+                    </Badge>
+                    {instance.deploymentTarget === "vps" && (
+                      <Badge variant="outline" className="ml-2 font-mono">
+                        {runtimeLabel(instance.runtime)}
+                      </Badge>
+                    )}
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {instance.region.flag} {instance.region.name} &middot;{" "}
+                      {instance.serverConfig.label}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
             ))}
           </div>
         )}
-      </div>
-    </div>
+      </PageSection>
+    </PageContainer>
   )
 }

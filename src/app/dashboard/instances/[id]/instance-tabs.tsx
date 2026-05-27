@@ -1,7 +1,64 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react"
-import { useRouter, usePathname } from "next/navigation"
+import { useRouter, usePathname, useSearchParams } from "next/navigation"
+import {
+  Check,
+  Cloud,
+  CloudUpload,
+  Copy,
+  Link2,
+  Loader2,
+  RefreshCw,
+  RotateCcw,
+  Trash2,
+  Unlink,
+} from "lucide-react"
+import { toast } from "sonner"
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+} from "@/components/ui/card"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
 
 type InstanceLite = {
@@ -18,6 +75,8 @@ type InstanceLite = {
   managedSubdomain: string | null
   dnsStatus: string | null
   tlsStatus: string | null
+  domainProxied: boolean
+  cfZoneId: string | null
   openclawAdminEmail: string | null
   hasOpenclawPassword: boolean
   hasRootPassword: boolean
@@ -25,6 +84,13 @@ type InstanceLite = {
   deploymentTarget: string | null
   provisionStage: string | null
   agentType: string | null
+  runtime: string | null
+  runtimeLabel: string
+  webuiEnabled: boolean
+  byosHost: string | null
+  byosPort: number | null
+  byosUser: string | null
+  byosLlmMode: string | null
 }
 
 const AGENT_CATEGORIES = [
@@ -50,10 +116,41 @@ type StatusPayload = {
   logs: LogLite[]
 }
 
+type BackupLite = {
+  id: string
+  fileName: string
+  agentName: string
+  sizeBytes: number | null
+  createdAt: string
+}
+
+type DriveInfo = {
+  configured: boolean
+  connected: boolean
+  email: string | null
+}
+
+type CloudflareInfo = {
+  connected: boolean
+}
+
+type KumaInfo = {
+  /** Whether the operator has configured Uptime Kuma (env set). Card hidden when false. */
+  configured: boolean
+  status: string | null
+  responseTimeMs: number | null
+  uptimeRatio: number | null
+  certDaysRemaining: number | null
+  checkedAt: string | null
+}
+
+type CfZone = { id: string; name: string; status: string }
+
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "controls", label: "Controls" },
   { id: "interfaces", label: "Interfaces" },
+  { id: "backup", label: "Backup" },
   { id: "logs", label: "Logs" },
   { id: "danger", label: "Danger Zone" },
 ] as const
@@ -79,7 +176,6 @@ function useInstancePolling(initialInstance: InstanceLite, initialLogs: LogLite[
     setProvisionStage(initialInstance.provisionStage)
   }, [initialInstance.provisionStage])
 
-  // Poll while the row is moving through any non-terminal transition state.
   const isPolling =
     status === "pending" || status === "provisioning" || status === "deleting"
 
@@ -147,10 +243,18 @@ export function InstanceTabs({
   active,
   instance: initialInstance,
   logs: initialLogs,
+  drive,
+  cloudflare,
+  kuma,
+  backups,
 }: {
   active: string
   instance: InstanceLite
   logs: LogLite[]
+  drive: DriveInfo
+  cloudflare: CloudflareInfo
+  kuma: KumaInfo
+  backups: BackupLite[]
 }) {
   const { instance, logs } = useInstancePolling(initialInstance, initialLogs)
   const router = useRouter()
@@ -161,48 +265,69 @@ export function InstanceTabs({
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex gap-1 border-b border-[var(--border-color)] overflow-x-auto">
+    <Tabs value={active} onValueChange={goTab} className="space-y-6">
+      <TabsList className="w-fit">
         {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => goTab(t.id)}
-            className={`px-4 py-3 text-xs uppercase tracking-[0.08em] font-mono whitespace-nowrap border-b-2 transition-colors ${
-              active === t.id
-                ? "border-[var(--accent-color)] text-[var(--accent-color)]"
-                : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-            }`}
-          >
+          <TabsTrigger key={t.id} value={t.id}>
             {t.label}
-          </button>
+          </TabsTrigger>
         ))}
-      </div>
+      </TabsList>
 
-      {active === "overview" && <OverviewTab instance={instance} logs={logs} />}
-      {active === "controls" && <ControlsTab instance={instance} />}
-      {active === "interfaces" && <InterfacesTab instance={instance} />}
-      {active === "logs" && <LogsTab instanceId={instance.id} logs={logs} />}
-      {active === "danger" && <DangerTab instance={instance} />}
-    </div>
+      <TabsContent value="overview" className="mt-0">
+        <OverviewTab instance={instance} logs={logs} kuma={kuma} />
+      </TabsContent>
+      <TabsContent value="controls" className="mt-0">
+        <ControlsTab instance={instance} cloudflare={cloudflare} />
+      </TabsContent>
+      <TabsContent value="interfaces" className="mt-0">
+        <InterfacesTab instance={instance} />
+      </TabsContent>
+      <TabsContent value="backup" className="mt-0">
+        <BackupTab instance={instance} drive={drive} initialBackups={backups} />
+      </TabsContent>
+      <TabsContent value="logs" className="mt-0">
+        <LogsTab instanceId={instance.id} logs={logs} />
+      </TabsContent>
+      <TabsContent value="danger" className="mt-0">
+        <DangerTab instance={instance} />
+      </TabsContent>
+    </Tabs>
   )
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function SectionCard({
+  title,
+  description,
+  children,
+  footer,
+}: {
+  title: string
+  description?: string
+  children: React.ReactNode
+  footer?: React.ReactNode
+}) {
   return (
-    <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] p-5">
-      <p className="text-[10px] text-[var(--text-secondary)] uppercase tracking-[0.1em] font-mono mb-3">
-        {title}
-      </p>
-      {children}
-    </div>
+    <Card>
+      <CardHeader>
+        <CardDescription className="font-mono text-[10px] tracking-[0.1em] uppercase">
+          {title}
+        </CardDescription>
+        {description && <p className="text-sm text-muted-foreground">{description}</p>}
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+      {footer && <CardFooter>{footer}</CardFooter>}
+    </Card>
   )
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="text-[10px] text-[var(--text-secondary)] uppercase tracking-[0.1em] font-mono">{label}</p>
-      <p className="text-[var(--text-primary)] text-sm mt-1">{value}</p>
+      <p className="font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-1 text-sm text-foreground">{value}</p>
     </div>
   )
 }
@@ -260,71 +385,69 @@ function DnsCard({ instance }: { instance: InstanceLite }) {
   const url = `https://${instance.domain}`
 
   return (
-    <Card title={ready ? "Agent URL" : "DNS Setup"}>
+    <SectionCard title={ready ? "Agent URL" : "DNS Setup"}>
       {ready ? (
         <div className="space-y-2">
-          <p className="text-sm text-[var(--text-primary)]">
+          <p className="text-sm text-foreground">
             Your agent is live at{" "}
             <a
               href={url}
               target="_blank"
               rel="noreferrer"
-              className="text-[var(--accent-color)] underline font-mono"
+              className="font-mono text-primary underline"
             >
               {url}
             </a>
           </p>
-          <p className="text-[10px] font-mono text-[var(--text-secondary)]">
+          <p className="font-mono text-[10px] text-muted-foreground">
             TLS certificate issued. DNS resolved to {resolvedIps.join(", ") || instance.ipAddress}.
           </p>
         </div>
       ) : (
         <div className="space-y-3">
-          <p className="text-sm text-[var(--text-secondary)]">
-            Add this <span className="font-mono text-[var(--text-primary)]">A</span> record to your DNS provider for{" "}
-            <span className="font-mono text-[var(--text-primary)]">{instance.domain}</span>:
+          <p className="text-sm text-muted-foreground">
+            Add this <span className="font-mono text-foreground">A</span> record to your DNS provider for{" "}
+            <span className="font-mono text-foreground">{instance.domain}</span>:
           </p>
-          <div className="font-mono text-sm bg-[var(--code-bg)] border border-[var(--border-color)] rounded-lg p-3 flex items-center justify-between gap-3">
-            <span className="text-[var(--text-secondary)]">
-              <span className="text-[var(--text-primary)]">{instance.domain}</span> →{" "}
-              <span className="text-[var(--accent-color)]">{instance.ipAddress ?? "…"}</span>
+          <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/40 p-3 font-mono text-sm">
+            <span className="text-muted-foreground">
+              <span className="text-foreground">{instance.domain}</span> →{" "}
+              <span className="text-primary">{instance.ipAddress ?? "…"}</span>
             </span>
-            <button
-              onClick={copyIp}
-              className="px-2 py-1 rounded-lg text-[10px] uppercase tracking-[0.08em] border border-[var(--border-color)] text-[var(--text-primary)] hover:border-[var(--accent-color)]"
-            >
+            <Button size="xs" variant="outline" onClick={copyIp}>
+              {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
               {copied ? "Copied" : "Copy IP"}
-            </button>
+            </Button>
           </div>
-          <div className="flex items-center gap-4 text-[10px] font-mono uppercase tracking-[0.08em]">
-            <span className="text-[var(--text-secondary)]">
+          <div className="flex flex-wrap items-center gap-4 font-mono text-[10px] uppercase tracking-[0.08em]">
+            <span className="text-muted-foreground">
               DNS:{" "}
-              <span className={dnsStatus === "ready" ? "text-[var(--accent-color)]" : "text-amber-400"}>
+              <span className={dnsStatus === "ready" ? "text-primary" : "text-amber-500"}>
                 {dnsStatus ?? "pending"}
               </span>
             </span>
-            <span className="text-[var(--text-secondary)]">
+            <span className="text-muted-foreground">
               TLS:{" "}
-              <span className={tlsStatus === "issued" ? "text-[var(--accent-color)]" : "text-amber-400"}>
+              <span className={tlsStatus === "issued" ? "text-primary" : "text-amber-500"}>
                 {tlsStatus ?? "pending"}
               </span>
             </span>
             {resolvedIps.length > 0 && (
-              <span className="text-[var(--text-secondary)]">
-                resolved: <span className="text-[var(--text-primary)]">{resolvedIps.join(", ")}</span>
+              <span className="text-muted-foreground">
+                resolved: <span className="text-foreground">{resolvedIps.join(", ")}</span>
               </span>
             )}
           </div>
-          <p className="text-[10px] font-mono text-[var(--text-secondary)]/70">
+          <p className="font-mono text-[10px] text-muted-foreground/70">
             Polling every 10s. Once DNS propagates, Caddy issues a Let&apos;s Encrypt certificate automatically.
           </p>
         </div>
       )}
-    </Card>
+    </SectionCard>
   )
 }
 
-/* ───────────── MANAGED HOSTNAME (CLOUDFLARE) ───────────── */
+/* ───────────── MANAGED HOSTNAME ───────────── */
 function ManagedHostnameCard({ instance }: { instance: InstanceLite }) {
   const url = buildPublicGatewayUrl({
     domain: null,
@@ -348,32 +471,29 @@ function ManagedHostnameCard({ instance }: { instance: InstanceLite }) {
   if (!instance.managedSubdomain || instance.domain || !url) return null
 
   return (
-    <Card title="Managed hostname">
-      <p className="text-sm text-[var(--text-secondary)] mb-2">
-        DNS for this hostname is managed automatically. Open the gateway over HTTPS:
-      </p>
-      <div className="font-mono text-sm bg-[var(--code-bg)] border border-[var(--border-color)] rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap">
+    <SectionCard
+      title="Managed hostname"
+      description="DNS for this hostname is managed automatically. Open the gateway over HTTPS:"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/40 p-3 font-mono text-sm">
         <a
           href={url}
           target="_blank"
           rel="noreferrer"
-          className="text-[var(--accent-color)] underline break-all"
+          className="break-all text-primary underline"
         >
           {url}
         </a>
-        <button
-          type="button"
-          onClick={copyUrl}
-          className="px-2 py-1 rounded-lg text-[10px] uppercase tracking-[0.08em] border border-[var(--border-color)] text-[var(--text-primary)] hover:border-[var(--accent-color)] shrink-0"
-        >
+        <Button size="xs" variant="outline" onClick={copyUrl}>
+          {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
           {copied ? "Copied" : "Copy"}
-        </button>
+        </Button>
       </div>
-      <p className="text-[10px] font-mono text-[var(--text-secondary)]/70 mt-2">
-        Direct <span className="text-[var(--text-primary)]">http://{instance.ipAddress ?? "IP"}</span> on port 80
+      <p className="mt-2 font-mono text-[10px] text-muted-foreground/70">
+        Direct <span className="text-foreground">http://{instance.ipAddress ?? "IP"}</span> on port 80
         still reaches the gateway when the VM firewall allows it.
       </p>
-    </Card>
+    </SectionCard>
   )
 }
 
@@ -384,12 +504,17 @@ function CredentialsCard({
   managedSubdomain,
   tlsStatus,
   ipAddress,
+  runtimeLabel,
+  webui,
 }: {
   instanceId: string
   domain: string | null
   managedSubdomain: string | null
   tlsStatus: string | null
   ipAddress: string | null
+  runtimeLabel: string
+  /** When true the admin account is the Open WebUI login (Hermes sidecar). */
+  webui?: boolean
 }) {
   const [revealed, setRevealed] = useState<{ email: string; password: string; loginUrl: string | null } | null>(null)
   const [loading, setLoading] = useState(false)
@@ -414,8 +539,9 @@ function CredentialsCard({
   async function copy(text: string) {
     try {
       await navigator.clipboard.writeText(text)
+      toast.success("Copied to clipboard")
     } catch {
-      /* ignore */
+      toast.error("Copy failed")
     }
   }
 
@@ -425,40 +551,39 @@ function CredentialsCard({
     null
 
   return (
-    <Card title="Admin Credentials">
+    <SectionCard title={webui ? "Open WebUI Login" : "Admin Credentials"}>
       {!revealed ? (
-        <div className="space-y-2">
-          <p className="text-sm text-[var(--text-secondary)]">
-            Log into your OpenClaw agent with the auto-generated admin account.
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            {webui
+              ? "Log into Open WebUI — the web chat UI for your Hermes agent — with the auto-generated admin account."
+              : `Log into your ${runtimeLabel} agent with the auto-generated admin account.`}
           </p>
-          <button
-            onClick={reveal}
-            disabled={loading}
-            className="px-4 py-2 rounded-lg text-xs uppercase tracking-[0.08em] font-mono bg-[var(--accent-dim)] text-[var(--accent-color)] border border-[var(--accent-color)]/40 hover:bg-[var(--accent-color)]/20 disabled:opacity-50"
-          >
+          <Button size="sm" onClick={reveal} disabled={loading}>
+            {loading && <Loader2 data-icon="inline-start" className="animate-spin" />}
             {loading ? "Loading…" : "Reveal Credentials"}
-          </button>
-          {error && <p className="text-xs font-mono text-red-400">{error}</p>}
+          </Button>
+          {error && <p className="font-mono text-xs text-destructive">{error}</p>}
         </div>
       ) : (
         <div className="space-y-2 text-sm">
-          <Row label="Email" value={revealed.email} onCopy={() => copy(revealed.email)} />
-          <Row label="Password" value={revealed.password} onCopy={() => copy(revealed.password)} mono />
+          <CredRow label="Email" value={revealed.email} onCopy={() => copy(revealed.email)} />
+          <CredRow label="Password" value={revealed.password} onCopy={() => copy(revealed.password)} mono />
           {loginUrl && (
-            <p className="text-[10px] font-mono text-[var(--text-secondary)] mt-2">
+            <p className="mt-2 font-mono text-[10px] text-muted-foreground">
               Login at{" "}
-              <a href={loginUrl} target="_blank" rel="noreferrer" className="text-[var(--accent-color)] underline">
+              <a href={loginUrl} target="_blank" rel="noreferrer" className="text-primary underline">
                 {loginUrl}
               </a>
             </p>
           )}
         </div>
       )}
-    </Card>
+    </SectionCard>
   )
 }
 
-function Row({
+function CredRow({
   label,
   value,
   onCopy,
@@ -471,18 +596,16 @@ function Row({
 }) {
   return (
     <div className="flex items-center gap-3">
-      <span className="text-[10px] font-mono uppercase tracking-[0.08em] text-[var(--text-secondary)] w-20">
+      <span className="w-20 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
         {label}
       </span>
-      <span className={`flex-1 text-sm text-[var(--text-primary)] ${mono ? "font-mono" : ""} break-all`}>
+      <span className={`flex-1 break-all text-sm text-foreground ${mono ? "font-mono" : ""}`}>
         {value}
       </span>
-      <button
-        onClick={onCopy}
-        className="px-2 py-1 rounded-lg text-[10px] uppercase tracking-[0.08em] border border-[var(--border-color)] text-[var(--text-primary)] hover:border-[var(--accent-color)] font-mono"
-      >
+      <Button size="xs" variant="outline" onClick={onCopy}>
+        <Copy data-icon="inline-start" />
         Copy
-      </button>
+      </Button>
     </div>
   )
 }
@@ -514,51 +637,47 @@ function ServerAccessCard({ instanceId }: { instanceId: string; ipAddress: strin
   }
 
   async function copy(text: string) {
-    try { await navigator.clipboard.writeText(text) } catch { /* ignore */ }
+    try {
+      await navigator.clipboard.writeText(text)
+      toast.success("Copied to clipboard")
+    } catch {
+      toast.error("Copy failed")
+    }
   }
 
   return (
-    <Card title="Server Access">
+    <SectionCard title="Server Access">
       {!revealed ? (
-        <div className="space-y-2">
-          <p className="text-sm text-[var(--text-secondary)]">
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
             SSH access and gateway URL for this server.
           </p>
-          <button
-            onClick={reveal}
-            disabled={loading}
-            className="px-4 py-2 rounded-lg text-xs uppercase tracking-[0.08em] font-mono bg-[var(--accent-dim)] text-[var(--accent-color)] border border-[var(--accent-color)]/40 hover:bg-[var(--accent-color)]/20 disabled:opacity-50"
-          >
+          <Button size="sm" onClick={reveal} disabled={loading}>
+            {loading && <Loader2 data-icon="inline-start" className="animate-spin" />}
             {loading ? "Loading…" : "Reveal Access Details"}
-          </button>
+          </Button>
         </div>
       ) : (
         <div className="space-y-2 text-sm">
           {revealed.sshCommand && (
-            <Row label="SSH" value={revealed.sshCommand} onCopy={() => copy(revealed.sshCommand!)} mono />
+            <CredRow label="SSH" value={revealed.sshCommand} onCopy={() => copy(revealed.sshCommand!)} mono />
           )}
           {revealed.rootPassword && (
-            <Row label="Root Pass" value={revealed.rootPassword} onCopy={() => copy(revealed.rootPassword!)} mono />
+            <CredRow label="Root Pass" value={revealed.rootPassword} onCopy={() => copy(revealed.rootPassword!)} mono />
           )}
           {revealed.gatewayUrl && (
-            <Row label="Gateway" value={revealed.gatewayUrl} onCopy={() => copy(revealed.gatewayUrl!)} mono />
+            <CredRow label="Gateway" value={revealed.gatewayUrl} onCopy={() => copy(revealed.gatewayUrl!)} mono />
           )}
         </div>
       )}
-    </Card>
+    </SectionCard>
   )
 }
 
 /* ───────────── GATEWAY TOKEN CARD ───────────── */
-function GatewayTokenCard({ instanceId }: { instanceId: string }) {
+function GatewayTokenCard({ instanceId, runtimeLabel }: { instanceId: string; runtimeLabel: string }) {
   const [token, setToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const [toast, setToast] = useState<string | null>(null)
-
-  function flash(msg: string) {
-    setToast(msg)
-    setTimeout(() => setToast(null), 3000)
-  }
 
   async function reveal() {
     setLoading(true)
@@ -566,7 +685,7 @@ function GatewayTokenCard({ instanceId }: { instanceId: string }) {
       const r = await fetch(`/api/instances/${instanceId}/gateway-token`, { cache: "no-store" })
       const j = (await r.json()) as { gatewayToken?: string; error?: string }
       if (!r.ok) {
-        flash(j.error || "Failed to reveal token")
+        toast.error(j.error || "Failed to reveal token")
         return
       }
       setToken(j.gatewayToken ?? null)
@@ -579,74 +698,56 @@ function GatewayTokenCard({ instanceId }: { instanceId: string }) {
     if (!token) return
     try {
       await navigator.clipboard.writeText(token)
-      flash("Token copied to clipboard.")
+      toast.success("Token copied to clipboard")
     } catch {
-      flash("Copy failed — your browser blocked clipboard access.")
+      toast.error("Copy failed — clipboard access blocked")
     }
   }
 
   return (
-    <Card title="Gateway Token">
-      <p className="text-xs text-[var(--text-secondary)] mb-2">
-        Use this token to authenticate with the OpenClaw Control UI and API.
-      </p>
-      <p className="font-mono text-sm text-[var(--text-primary)] break-all bg-[var(--code-bg)] border border-[var(--border-color)] rounded-lg p-3">
+    <SectionCard
+      title="Gateway Token"
+      description={`Use this token to authenticate with the ${runtimeLabel} Control UI and API.`}
+    >
+      <p className="break-all rounded-lg border bg-muted/40 p-3 font-mono text-sm text-foreground">
         {token ?? "gw_•••••••••••••••••••••"}
       </p>
-      <div className="flex gap-2 mt-3">
-        <button
-          onClick={reveal}
-          disabled={loading}
-          className="px-3 py-1.5 rounded-lg text-xs uppercase tracking-[0.08em] bg-[var(--card-bg)] text-[var(--text-primary)] border border-[var(--border-color)] hover:border-[var(--accent-color)] font-mono disabled:opacity-50"
-        >
+      <div className="mt-3 flex gap-2">
+        <Button size="sm" variant="outline" onClick={reveal} disabled={loading}>
           {loading ? "…" : "Reveal"}
-        </button>
+        </Button>
         {token && (
-          <button
-            onClick={copy}
-            className="px-3 py-1.5 rounded-lg text-xs uppercase tracking-[0.08em] bg-[var(--card-bg)] text-[var(--text-primary)] border border-[var(--border-color)] hover:border-[var(--accent-color)] font-mono"
-          >
+          <Button size="sm" variant="outline" onClick={copy}>
+            <Copy data-icon="inline-start" />
             Copy
-          </button>
+          </Button>
         )}
       </div>
-      {toast && (
-        <div className="mt-3 px-3 py-1.5 rounded-lg text-xs font-mono text-[var(--text-primary)] bg-[var(--card-bg)] border border-[var(--accent-color)]/40">
-          {toast}
-        </div>
-      )}
-    </Card>
+    </SectionCard>
   )
 }
 
 /* ───────────── PROVISIONING CARD ───────────── */
-// Order matters — these are rendered as a sequential checklist.
-// `match` strings come from `PROVISION_EVENT` in src/lib/provision-events.ts;
-// keep them in sync if either side changes.
 const PROVISION_STEPS = [
-  // VPS path
   { match: "Creating VM", label: "Creating server" },
   { match: "Waiting for boot", label: "Booting server" },
   { match: "Cloudflare DNS upserted", label: "Setting up DNS" },
   { match: "Waiting for SSH", label: "Connecting to server" },
   { match: "Bootstrapping server", label: "Installing dependencies" },
   { match: "bootstrap complete", label: "Server ready" },
-  { match: "Writing OpenClaw configuration", label: "Writing configuration" },
-  { match: "OpenClaw configuration written", label: "Configuration applied" },
+  { match: "Writing agent configuration", label: "Writing configuration" },
+  { match: "Agent configuration written", label: "Configuration applied" },
   { match: "Caddy reloaded", label: "Routing online" },
   { match: "systemd service active", label: "Service running" },
   { match: "Gateway port listening", label: "Port check passed" },
   { match: "HTTP health check passed", label: "HTTP health check passed" },
   { match: "Deployment complete", label: "Deployment complete" },
-  // Shared-cluster path
   { match: "Selecting shared host", label: "Selecting host" },
   { match: "Starting bot container", label: "Starting container" },
-  // Dev / mock
   { match: "Starting provisioning", label: "Initializing" },
   { match: "Mock-provisioned", label: "Provisioned" },
 ] as const
 
-/** Matches `VpsStage` in provisioner — shown under the checklist while a stage runs */
 const PROVISION_STAGE_HINTS: Record<string, string> = {
   create_vm: "Creating your VM in the cloud region you selected.",
   wait_boot: "Waiting for the server to finish booting.",
@@ -654,7 +755,7 @@ const PROVISION_STAGE_HINTS: Record<string, string> = {
   bootstrap: "Setting up the server environment.",
   writing_config: "Writing configuration files.",
   installing_service: "Starting services and running health checks.",
-  starting_service: "Starting the OpenClaw gateway.",
+  starting_service: "Starting the agent gateway.",
   health_check: "Verifying the gateway is responding.",
   commit: "Finalizing deployment.",
 }
@@ -685,12 +786,12 @@ function ProvisioningCard({ instance, logs }: { instance: InstanceLite; logs: Lo
       : "Provisioning"
 
   return (
-    <Card title={title}>
+    <SectionCard title={title}>
       <div className="space-y-3">
         {steps.length === 0 && isActive && (
           <div className="flex items-center gap-3">
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            <span className="text-sm text-[var(--text-secondary)]">Preparing deployment...</span>
+            <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />
+            <span className="text-sm text-muted-foreground">Preparing deployment...</span>
           </div>
         )}
         {steps.map((step, i) => {
@@ -699,74 +800,142 @@ function ProvisioningCard({ instance, logs }: { instance: InstanceLite; logs: Lo
           return (
             <div key={step.match} className="flex items-center gap-3">
               {isDone ? (
-                <span className="w-4 h-4 rounded flex items-center justify-center text-[10px] font-bold border border-[var(--accent-color)] bg-[var(--accent-color)] text-black">
-                  &#10003;
+                <span className="flex size-4 items-center justify-center rounded border border-primary bg-primary text-primary-foreground">
+                  <Check className="size-3" />
                 </span>
               ) : (
-                <span className="w-4 h-4 flex items-center justify-center">
-                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                <span className="flex size-4 items-center justify-center">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />
                 </span>
               )}
-              <span className={`text-sm ${isDone ? "text-[var(--text-primary)]" : "text-amber-400"}`}>
+              <span className={`text-sm ${isDone ? "text-foreground" : "text-amber-500"}`}>
                 {step.label}
               </span>
             </div>
           )
         })}
         {isFailed && lastError && (
-          <div className="mt-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30">
-            <p className="text-xs font-mono text-red-400">{lastError.message}</p>
-          </div>
+          <Alert variant="destructive">
+            <AlertDescription className="font-mono">{lastError.message}</AlertDescription>
+          </Alert>
         )}
         {isFailed && (
-          <div className="mt-3 p-3 rounded-lg border border-red-500/20 bg-red-500/5 flex items-center justify-between gap-4">
-            <p className="text-xs text-[var(--text-secondary)]">
-              This instance failed to provision. You can delete it and try again.
-            </p>
-            <a
-              href="?tab=danger"
-              className="shrink-0 px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-[0.08em] font-mono bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20"
-            >
-              Delete Instance
-            </a>
-          </div>
+          <Alert variant="destructive">
+            <AlertTitle>This instance failed to provision.</AlertTitle>
+            <AlertDescription>You can delete it and try again.</AlertDescription>
+          </Alert>
         )}
         {isRunning && (
-          <p className="text-xs font-mono text-[var(--accent-color)] mt-2">
+          <p className="mt-2 font-mono text-xs text-primary">
             Agent is live and ready to accept requests.
           </p>
         )}
         {isActive && stageHint && (
-          <p className="text-xs text-[var(--text-secondary)] leading-relaxed border-t border-[var(--border-color)] pt-3 mt-1">
+          <p className="mt-1 border-t pt-3 text-xs leading-relaxed text-muted-foreground">
             {stageHint}
           </p>
         )}
       </div>
-    </Card>
+    </SectionCard>
   )
 }
 
 /* ───────────── OVERVIEW ───────────── */
-function OverviewTab({ instance, logs }: { instance: InstanceLite; logs: LogLite[] }) {
+function UptimeCard({ kuma }: { kuma: KumaInfo }) {
+  // Hidden entirely when the operator hasn't wired up Uptime Kuma.
+  if (!kuma.configured) return null
+
+  if (!kuma.checkedAt) {
+    return (
+      <SectionCard title="Uptime">
+        <p className="text-xs text-muted-foreground">
+          Monitoring is enabled — waiting for the first status check.
+        </p>
+      </SectionCard>
+    )
+  }
+
+  const statusDot =
+    kuma.status === "up"
+      ? "bg-emerald-500"
+      : kuma.status === "down"
+        ? "bg-destructive"
+        : "bg-amber-500"
+  const statusLabel = kuma.status
+    ? kuma.status.charAt(0).toUpperCase() + kuma.status.slice(1)
+    : "Unknown"
+
+  return (
+    <SectionCard title="Uptime">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <div>
+          <p className="font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">
+            Status
+          </p>
+          <p className="mt-1 flex items-center gap-2 text-sm text-foreground">
+            <span className={`inline-block h-2 w-2 rounded-full ${statusDot}`} />
+            {statusLabel}
+          </p>
+        </div>
+        <Stat
+          label="Response"
+          value={kuma.responseTimeMs != null ? `${kuma.responseTimeMs} ms` : "—"}
+        />
+        <Stat
+          label="Uptime (24h)"
+          value={kuma.uptimeRatio != null ? `${(kuma.uptimeRatio * 100).toFixed(2)}%` : "—"}
+        />
+        <Stat
+          label="Cert expiry"
+          value={kuma.certDaysRemaining != null ? `${kuma.certDaysRemaining} days` : "—"}
+        />
+      </div>
+      <p className="mt-3 text-xs text-muted-foreground">
+        Last checked {new Date(kuma.checkedAt).toLocaleString()}.
+      </p>
+    </SectionCard>
+  )
+}
+
+function OverviewTab({
+  instance,
+  logs,
+  kuma,
+}: {
+  instance: InstanceLite
+  logs: LogLite[]
+  kuma: KumaInfo
+}) {
   const isProvisioning =
     instance.status === "pending" || instance.status === "provisioning"
   const isFailed = instance.status === "failed_provisioning"
   return (
-    <div className="space-y-4 max-w-4xl">
+    <div className="w-full space-y-4">
       {(isProvisioning || (isFailed && !instance.ipAddress)) && (
         <ProvisioningCard instance={instance} logs={logs} />
       )}
-      {/* DNS card only renders when a domain is explicitly configured. */}
       {instance.domain && instance.status === "running" && <DnsCard instance={instance} />}
       {instance.managedSubdomain && !instance.domain && instance.status === "running" && (
         <ManagedHostnameCard instance={instance} />
       )}
-      {instance.hasGatewayToken && instance.deploymentTarget === "vps" && (
-        <GatewayTokenCard instanceId={instance.id} />
+      {instance.hasGatewayToken &&
+        (instance.deploymentTarget === "vps" || instance.deploymentTarget === "byos") && (
+          <GatewayTokenCard instanceId={instance.id} runtimeLabel={instance.runtimeLabel} />
+        )}
+      {instance.hasOpenclawPassword && instance.status === "running" && (
+        <CredentialsCard
+          instanceId={instance.id}
+          domain={instance.domain}
+          managedSubdomain={instance.managedSubdomain}
+          tlsStatus={instance.tlsStatus}
+          ipAddress={instance.ipAddress}
+          runtimeLabel={instance.runtimeLabel}
+          webui={instance.runtime === "hermes" && instance.webuiEnabled}
+        />
       )}
 
-      <Card title="Deployment">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <SectionCard title="Deployment">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <Stat label="Status" value={instance.status} />
           <Stat label="IP" value={instance.ipAddress || "—"} />
           <Stat label="Domain" value={instance.domain ?? instance.managedSubdomain ?? "—"} />
@@ -780,21 +949,54 @@ function OverviewTab({ instance, logs }: { instance: InstanceLite; logs: LogLite
                   : "—"
             }
           />
+          <Stat
+            label="Runtime"
+            value={
+              instance.deploymentTarget === "vps" || instance.deploymentTarget === "byos"
+                ? instance.runtimeLabel
+                : "—"
+            }
+          />
         </div>
-      </Card>
+      </SectionCard>
 
-      <Card title="Infrastructure">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Stat label="Region" value={instance.regionLabel} />
-          <Stat label="Server" value={instance.serverLabel} />
-          <Stat label="Specs" value={`${instance.vcpu} vCPU · ${instance.ramGb} GB`} />
-          <Stat label="Created" value={new Date(instance.createdAt).toLocaleDateString()} />
-        </div>
-      </Card>
+      {instance.status === "running" && <UptimeCard kuma={kuma} />}
 
-      <Card title="Recent Logs">
+      {instance.deploymentTarget === "byos" ? (
+        <SectionCard title="Your server">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <Stat
+              label="Host"
+              value={`${instance.byosUser ?? "root"}@${instance.byosHost ?? instance.ipAddress ?? "—"}${
+                instance.byosPort && instance.byosPort !== 22 ? `:${instance.byosPort}` : ""
+              }`}
+            />
+            <Stat
+              label="Model access"
+              value={
+                instance.byosLlmMode === "own_key"
+                  ? "Your own API key"
+                  : "Our OpenRouter credits"
+              }
+            />
+            <Stat label="Managed by" value="Sovereign panel" />
+            <Stat label="Created" value={new Date(instance.createdAt).toLocaleDateString()} />
+          </div>
+        </SectionCard>
+      ) : (
+        <SectionCard title="Infrastructure">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <Stat label="Region" value={instance.regionLabel} />
+            <Stat label="Server" value={instance.serverLabel} />
+            <Stat label="Specs" value={`${instance.vcpu} vCPU · ${instance.ramGb} GB`} />
+            <Stat label="Created" value={new Date(instance.createdAt).toLocaleDateString()} />
+          </div>
+        </SectionCard>
+      )}
+
+      <SectionCard title="Recent Logs">
         {logs.length === 0 ? (
-          <p className="text-xs text-[var(--text-secondary)]">No logs yet.</p>
+          <p className="text-xs text-muted-foreground">No logs yet.</p>
         ) : (
           <div className="space-y-1.5 font-mono text-xs">
             {logs.slice(0, 8).map((l) => (
@@ -802,50 +1004,50 @@ function OverviewTab({ instance, logs }: { instance: InstanceLite; logs: LogLite
                 <span
                   className={
                     l.level === "error"
-                      ? "text-red-400"
+                      ? "text-destructive"
                       : l.level === "warn"
-                      ? "text-amber-400"
-                      : "text-[var(--text-secondary)]"
+                        ? "text-amber-500"
+                        : "text-muted-foreground"
                   }
                 >
                   [{l.level}]
                 </span>{" "}
-                <span className="text-[var(--text-secondary)]/60">{l.createdAt.slice(0, 19)}</span>{" "}
-                <span className="text-[var(--text-primary)]">{l.message}</span>
+                <span className="text-muted-foreground/70">{l.createdAt.slice(0, 19)}</span>{" "}
+                <span className="text-foreground">{l.message}</span>
               </p>
             ))}
           </div>
         )}
-      </Card>
+      </SectionCard>
     </div>
   )
 }
 
 /* ───────────── CONTROLS ───────────── */
-function ControlsTab({ instance }: { instance: InstanceLite }) {
+function ControlsTab({
+  instance,
+  cloudflare,
+}: {
+  instance: InstanceLite
+  cloudflare: CloudflareInfo
+}) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [toast, setToast] = useState<string | null>(null)
   const [tokenRevealed, setTokenRevealed] = useState<string | null>(null)
   const [tokenLoading, setTokenLoading] = useState(false)
-
-  function flash(msg: string) {
-    setToast(msg)
-    setTimeout(() => setToast(null), 3500)
-  }
 
   async function callAction(url: string, method: "POST" | "DELETE", label: string) {
     try {
       const r = await fetch(url, { method })
       if (!r.ok) {
         const body = (await r.json().catch(() => ({}))) as { error?: string }
-        flash(`${label} failed: ${body.error || r.statusText}`)
+        toast.error(`${label} failed: ${body.error || r.statusText}`)
         return
       }
-      flash(`${label} succeeded.`)
+      toast.success(`${label} succeeded.`)
       startTransition(() => router.refresh())
     } catch (err) {
-      flash(`${label} failed: ${err instanceof Error ? err.message : String(err)}`)
+      toast.error(`${label} failed: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -857,7 +1059,7 @@ function ControlsTab({ instance }: { instance: InstanceLite }) {
       const r = await fetch(`/api/instances/${instance.id}/token`, { method: "GET" })
       const j = await r.json()
       if (!r.ok) {
-        flash(j.error || "Failed to reveal token")
+        toast.error(j.error || "Failed to reveal token")
         return
       }
       setTokenRevealed(j.botToken ?? "(not yet assigned)")
@@ -872,11 +1074,11 @@ function ControlsTab({ instance }: { instance: InstanceLite }) {
       const r = await fetch(`/api/instances/${instance.id}/token`, { method: "POST" })
       const j = (await r.json()) as { botToken?: string; error?: string }
       if (!r.ok) {
-        flash(j.error || "Failed to rotate token")
+        toast.error(j.error || "Failed to rotate token")
         return
       }
       setTokenRevealed(j.botToken ?? "")
-      flash("Token rotated. Container env updated.")
+      toast.success("Token rotated. Container env updated.")
     } finally {
       setTokenLoading(false)
     }
@@ -886,93 +1088,94 @@ function ControlsTab({ instance }: { instance: InstanceLite }) {
     if (!tokenRevealed) return
     try {
       await navigator.clipboard.writeText(tokenRevealed)
-      flash("Token copied to clipboard.")
+      toast.success("Token copied to clipboard.")
     } catch {
-      flash("Copy failed — your browser blocked clipboard access.")
+      toast.error("Copy failed — clipboard access blocked.")
     }
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <Card title="Lifecycle">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <SectionCard title="Lifecycle">
         <div className="flex flex-col gap-2">
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             disabled={pending}
             onClick={() => callAction(`/api/instances/${instance.id}/restart`, "POST", "Restart")}
-            className="px-4 py-2 rounded-lg text-xs uppercase tracking-[0.08em] bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 font-mono text-left disabled:opacity-50"
           >
+            <RefreshCw data-icon="inline-start" />
             {pending ? "Working…" : "Restart Bot"}
-          </button>
-          <button
-            disabled={pending}
-            onClick={() => {
-              if (!confirm("Delete this instance? This cannot be undone.")) return
-              callAction(`/api/instances/${instance.id}`, "DELETE", "Delete").then(() => {
-                router.push("/dashboard/instances")
-              })
-            }}
-            className="px-4 py-2 rounded-lg text-xs uppercase tracking-[0.08em] bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 font-mono text-left disabled:opacity-50"
-          >
-            Delete Instance
-          </button>
+          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger
+              render={
+                <Button variant="destructive" size="sm" disabled={pending}>
+                  <Trash2 data-icon="inline-start" />
+                  Delete Instance
+                </Button>
+              }
+            />
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete this instance?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This cannot be undone. The VM and all associated data will be removed.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() =>
+                    callAction(`/api/instances/${instance.id}`, "DELETE", "Delete").then(() => {
+                      router.push("/dashboard/instances")
+                    })
+                  }
+                >
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
-      </Card>
-      <AgentTypeCard instance={instance} onFlash={flash} />
+      </SectionCard>
+      <AgentTypeCard instance={instance} />
       {!isVps && (
-        <Card title="Bot Token">
-          <p className="text-xs text-[var(--text-secondary)] mb-2">
-            API token for programmatic access to this bot.
-          </p>
-          <p className="font-mono text-sm text-[var(--text-primary)] break-all bg-[var(--code-bg)] border border-[var(--border-color)] rounded-lg p-3">
+        <SectionCard
+          title="Bot Token"
+          description="API token for programmatic access to this bot."
+        >
+          <p className="break-all rounded-lg border bg-muted/40 p-3 font-mono text-sm text-foreground">
             {tokenRevealed ?? `sk_bot_•••••••••••••••••••••••••${instance.id.slice(-6)}`}
           </p>
-          <div className="flex gap-2 mt-3">
-            <button
-              onClick={revealToken}
-              disabled={tokenLoading}
-              className="px-3 py-1.5 rounded-lg text-xs uppercase tracking-[0.08em] bg-[var(--card-bg)] text-[var(--text-primary)] border border-[var(--border-color)] hover:border-[var(--accent-color)] font-mono disabled:opacity-50"
-            >
+          <div className="mt-3 flex gap-2">
+            <Button size="sm" variant="outline" onClick={revealToken} disabled={tokenLoading}>
               {tokenLoading ? "…" : "Reveal"}
-            </button>
-            <button
-              onClick={rotateToken}
-              disabled={tokenLoading}
-              className="px-3 py-1.5 rounded-lg text-xs uppercase tracking-[0.08em] bg-[var(--card-bg)] text-[var(--text-primary)] border border-[var(--border-color)] hover:border-[var(--accent-color)] font-mono disabled:opacity-50"
-            >
+            </Button>
+            <Button size="sm" variant="outline" onClick={rotateToken} disabled={tokenLoading}>
+              <RefreshCw data-icon="inline-start" />
               Rotate
-            </button>
+            </Button>
             {tokenRevealed && (
-              <button
-                onClick={copyToken}
-                className="px-3 py-1.5 rounded-lg text-xs uppercase tracking-[0.08em] bg-[var(--card-bg)] text-[var(--text-primary)] border border-[var(--border-color)] hover:border-[var(--accent-color)] font-mono"
-              >
+              <Button size="sm" variant="outline" onClick={copyToken}>
+                <Copy data-icon="inline-start" />
                 Copy
-              </button>
+              </Button>
             )}
           </div>
-        </Card>
+        </SectionCard>
       )}
-      {isVps && <DomainManageCard instance={instance} onFlash={flash} />}
+      {isVps && <DomainManageCard instance={instance} />}
+      {isVps && <CloudflareDomainCard instance={instance} cloudflare={cloudflare} />}
       {instance.hasRootPassword && instance.status === "running" && (
         <ServerAccessCard instanceId={instance.id} ipAddress={instance.ipAddress} />
-      )}
-      {toast && (
-        <div className="md:col-span-2 px-4 py-2 rounded-lg text-xs font-mono text-[var(--text-primary)] bg-[var(--card-bg)] border border-[var(--accent-color)]/40">
-          {toast}
-        </div>
       )}
     </div>
   )
 }
 
 /* ───────────── AGENT TYPE CARD ───────────── */
-function AgentTypeCard({
-  instance,
-  onFlash,
-}: {
-  instance: InstanceLite
-  onFlash: (msg: string) => void
-}) {
+function AgentTypeCard({ instance }: { instance: InstanceLite }) {
   const [agentType, setAgentType] = useState(instance.agentType ?? "custom")
   const [saving, setSaving] = useState(false)
   const router = useRouter()
@@ -988,13 +1191,13 @@ function AgentTypeCard({
       })
       const j = await r.json()
       if (!r.ok) {
-        onFlash(j.error || "Failed to update agent type")
+        toast.error(j.error || "Failed to update agent type")
         return
       }
       if (j.warning) {
-        onFlash(j.warning)
+        toast.warning(j.warning)
       } else {
-        onFlash(`Agent type updated to "${agentType}". Identity files rewritten.`)
+        toast.success(`Agent type updated to "${agentType}". Identity files rewritten.`)
       }
       router.refresh()
     } finally {
@@ -1005,47 +1208,40 @@ function AgentTypeCard({
   const current = AGENT_CATEGORIES.find((c) => c.slug === agentType)
 
   return (
-    <Card title="Agent Type">
-      <p className="text-xs text-[var(--text-secondary)] mb-3">
-        Determines the agent&apos;s persona, skills, and identity files on the VM.
-      </p>
-      <select
-        value={agentType}
-        onChange={(e) => setAgentType(e.target.value)}
-        className="w-full bg-[var(--code-bg)] border border-[var(--border-color)] rounded-lg px-3 py-2 font-mono text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-color)]"
-      >
-        {AGENT_CATEGORIES.map((cat) => (
-          <option key={cat.slug} value={cat.slug}>
-            {cat.name}
-          </option>
-        ))}
-      </select>
+    <SectionCard
+      title="Agent Type"
+      description="Determines the agent's persona, skills, and identity files on the VM."
+    >
+      <Select value={agentType} onValueChange={(v) => v && setAgentType(v)}>
+        <SelectTrigger className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            {AGENT_CATEGORIES.map((cat) => (
+              <SelectItem key={cat.slug} value={cat.slug}>
+                {cat.name}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
       {current && (
-        <p className="text-[10px] font-mono text-[var(--text-secondary)] mt-2">
-          Category: <span className="text-[var(--text-primary)]">{current.slug}</span>
+        <p className="mt-2 font-mono text-[10px] text-muted-foreground">
+          Category: <span className="text-foreground">{current.slug}</span>
         </p>
       )}
       {isDirty && (
-        <button
-          onClick={save}
-          disabled={saving}
-          className="mt-3 px-4 py-2 rounded-lg text-xs uppercase tracking-[0.08em] font-mono bg-[var(--accent-dim)] text-[var(--accent-color)] border border-[var(--accent-color)]/40 hover:bg-[var(--accent-color)]/20 disabled:opacity-50"
-        >
+        <Button size="sm" className="mt-3" onClick={save} disabled={saving}>
           {saving ? "Saving…" : "Save & Apply"}
-        </button>
+        </Button>
       )}
-    </Card>
+    </SectionCard>
   )
 }
 
 /* ───────────── DOMAIN MANAGEMENT CARD ───────────── */
-function DomainManageCard({
-  instance,
-  onFlash,
-}: {
-  instance: InstanceLite
-  onFlash: (msg: string) => void
-}) {
+function DomainManageCard({ instance }: { instance: InstanceLite }) {
   const [domain, setDomain] = useState(instance.domain ?? "")
   const [saving, setSaving] = useState(false)
   const router = useRouter()
@@ -1060,10 +1256,14 @@ function DomainManageCard({
       })
       const j = await r.json()
       if (!r.ok) {
-        onFlash(j.error || "Failed to update domain")
+        toast.error(j.error || "Failed to update domain")
         return
       }
-      onFlash(domain.trim() ? `Domain set to ${domain.trim()}. Configure DNS A record → ${instance.ipAddress}` : "Domain removed.")
+      toast.success(
+        domain.trim()
+          ? `Domain set to ${domain.trim()}. Configure DNS A record → ${instance.ipAddress}`
+          : "Domain removed."
+      )
       router.refresh()
     } finally {
       setSaving(false)
@@ -1071,36 +1271,335 @@ function DomainManageCard({
   }
 
   return (
-    <Card title="Custom Domain">
-      <p className="text-xs text-[var(--text-secondary)] mb-2">
-        {instance.domain
+    <SectionCard
+      title="Custom Domain"
+      description={
+        instance.domain
           ? `Currently configured: ${instance.domain}`
           : instance.managedSubdomain
             ? `No custom domain yet. HTTPS hostname: ${instance.managedSubdomain}`
-            : "No custom domain. Access via IP only."}
-      </p>
+            : "No custom domain. Access via IP only."
+      }
+    >
       <div className="flex gap-2">
-        <input
-          type="text"
+        <Input
           value={domain}
           onChange={(e) => setDomain(e.target.value)}
           placeholder="example.com"
-          className="flex-1 bg-[var(--code-bg)] border border-[var(--border-color)] rounded-lg px-3 py-2 font-mono text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-color)]"
+          className="font-mono"
         />
-        <button
-          onClick={saveDomain}
-          disabled={saving}
-          className="px-4 py-2 rounded-lg text-xs uppercase tracking-[0.08em] font-mono bg-[var(--accent-dim)] text-[var(--accent-color)] border border-[var(--accent-color)]/40 hover:bg-[var(--accent-color)]/20 disabled:opacity-50"
-        >
+        <Button size="sm" onClick={saveDomain} disabled={saving}>
           {saving ? "…" : "Save"}
-        </button>
+        </Button>
       </div>
       {instance.domain && instance.ipAddress && (
-        <p className="text-[10px] font-mono text-[var(--text-secondary)] mt-2">
-          Point <span className="text-[var(--text-primary)]">{instance.domain}</span> A record → <span className="text-[var(--accent-color)]">{instance.ipAddress}</span>
+        <p className="mt-2 font-mono text-[10px] text-muted-foreground">
+          Point <span className="text-foreground">{instance.domain}</span> A record →{" "}
+          <span className="text-primary">{instance.ipAddress}</span>
         </p>
       )}
-    </Card>
+    </SectionCard>
+  )
+}
+
+/* ───────────── CLOUDFLARE DOMAIN CARD ───────────── */
+function CloudflareDomainCard({
+  instance,
+  cloudflare,
+}: {
+  instance: InstanceLite
+  cloudflare: CloudflareInfo
+}) {
+  const router = useRouter()
+  const [token, setToken] = useState("")
+  const [connecting, setConnecting] = useState(false)
+
+  const [zones, setZones] = useState<CfZone[] | null>(null)
+  const [zonesError, setZonesError] = useState<string | null>(null)
+  const [zoneId, setZoneId] = useState("")
+  const [label, setLabel] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [needOverwrite, setNeedOverwrite] = useState(false)
+  const [removing, setRemoving] = useState(false)
+  const [disconnecting, setDisconnecting] = useState(false)
+
+  const bound = instance.domainProxied && Boolean(instance.domain)
+
+  // Lazily load the user's zones once connected.
+  useEffect(() => {
+    if (!cloudflare.connected) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await fetch("/api/integrations/cloudflare/zones", { cache: "no-store" })
+        const j = (await r.json()) as { zones?: CfZone[]; error?: string; code?: string }
+        if (cancelled) return
+        if (!r.ok) {
+          setZonesError(j.error || "Could not load zones")
+          return
+        }
+        setZones(j.zones ?? [])
+        if (instance.cfZoneId) setZoneId(instance.cfZoneId)
+      } catch {
+        if (!cancelled) setZonesError("Could not load zones")
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [cloudflare.connected, instance.cfZoneId])
+
+  async function connect() {
+    if (!token.trim()) return
+    setConnecting(true)
+    try {
+      const r = await fetch("/api/integrations/cloudflare/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: token.trim() }),
+      })
+      const j = (await r.json()) as { zonesCount?: number; error?: string }
+      if (!r.ok) {
+        toast.error(j.error || "Failed to connect Cloudflare")
+        return
+      }
+      toast.success(`Cloudflare connected — ${j.zonesCount ?? 0} domain(s) available.`)
+      setToken("")
+      router.refresh()
+    } finally {
+      setConnecting(false)
+    }
+  }
+
+  async function disconnect() {
+    setDisconnecting(true)
+    try {
+      const r = await fetch("/api/integrations/cloudflare/disconnect", { method: "POST" })
+      const j = (await r.json()) as { orphaned?: string[]; error?: string }
+      if (!r.ok) {
+        toast.error(j.error || "Failed to disconnect")
+        return
+      }
+      if (j.orphaned && j.orphaned.length > 0) {
+        toast.warning(
+          `Disconnected. ${j.orphaned.length} DNS record(s) remain in your Cloudflare account and must be removed manually: ${j.orphaned.join(", ")}`,
+        )
+      } else {
+        toast.success("Cloudflare disconnected.")
+      }
+      router.refresh()
+    } finally {
+      setDisconnecting(false)
+    }
+  }
+
+  async function save(overwrite = false) {
+    if (!zoneId) {
+      toast.error("Select a domain first.")
+      return
+    }
+    setSaving(true)
+    try {
+      const r = await fetch(`/api/instances/${instance.id}/cloudflare-domain`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ zoneId, label: label.trim(), overwrite }),
+      })
+      const j = (await r.json()) as {
+        domain?: string
+        sslWarning?: string
+        error?: string
+        code?: string
+      }
+      if (!r.ok) {
+        if (j.code === "cloudflare_record_conflict") {
+          setNeedOverwrite(true)
+          toast.warning(j.error || "A record already exists. Confirm to overwrite.")
+          return
+        }
+        toast.error(j.error || "Failed to set domain")
+        return
+      }
+      setNeedOverwrite(false)
+      toast.success(`Agent will be served at ${j.domain}. DNS & TLS propagating…`)
+      if (j.sslWarning) toast.warning(j.sslWarning)
+      router.refresh()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function remove() {
+    setRemoving(true)
+    try {
+      const r = await fetch(`/api/instances/${instance.id}/cloudflare-domain`, {
+        method: "DELETE",
+      })
+      const j = (await r.json()) as { error?: string }
+      if (!r.ok) {
+        toast.error(j.error || "Failed to remove domain")
+        return
+      }
+      toast.success("Cloudflare domain removed.")
+      router.refresh()
+    } finally {
+      setRemoving(false)
+    }
+  }
+
+  const selectedZone = zones?.find((z) => z.id === zoneId)
+  const previewHost = selectedZone
+    ? label.trim() && label.trim() !== "@"
+      ? `${label.trim()}.${selectedZone.name}`
+      : selectedZone.name
+    : null
+
+  // Not connected → token paste flow.
+  if (!cloudflare.connected) {
+    return (
+      <SectionCard
+        title="Cloudflare Domain"
+        description="Connect your own Cloudflare account to put this agent on a subdomain of your domains."
+      >
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="cf-token">API token</FieldLabel>
+            <Input
+              id="cf-token"
+              type="password"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="Cloudflare API token"
+              className="font-mono"
+            />
+          </Field>
+        </FieldGroup>
+        <p className="mt-2 text-[10px] text-muted-foreground">
+          Create a token with <span className="text-foreground">Zone:Read</span>,{" "}
+          <span className="text-foreground">Zone:DNS:Edit</span>, and{" "}
+          <span className="text-foreground">Zone Settings:Edit</span> at{" "}
+          <a
+            href="https://dash.cloudflare.com/profile/api-tokens"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary hover:underline"
+          >
+            dash.cloudflare.com
+          </a>
+          .
+        </p>
+        <Button size="sm" className="mt-3" onClick={connect} disabled={connecting || !token.trim()}>
+          <Link2 data-icon="inline-start" />
+          {connecting ? "Connecting…" : "Connect Cloudflare"}
+        </Button>
+      </SectionCard>
+    )
+  }
+
+  // Connected → picker.
+  return (
+    <SectionCard
+      title="Cloudflare Domain"
+      description={
+        bound
+          ? `Served at ${instance.domain} (proxied through your Cloudflare).`
+          : "Pick a domain from your Cloudflare account to put this agent on it."
+      }
+      footer={
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Cloud className="size-3.5 text-primary" />
+            Connected
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={disconnect}
+            disabled={disconnecting}
+          >
+            <Unlink data-icon="inline-start" />
+            {disconnecting ? "…" : "Disconnect"}
+          </Button>
+        </div>
+      }
+    >
+      {zonesError ? (
+        <Alert variant="destructive">
+          <AlertDescription>{zonesError}</AlertDescription>
+        </Alert>
+      ) : zones === null ? (
+        <p className="text-sm text-muted-foreground">Loading your domains…</p>
+      ) : zones.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No zones found for this token. Add a domain to Cloudflare or check the token&apos;s scope.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input
+              value={label}
+              onChange={(e) => {
+                setLabel(e.target.value)
+                setNeedOverwrite(false)
+              }}
+              placeholder="subdomain (blank = apex)"
+              className="font-mono sm:max-w-[40%]"
+            />
+            <Select
+              value={zoneId}
+              onValueChange={(v) => {
+                if (v) setZoneId(v)
+                setNeedOverwrite(false)
+              }}
+            >
+              <SelectTrigger className="flex-1">
+                <SelectValue placeholder="Select a domain…" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {zones.map((z) => (
+                    <SelectItem key={z.id} value={z.id}>
+                      {z.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {previewHost && (
+            <p className="font-mono text-[10px] text-muted-foreground">
+              Hostname: <span className="text-primary">{previewHost}</span> → proxied A record →{" "}
+              <span className="text-foreground">{instance.ipAddress}</span>
+            </p>
+          )}
+
+          <Alert>
+            <AlertTitle>Zone-wide setting</AlertTitle>
+            <AlertDescription>
+              Saving sets your zone&apos;s SSL/TLS mode to <strong>Full</strong> if it isn&apos;t
+              already — this affects every hostname in the selected Cloudflare zone.
+            </AlertDescription>
+          </Alert>
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant={needOverwrite ? "destructive" : "default"}
+              onClick={() => save(needOverwrite)}
+              disabled={saving || !zoneId}
+            >
+              {saving ? "Saving…" : needOverwrite ? "Overwrite & Save" : "Save & apply"}
+            </Button>
+            {bound && (
+              <Button size="sm" variant="outline" onClick={remove} disabled={removing}>
+                {removing ? "Removing…" : "Remove domain"}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+    </SectionCard>
   )
 }
 
@@ -1113,25 +1612,28 @@ function InterfacesTab({ instance }: { instance: InstanceLite }) {
     ipAddress: instance.ipAddress,
   })?.url
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <Card title="Web">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <SectionCard title="Web">
         <div className="flex items-center justify-between">
-          <span className="text-xs uppercase tracking-[0.08em] font-mono px-2 py-0.5 rounded-full border border-[var(--accent-color)]/40 text-[var(--accent-color)] bg-[var(--accent-dim)]">
+          <Badge variant={instance.status === "running" ? "default" : "outline"}>
             {instance.status === "running" ? "bound" : instance.status}
-          </span>
+          </Badge>
         </div>
-        <p className="text-xs text-[var(--text-secondary)] mt-3 font-mono break-all">
+        <p className="mt-3 break-all font-mono text-xs text-muted-foreground">
           {webUrl ?? "—"}
         </p>
-      </Card>
-      <Card title="Telegram">
-        <p className="text-xs text-[var(--text-secondary)]">
-          Bind a Telegram bot token to route Telegram DMs to this agent.
+      </SectionCard>
+      <SectionCard
+        title="Telegram"
+        description="Bind a Telegram bot token to route Telegram DMs to this agent."
+      >
+        <p className="mt-3 font-mono text-[10px] text-muted-foreground/70">
+          Use{" "}
+          <span className="text-foreground">
+            POST /api/instances/{instance.id.slice(0, 8)}…/interfaces/connect
+          </span>
         </p>
-        <p className="text-[10px] font-mono text-[var(--text-secondary)]/70 mt-3">
-          Use <span className="text-[var(--text-primary)]">POST /api/instances/{instance.id.slice(0, 8)}…/interfaces/connect</span>
-        </p>
-      </Card>
+      </SectionCard>
     </div>
   )
 }
@@ -1201,55 +1703,59 @@ function LogsTab({ instanceId, logs: polledLogs }: { instanceId: string; logs: L
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
+      <ToggleGroup
+        value={[level]}
+        onValueChange={(v) => {
+          const next = v[0]
+          if (next) setLevel(next as typeof level)
+        }}
+        variant="outline"
+        size="sm"
+      >
         {(["all", "info", "warn", "error"] as const).map((l) => (
-          <button
-            key={l}
-            onClick={() => setLevel(l)}
-            className={`px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-[0.08em] font-mono border ${
-              level === l
-                ? "border-[var(--accent-color)] text-[var(--accent-color)] bg-[var(--accent-dim)]"
-                : "border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[var(--accent-color)]"
-            }`}
-          >
+          <ToggleGroupItem key={l} value={l} className="font-mono text-[10px]">
             {l}
-          </button>
+          </ToggleGroupItem>
         ))}
-      </div>
-      <div className="rounded-2xl border border-[var(--border-color)] bg-black/60 p-4 font-mono text-xs space-y-1 max-h-[36rem] overflow-y-auto">
-        {filtered.length === 0 && !loading ? (
-          <p className="text-[var(--text-secondary)]">No log entries.</p>
-        ) : (
-          <>
-            {filtered.map((l) => (
-              <p key={l.id}>
-                <span className="text-[var(--text-secondary)]/60">{l.createdAt.slice(0, 19)}</span>{" "}
-                <span
-                  className={
-                    l.level === "error"
-                      ? "text-red-400"
-                      : l.level === "warn"
-                      ? "text-amber-400"
-                      : "text-[var(--accent-color)]"
-                  }
+      </ToggleGroup>
+      <Card className="max-h-[36rem] overflow-y-auto bg-zinc-950 p-4">
+        <div className="space-y-1 font-mono text-xs">
+          {filtered.length === 0 && !loading ? (
+            <p className="text-muted-foreground">No log entries.</p>
+          ) : (
+            <>
+              {filtered.map((l) => (
+                <p key={l.id}>
+                  <span className="text-zinc-500">{l.createdAt.slice(0, 19)}</span>{" "}
+                  <span
+                    className={
+                      l.level === "error"
+                        ? "text-red-400"
+                        : l.level === "warn"
+                          ? "text-amber-400"
+                          : "text-emerald-400"
+                    }
+                  >
+                    [{l.level}]
+                  </span>{" "}
+                  <span className="text-zinc-200">{l.message}</span>
+                </p>
+              ))}
+              {hasMore && (
+                <Button
+                  className="mt-3"
+                  size="sm"
+                  variant="outline"
+                  onClick={loadMore}
+                  disabled={loading}
                 >
-                  [{l.level}]
-                </span>{" "}
-                <span className="text-[var(--text-primary)]">{l.message}</span>
-              </p>
-            ))}
-            {hasMore && (
-              <button
-                onClick={loadMore}
-                disabled={loading}
-                className="mt-3 px-4 py-1.5 rounded-lg text-[10px] uppercase tracking-[0.08em] font-mono border border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[var(--accent-color)] hover:text-[var(--accent-color)] disabled:opacity-50"
-              >
-                {loading ? "Loading…" : "Load More"}
-              </button>
-            )}
-          </>
-        )}
-      </div>
+                  {loading ? "Loading…" : "Load More"}
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      </Card>
     </div>
   )
 }
@@ -1258,8 +1764,8 @@ function LogsTab({ instanceId, logs: polledLogs }: { instanceId: string; logs: L
 function DangerTab({ instance }: { instance: InstanceLite }) {
   const router = useRouter()
   const [confirmText, setConfirmText] = useState("")
-  const [open, setOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [open, setOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const matches = confirmText === instance.name
 
@@ -1283,55 +1789,461 @@ function DangerTab({ instance }: { instance: InstanceLite }) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-red-500/30 bg-red-500/5 p-5">
-        <p className="text-[10px] uppercase tracking-[0.1em] font-mono text-red-400 mb-3">
-          Delete Instance
-        </p>
-        <p className="text-sm text-[var(--text-secondary)] mb-3">
-          Permanently deletes this bot, its config, logs, and all associated data. Also destroys the Linode VPS. This cannot be undone.
-        </p>
-        {!open ? (
-          <button
-            onClick={() => setOpen(true)}
-            className="px-4 py-2 rounded-lg text-xs uppercase tracking-[0.08em] font-mono bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20"
-          >
+      <Card className="border-destructive/30 bg-destructive/5">
+        <CardHeader>
+          <CardDescription className="font-mono text-[10px] tracking-[0.1em] uppercase text-destructive">
             Delete Instance
-          </button>
-        ) : (
-          <div className="space-y-3">
-            <p className="text-xs font-mono text-[var(--text-secondary)]">
-              Type <span className="text-red-400">{instance.name}</span> to confirm:
-            </p>
-            <input
-              type="text"
-              value={confirmText}
-              onChange={(e) => setConfirmText(e.target.value)}
-              className="w-full bg-[var(--card-bg)] border border-[var(--border-color)] rounded-lg px-3 py-2 font-mono text-sm text-[var(--text-primary)] focus:outline-none focus:border-red-500/50"
+          </CardDescription>
+          <p className="text-sm text-muted-foreground">
+            Permanently deletes this bot, its config, logs, and all associated data. Also destroys
+            the Linode VPS. This cannot be undone.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <AlertDialog
+            open={open}
+            onOpenChange={(o) => {
+              setOpen(o)
+              if (!o) {
+                setConfirmText("")
+                setError(null)
+              }
+            }}
+          >
+            <AlertDialogTrigger
+              render={
+                <Button variant="destructive">
+                  <Trash2 data-icon="inline-start" />
+                  Delete Instance
+                </Button>
+              }
             />
-            <div className="flex gap-2">
-              <button
-                disabled={!matches || deleting}
-                onClick={doDelete}
-                className="px-4 py-2 rounded-lg text-xs uppercase tracking-[0.08em] font-mono bg-red-500/20 text-red-400 border border-red-500/40 hover:bg-red-500/30 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {deleting ? "Deleting…" : "I understand, delete"}
-              </button>
-              <button
-                disabled={deleting}
-                onClick={() => {
-                  setOpen(false)
-                  setConfirmText("")
-                  setError(null)
-                }}
-                className="px-4 py-2 rounded-lg text-xs uppercase tracking-[0.08em] font-mono border border-[var(--border-color)] text-[var(--text-primary)]"
-              >
-                Cancel
-              </button>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete {instance.name}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This cannot be undone. Type <span className="font-mono text-destructive">{instance.name}</span> to confirm.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="confirm">Instance name</FieldLabel>
+                  <Input
+                    id="confirm"
+                    value={confirmText}
+                    onChange={(e) => setConfirmText(e.target.value)}
+                    placeholder={instance.name}
+                    className="font-mono"
+                  />
+                </Field>
+              </FieldGroup>
+              {error && (
+                <Alert variant="destructive">
+                  <AlertDescription>Delete failed: {error}</AlertDescription>
+                </Alert>
+              )}
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  disabled={!matches || deleting}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    doDelete()
+                  }}
+                >
+                  {deleting ? "Deleting…" : "I understand, delete"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+/* ───────────── BACKUP & RESTORE ───────────── */
+
+function formatBytes(n: number | null): string {
+  if (!n) return "—"
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function BackupTab({
+  instance,
+  drive,
+  initialBackups,
+}: {
+  instance: InstanceLite
+  drive: DriveInfo
+  initialBackups: BackupLite[]
+}) {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const pathname = usePathname()
+  const [backups, setBackups] = useState<BackupLite[]>(initialBackups)
+  const [connecting, setConnecting] = useState(false)
+  const [backingUp, setBackingUp] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+
+  // Surface the OAuth callback result, then strip the `?drive=` param.
+  useEffect(() => {
+    const status = searchParams.get("drive")
+    if (!status) return
+    if (status === "connected") toast.success("Google Drive connected.")
+    else if (status === "norefresh")
+      toast.error("Google didn't return a refresh token. Please try connecting again.")
+    else toast.error("Could not connect Google Drive. Please try again.")
+    router.replace(`${pathname}?tab=backup`)
+    if (status === "connected") router.refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
+  async function refreshList(fromDrive = false) {
+    setRefreshing(true)
+    try {
+      const r = await fetch(
+        `/api/instances/${instance.id}/backups${fromDrive ? "?source=drive" : ""}`,
+        { cache: "no-store" },
+      )
+      const j = (await r.json()) as { backups?: BackupLite[]; error?: string }
+      if (!r.ok) {
+        toast.error(j.error || "Could not load backups.")
+        return
+      }
+      setBackups(j.backups ?? [])
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  async function connect() {
+    setConnecting(true)
+    try {
+      const r = await fetch(`/api/integrations/drive/connect?instanceId=${instance.id}`)
+      const j = (await r.json()) as { url?: string; error?: string }
+      if (!r.ok || !j.url) {
+        toast.error(j.error || "Could not start Google Drive connection.")
+        setConnecting(false)
+        return
+      }
+      window.location.href = j.url
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+      setConnecting(false)
+    }
+  }
+
+  async function disconnect() {
+    const r = await fetch(`/api/integrations/drive/disconnect`, { method: "POST" })
+    if (!r.ok) {
+      toast.error("Could not disconnect Google Drive.")
+      return
+    }
+    toast.success("Google Drive disconnected.")
+    router.refresh()
+  }
+
+  async function backupNow() {
+    setBackingUp(true)
+    try {
+      const r = await fetch(`/api/instances/${instance.id}/backup`, { method: "POST" })
+      const j = (await r.json()) as { backup?: BackupLite; error?: string; code?: string }
+      if (!r.ok) {
+        if (j.code === "drive_reauth") toast.error("Drive access expired — reconnect to continue.")
+        else toast.error(j.error || "Backup failed.")
+        return
+      }
+      if (j.backup) setBackups((prev) => [j.backup as BackupLite, ...prev])
+      toast.success("Backup saved to Google Drive.")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBackingUp(false)
+    }
+  }
+
+  if (!drive.configured) {
+    return (
+      <SectionCard title="Backup & Restore">
+        <p className="text-sm text-muted-foreground">
+          Google Drive backups aren&apos;t enabled on this platform. Ask your administrator to
+          configure Google OAuth credentials.
+        </p>
+      </SectionCard>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <SectionCard
+        title="Google Drive"
+        description="Back up this agent's settings to your own Google Drive and restore them anytime."
+      >
+        {drive.connected ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm">
+              <Cloud className="size-4 text-primary" />
+              <span className="text-foreground">
+                Connected{drive.email ? ` as ${drive.email}` : ""}
+              </span>
             </div>
-            {error && <p className="text-xs font-mono text-red-400">Delete failed: {error}</p>}
+            <Button variant="outline" size="sm" onClick={disconnect}>
+              <Unlink data-icon="inline-start" />
+              Disconnect
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">
+              Connect your Google Drive to enable backups.
+            </p>
+            <Button size="sm" disabled={connecting} onClick={connect}>
+              {connecting ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Link2 data-icon="inline-start" />}
+              Connect Google Drive
+            </Button>
           </div>
         )}
-      </div>
+      </SectionCard>
+
+      {drive.connected && (
+        <SectionCard
+          title="Backups"
+          footer={
+            <div className="flex items-center gap-2">
+              <Button size="sm" disabled={backingUp} onClick={backupNow}>
+                {backingUp ? (
+                  <Loader2 data-icon="inline-start" className="animate-spin" />
+                ) : (
+                  <CloudUpload data-icon="inline-start" />
+                )}
+                Back up now
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={refreshing}
+                onClick={() => refreshList(true)}
+              >
+                <RefreshCw data-icon="inline-start" className={refreshing ? "animate-spin" : ""} />
+                Refresh from Drive
+              </Button>
+            </div>
+          }
+        >
+          {backups.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No backups yet. Click &ldquo;Back up now&rdquo; to create one.
+            </p>
+          ) : (
+            <div className="divide-y divide-border">
+              {backups.map((b) => (
+                <div
+                  key={b.id}
+                  className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-mono text-sm text-foreground">{b.fileName}</p>
+                    <p className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+                      {new Date(b.createdAt).toLocaleString()} · {formatBytes(b.sizeBytes)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <RestoreDialog instance={instance} backup={b} />
+                    <DeleteBackupButton
+                      instance={instance}
+                      backup={b}
+                      onDeleted={() => setBackups((prev) => prev.filter((x) => x.id !== b.id))}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+      )}
     </div>
+  )
+}
+
+function RestoreDialog({ instance, backup }: { instance: InstanceLite; backup: BackupLite }) {
+  const router = useRouter()
+  const [open, setOpen] = useState(false)
+  const [mode, setMode] = useState<"new" | "in_place">("new")
+  const [name, setName] = useState(backup.agentName)
+  const [busy, setBusy] = useState(false)
+
+  async function doRestore() {
+    setBusy(true)
+    try {
+      const r = await fetch(
+        `/api/instances/${instance.id}/backups/${backup.id}/restore`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            mode === "new" ? { mode, name } : { mode, targetInstanceId: instance.id },
+          ),
+        },
+      )
+      const j = (await r.json()) as {
+        success?: boolean
+        instanceId?: string
+        warning?: string
+        error?: string
+      }
+      if (!r.ok) {
+        toast.error(j.error || "Restore failed.")
+        return
+      }
+      setOpen(false)
+      if (j.warning) toast.warning(j.warning)
+      if (mode === "new" && j.instanceId) {
+        toast.success("Agent restored. Provisioning started.")
+        router.push(`/dashboard/instances/${j.instanceId}`)
+      } else {
+        toast.success("Settings restored from backup.")
+        router.refresh()
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger
+        render={
+          <Button variant="outline" size="sm">
+            <RotateCcw data-icon="inline-start" />
+            Restore
+          </Button>
+        }
+      />
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Restore from backup</DialogTitle>
+          <DialogDescription>
+            Restore the settings captured in{" "}
+            <span className="font-mono text-foreground">{backup.fileName}</span>.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <ToggleGroup
+            value={[mode]}
+            onValueChange={(v) => {
+              const next = (v[0] as "new" | "in_place") ?? mode
+              setMode(next)
+            }}
+            className="w-full"
+          >
+            <ToggleGroupItem value="new" className="flex-1">
+              New agent
+            </ToggleGroupItem>
+            <ToggleGroupItem value="in_place" className="flex-1">
+              Overwrite this agent
+            </ToggleGroupItem>
+          </ToggleGroup>
+
+          {mode === "new" ? (
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="restore-name">New agent name</FieldLabel>
+                <Input
+                  id="restore-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={backup.agentName}
+                />
+              </Field>
+              <p className="text-xs text-muted-foreground">
+                Creates a fresh agent on the free tier and starts provisioning. BYOS agents can&apos;t
+                be recreated this way.
+              </p>
+            </FieldGroup>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Overwrites <span className="font-mono text-foreground">{instance.name}</span>&apos;s
+              settings with this backup. Infrastructure and credentials are kept; a running agent is
+              updated live.
+            </p>
+          )}
+        </div>
+        <DialogFooter>
+          <DialogClose render={<Button variant="ghost" disabled={busy}>Cancel</Button>} />
+          <Button disabled={busy || (mode === "new" && !name.trim())} onClick={doRestore}>
+            {busy ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}
+            Restore
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function DeleteBackupButton({
+  instance,
+  backup,
+  onDeleted,
+}: {
+  instance: InstanceLite
+  backup: BackupLite
+  onDeleted: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+
+  async function doDelete() {
+    setBusy(true)
+    try {
+      const r = await fetch(`/api/instances/${instance.id}/backups/${backup.id}`, {
+        method: "DELETE",
+      })
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { error?: string }
+        toast.error(j.error || "Could not delete backup.")
+        return
+      }
+      toast.success("Backup deleted.")
+      onDeleted()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger
+        render={
+          <Button variant="ghost" size="icon-sm" aria-label="Delete backup">
+            <Trash2 />
+          </Button>
+        }
+      />
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete this backup?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Removes <span className="font-mono text-foreground">{backup.fileName}</span> from your
+            Google Drive. This cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={busy}
+            onClick={(e) => {
+              e.preventDefault()
+              doDelete()
+            }}
+          >
+            {busy ? "Deleting…" : "Delete"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }

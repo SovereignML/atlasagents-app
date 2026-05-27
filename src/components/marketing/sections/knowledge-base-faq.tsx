@@ -33,24 +33,32 @@ function FAQItem({ q, a, index }: { q: string; a: string; index: number }) {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      whileInView={{ opacity: 1, y: 0 }}
+      initial={{ opacity: 0, y: 20, filter: "blur(4px)" }}
+      whileInView={{ opacity: 1, y: 0, filter: "blur(0px)" }}
       viewport={{ once: true, amount: 0.5 }}
       transition={{ duration: 0.5, delay: index * 0.06, ease: easing.outExpo }}
-      className={`glass-subtle rounded-2xl overflow-hidden transition-all duration-300 ${open ? "shadow-[0_0_30px_var(--glass-glow)]" : ""}`}
-      style={open ? { borderLeft: "2px solid var(--color-primary)" } : {}}
+      className={`relative glass-subtle rounded-2xl overflow-hidden transition-shadow duration-300 ${open ? "shadow-[0_0_30px_var(--glass-glow)]" : ""}`}
     >
+      {/* Animated accent bar — scales in on open instead of snapping a border
+          (no layout shift, unlike a real left-border). */}
+      <motion.span
+        aria-hidden
+        className="absolute left-0 top-0 bottom-0 w-[2px] bg-accent-blue-rest origin-top"
+        initial={false}
+        animate={{ scaleY: open ? 1 : 0, opacity: open ? 1 : 0 }}
+        transition={spring.snappy}
+      />
       <button
         onClick={() => setOpen(!open)}
         className="w-full flex justify-between items-center p-5 text-left cursor-pointer"
       >
-        <span className="text-base font-semibold text-[var(--text-primary)] pr-4">{q}</span>
+        <span className="text-base font-semibold text-text-loud pr-4">{q}</span>
         <motion.div
           animate={{ rotate: open ? 180 : 0 }}
           transition={spring.snappy}
           className="shrink-0"
         >
-          <ChevronDown className="w-4 h-4 text-[var(--color-primary)]" />
+          <ChevronDown className="w-4 h-4 text-accent-blue-rest" />
         </motion.div>
       </button>
 
@@ -64,7 +72,7 @@ function FAQItem({ q, a, index }: { q: string; a: string; index: number }) {
             className="overflow-hidden"
           >
             <div className="px-5 pb-5">
-              <p className="text-sm text-[var(--text-secondary)] leading-relaxed">{a}</p>
+              <p className="text-sm text-text-secondary leading-relaxed">{a}</p>
             </div>
           </motion.div>
         )}
@@ -76,18 +84,18 @@ function FAQItem({ q, a, index }: { q: string; a: string; index: number }) {
 export function KnowledgeBaseFAQ() {
   return (
     <section className="relative py-32 overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[var(--bg-secondary)]/30 to-transparent" />
+      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-background-faint/30 to-transparent" />
 
       <div className="max-w-[720px] mx-auto px-8 relative z-10">
         <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, amount: 0.3 }}
+          initial={{ opacity: 0, y: 48, filter: "blur(4px)" }}
+          whileInView={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+          viewport={{ once: true, amount: 0.15 }}
           transition={{ duration: 0.8, ease: easing.outExpo }}
           className="text-center mb-12"
         >
-          <p className="text-xs text-[var(--color-primary)] uppercase tracking-[0.2em] mb-4 font-medium">Knowledge Base</p>
-          <h2 className="text-[clamp(2rem,4vw,44px)] font-bold text-[var(--text-primary)] tracking-[-1.5px]">
+          <p className="text-xs text-accent-blue-rest uppercase tracking-[0.2em] mb-4 font-medium">Knowledge Base</p>
+          <h2 className="text-[clamp(2rem,4vw,44px)] font-bold text-text-loud tracking-[-1.5px]">
             Common questions.
           </h2>
         </motion.div>

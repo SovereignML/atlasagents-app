@@ -1,0 +1,57 @@
+# Caddy reverse proxy for the SovereignML dashboard, fronting the Next.js
+# standalone server on 127.0.0.1:3000.
+#
+# This terminates TLS for BOTH:
+#   • the canonical dashboard host (a normal managed cert), and
+#   • per-team white-label CUSTOM domains (certs issued on demand, only after
+#     the ask endpoint confirms the domain is verified + the team is entitled).
+#
+# Install:
+#   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+#   # edit the email + canonical host below, then:
+#   sudo systemctl reload caddy   # or: caddy reload --config /etc/caddy/Caddyfile
+#
+# Prereqs: the Next app binds to 127.0.0.1:3000 (loopback), and a Cloudflare
+# Tunnel is NOT terminating TLS for these hostnames — a tunnel cannot fetch
+# Let's Encrypt certs for third-party customer domains, so Caddy must be the
+# public :443 listener.
+
+{
+	# ACME contact for Let's Encrypt. REQUIRED — set to a real mailbox.
+	email admin@example.com
+
+	# On-demand TLS: before issuing a cert for an incoming SNI, Caddy asks the
+	# app whether that hostname is allowed. A 2xx authorizes; anything else
+	# denies. This prevents unbounded cert issuance (DoS) for random domains.
+	on_demand_tls {
+		ask http://127.0.0.1:3000/api/internal/tls-authorize
+		interval 2m
+		burst 5
+	}
+}
+
+# ── Canonical dashboard host ────────────────────────────────────────────
+# REPLACE app.example.com with your real dashboard host. Gets a normal
+# managed certificate (not on-demand).
+app.example.com {
+	# The ask endpoint is for Caddy only (it calls 127.0.0.1 directly, which
+	# bypasses this block). Never expose it to the public internet.
+	@internal path /api/internal/*
+	respond @internal 403
+
+	reverse_proxy 127.0.0.1:3000
+}
+
+# ── White-label custom domains ──────────────────────────────────────────
+# Catch-all HTTPS for any other hostname pointed at this server. Certs are
+# issued on demand, gated by the ask endpoint above.
+https:// {
+	tls {
+		on_demand
+	}
+
+	@internal path /api/internal/*
+	respond @internal 403
+
+	reverse_proxy 127.0.0.1:3000
+}

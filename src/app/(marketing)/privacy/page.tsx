@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { BRANDING } from "@/configs/branding"
+import { Reveal, RevealGroup, RevealItem } from "@/components/marketing/motion/reveal"
 
 const LAST_UPDATED = "January 1, 2025"
 
@@ -154,7 +155,7 @@ export default function PrivacyPage() {
   return (
     <div className="max-w-[900px] mx-auto px-8 py-16">
       {/* Header */}
-      <div className="border-l-4 border-primary pl-8 mb-12">
+      <Reveal className="border-l-4 border-primary pl-8 mb-12">
         <div className="text-primary text-xs mb-3 opacity-80">
           Legal
         </div>
@@ -164,10 +165,10 @@ export default function PrivacyPage() {
         <p className="text-[var(--text-secondary)] text-sm">
           Last updated: {LAST_UPDATED}
         </p>
-      </div>
+      </Reveal>
 
       {/* Nav */}
-      <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-6 mb-12">
+      <Reveal delay={0.05} className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-6 mb-12">
         <p className="text-primary text-xs mb-4">
           Contents
         </p>
@@ -183,12 +184,12 @@ export default function PrivacyPage() {
             </li>
           ))}
         </ol>
-      </div>
+      </Reveal>
 
       {/* Sections */}
-      <div className="space-y-12">
+      <RevealGroup className="space-y-12">
         {sections.map((s, i) => (
-          <section key={s.id} id={s.id} className="scroll-mt-[100px]">
+          <RevealItem as="section" key={s.id} id={s.id} className="scroll-mt-[100px]">
             <h2 className="text-xl font-bold text-[var(--text-primary)] mb-4 pb-3 border-b border-[var(--border-color)]">
               <span className="text-primary mr-2 font-mono">
                 {String(i + 1).padStart(2, "0")}.
@@ -216,7 +217,7 @@ export default function PrivacyPage() {
             {"subsections" in s && s.subsections && (
               <div className="space-y-6">
                 {s.subsections.map((sub) => (
-                  <div key={sub.title} className="border-l-2 border-[var(--border-color)] pl-4">
+                  <div key={sub.title} className="border-l-2 border-primary/30 pl-4">
                     <p className="font-bold text-[var(--text-primary)] mb-2 text-sm">
                       {sub.title}
                     </p>
@@ -225,9 +226,9 @@ export default function PrivacyPage() {
                 ))}
               </div>
             )}
-          </section>
+          </RevealItem>
         ))}
-      </div>
+      </RevealGroup>
 
       {/* Footer links */}
       <div className="mt-16 pt-8 border-t border-[var(--border-color)] flex flex-col sm:flex-row gap-4 justify-between items-start">

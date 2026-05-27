@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
-import { db, eq, and, isNull, teamInvites, memberships, teams, users } from "@/db"
+import { db, eq, and, isNull, sql, teamInvites, memberships, teams, users } from "@/db"
 import { z } from "zod"
 import { logAuditEvent } from "@/lib/audit"
 
@@ -53,6 +53,11 @@ export async function POST(req: Request) {
 
   try {
     await db.transaction(async (tx) => {
+      // Serialize concurrent acceptances against the team row so the
+      // seat-limit check + insert is atomic. Without this lock, two
+      // simultaneous accepts on a near-full team can both pass the
+      // count check and overshoot the limit.
+      await tx.execute(sql`SELECT 1 FROM "Team" WHERE id = ${team.id} FOR UPDATE`)
       const current = await tx.query.memberships.findMany({
         where: eq(memberships.teamId, team.id),
       })

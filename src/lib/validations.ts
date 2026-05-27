@@ -27,6 +27,39 @@ export const userUpdateSchema = z.object({
   bannedReason: z.string().max(500).optional(),
 })
 
+export const supportTicketSchema = z.object({
+  subject: z.string().min(3, "Subject must be at least 3 characters").max(150),
+  message: z.string().min(10, "Please describe your issue in at least 10 characters").max(5000),
+  category: z.enum(["general", "billing", "technical", "account"]).default("general"),
+  priority: z.enum(["low", "normal", "high", "urgent"]).default("normal"),
+})
+
+export const supportReplySchema = z.object({
+  content: z.string().min(1, "Reply can't be empty").max(5000),
+})
+
+export const providerUpdateSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    priority: z.number().int().min(0).max(1000).optional(),
+    // null = unpin; a region id pins this provider for that region.
+    pinnedRegionId: z.string().min(1).nullable().optional(),
+  })
+  .refine((d) => Object.keys(d).length > 0, { message: "No fields to update" })
+
+export const providerBillingSchema = z
+  .object({
+    monthlyCreditsUsd: z.number().min(0).optional(),
+    softLimitUsd: z.number().min(0).nullable().optional(),
+    hardLimitUsd: z.number().min(0).nullable().optional(),
+  })
+  .refine((d) => Object.keys(d).length > 0, { message: "No fields to update" })
+
+export type ProviderUpdateInput = z.infer<typeof providerUpdateSchema>
+export type ProviderBillingInput = z.infer<typeof providerBillingSchema>
+
 export type LoginInput = z.infer<typeof loginSchema>
 export type RegisterInput = z.infer<typeof registerSchema>
 export type DeployInput = z.infer<typeof deploySchema>
+export type SupportTicketInput = z.infer<typeof supportTicketSchema>
+export type SupportReplyInput = z.infer<typeof supportReplySchema>

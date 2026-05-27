@@ -14,6 +14,8 @@ The product has five pricing tiers (Free → Builder → Operator → Scale → 
 
 ## Tech Stack
 
+For a full rationale (including **Prisma vs Drizzle**), see [TECH-STACK.md](TECH-STACK.md).
+
 | Layer | Technology |
 |-------|-----------|
 | Frontend | Next.js 16 (App Router), React 19, Tailwind CSS 4, shadcn/ui |
@@ -353,7 +355,8 @@ The 16 tables in `src/db/schema.ts`:
 **For real VM provisioning:**
 - `LINODE_API_TOKEN` — Linode API access
 - `SSH_FLEET_PRIVATE_KEY`, `SSH_FLEET_PUBLIC_KEY` — SSH keypair for fleet access
-- `OPENROUTER_API_KEY` — For bot AI responses
+- `OPENROUTER_PROVISIONING_KEY` — Parent account key used to mint a per-instance OpenRouter runtime key at deploy time and revoke it on delete. The parent key stays on the control plane; only the minted child key lands on the bot VM. Required for new OpenClaw VPS deploys.
+- `OPENROUTER_API_KEY` — Legacy shared key. Still used by the shared-cluster `bot-runtime` path and remains the on-disk key for OpenClaw instances that pre-date per-instance minting (until they naturally reprovision).
 
 **For DNS:**
 - `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_BASE_DOMAIN`
@@ -403,10 +406,10 @@ The app runs at `http://localhost:3000`. In dev mode, everything works without S
 
 4. **Advisory locks** — `pg_try_advisory_xact_lock` prevents concurrent provisioning of the same instance, even across multiple Node processes.
 
-5. **Encrypted secrets at rest** — Root passwords, Telegram tokens, gateway tokens are AES-encrypted in the DB via `crypto-secret.ts`.
+5. **Encrypted secrets at rest** — Root passwords, Telegram tokens, gateway tokens, and per-instance OpenRouter runtime keys are AES-encrypted in the DB via `crypto-secret.ts`.
 
 6. **Credits, not metering** — Simpler than real-time metering. Bots report usage, platform deducts credits, bot pauses at zero.
 
-7. **OpenRouter as LLM gateway** — Single API key routes to multiple model providers. Budget tier determines which model, with free fallbacks for resilience.
+7. **OpenRouter as LLM gateway, per-instance keys** — Each OpenClaw VPS gets its own runtime key minted via OpenRouter's Provisioning API (label `sovereign-<instanceId>`), encrypted at rest in `instances.openRouterKeyEnc`, and revoked on delete. The shared `OPENROUTER_API_KEY` env var is now scoped to the shared-cluster bot-runtime path only. See `src/lib/openrouter-provisioning.ts` and the `getOrMintInstanceOpenRouterKey` helper in `src/lib/provisioner.ts`.
 
 8. **Golden images** — Optional pre-baked Linode images skip the 3-5 minute cloud-init bootstrap, cutting provision time significantly.

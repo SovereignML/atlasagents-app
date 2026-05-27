@@ -1,0 +1,232 @@
+// OpenRouter real-usage credit billing.
+//
+// Periodically (cron → POST /api/billing/usage-sync) polls each managed-credit
+// instance's OpenRouter key for its cumulative real spend, charges the wallet
+// for the delta since the last poll (marked up by the margin), and advances a
+// per-instance pointer. When a key drains the wallet, hits its cap, or spikes
+// anomalously, it disables the key + pauses the bot + notifies.
+//
+// This REPLACES the synthetic per-request/token metering that used to live in
+// /api/usage/ingest. The per-key OpenRouter cap (= funded × margin, set at mint
+// and on every top-up) is the hard floor on our cost; this poller is how that
+// real spend gets reflected back into the credit wallet.
+
+import type { InferSelectModel } from "drizzle-orm"
+import { db, instances, eq, and, isNotNull, sql } from "@/db"
+import { getRuntimeKey, updateRuntimeKey } from "@/lib/openrouter-provisioning"
+import { deductWithinTx, isAboveMinimum } from "@/lib/wallet"
+import { maybeWarnLowBalance } from "@/lib/low-balance"
+import { OPENROUTER_MARGIN, openRouterUsdToCredits } from "@/lib/credit-pricing"
+import { pauseBot } from "@/lib/provisioner"
+import { logInstanceEvent } from "@/lib/instance-state"
+import { notify } from "@/lib/notifications/dispatch"
+import { createAdminNotification } from "@/lib/admin-notify"
+
+type Instance = InferSelectModel<typeof instances>
+
+/** A single poll's worth of OpenRouter spend (USD) above this → treat as
+ *  abuse (leaked token / runaway loop): enforce immediately + alert admin. */
+const ANOMALY_USD_PER_INTERVAL = ((): number => {
+  const raw = parseFloat(process.env.ANOMALY_USD_PER_INTERVAL ?? "")
+  return Number.isFinite(raw) && raw > 0 ? raw : 50
+})()
+
+export type UsageSyncReport = {
+  scanned: number
+  /** Instances for which we deducted credits this run. */
+  charged: number
+  /** Total credits actually deducted this run. */
+  creditsDeducted: number
+  /** Instances we enforced against (key disabled + bot paused). */
+  enforced: number
+  errors: string[]
+}
+
+export async function runOpenRouterUsageSync(): Promise<UsageSyncReport> {
+  const report: UsageSyncReport = {
+    scanned: 0,
+    charged: 0,
+    creditsDeducted: 0,
+    enforced: 0,
+    errors: [],
+  }
+
+  // Users we charged this run — warned (once/day) about a low balance after the
+  // loop, so a multi-instance user gets one nudge, not one per key.
+  const chargedUsers = new Set<string>()
+
+  // Without the provisioning key we can't read OpenRouter usage. Skip silently
+  // so the route stays usable for fleets that haven't enabled per-instance keys.
+  if (!process.env.OPENROUTER_PROVISIONING_KEY) return report
+
+  const rows = await db.query.instances.findMany({
+    where: and(
+      isNotNull(instances.openRouterKeyId),
+      sql`${instances.status} != 'deleted'`,
+    ),
+  })
+
+  for (const row of rows) {
+    // Skip BYOS own-key instances — they spend on the customer's own key and
+    // never draw on our wallet.
+    if (row.byosLlmMode === "own_key" || !row.openRouterKeyId) continue
+    report.scanned++
+
+    let state: Awaited<ReturnType<typeof getRuntimeKey>>
+    try {
+      state = await getRuntimeKey(row.openRouterKeyId)
+    } catch (err) {
+      report.errors.push(
+        `get ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
+      )
+      continue
+    }
+
+    const prev = row.openRouterUsageUsd ?? 0
+    const delta = state.usageUsd - prev
+
+    // Advance the pointer carefully so we never systematically lose sub-credit
+    // usage to rounding, and never charge twice:
+    //   - usage decreased (key reset / OR anomaly): resync down, don't charge.
+    //   - delta rounds to < 1 credit: leave the pointer so the fraction
+    //     accumulates until it crosses a whole credit.
+    //   - otherwise: charge, and advance only by the exact USD those credits
+    //     cover (delta = credits × margin / 100), keeping the remainder.
+    //
+    // CRITICAL: the charge and the pointer advance commit in the SAME
+    // transaction. If they didn't, a crash between them would either re-charge
+    // the delta next poll (pointer never advanced) or silently drop usage
+    // (pointer advanced, charge rolled back). Atomic = exactly-once.
+    if (delta <= 0) {
+      if (state.usageUsd !== prev) {
+        await db
+          .update(instances)
+          .set({ openRouterUsageUsd: state.usageUsd })
+          .where(eq(instances.id, row.id))
+      }
+    } else {
+      const credits = openRouterUsdToCredits(delta)
+      if (credits > 0) {
+        const charged = await db.transaction(async (tx) => {
+          const result = await deductWithinTx(
+            tx,
+            row.userId,
+            credits,
+            "api_usage",
+            row.id,
+            `OpenRouter usage: $${delta.toFixed(6)}`,
+            { allowBelowMinimum: true },
+          )
+          const c = credits - result.shortfall
+          // USD these charged credits cover (inverse of the markup).
+          const pointer = prev + (c / 100) * OPENROUTER_MARGIN
+          if (pointer !== prev) {
+            await tx
+              .update(instances)
+              .set({ openRouterUsageUsd: pointer })
+              .where(eq(instances.id, row.id))
+          }
+          return c
+        })
+        report.charged++
+        report.creditsDeducted += charged
+        if (charged > 0) chargedUsers.add(row.userId)
+      }
+      // credits === 0: sub-credit delta — leave the pointer so it accumulates.
+    }
+
+    // ── Enforcement ──────────────────────────────────────────────────────
+    const capHit = state.limitUsd != null && state.usageUsd >= state.limitUsd
+    const anomaly = delta > ANOMALY_USD_PER_INTERVAL
+    const drained = !(await isAboveMinimum(row.userId))
+
+    if (capHit || anomaly || drained) {
+      const reason = anomaly
+        ? `anomalous spend $${delta.toFixed(2)} in one interval`
+        : capHit
+          ? "OpenRouter spend cap reached"
+          : "wallet balance below minimum"
+      try {
+        await enforce(row, state, reason, anomaly)
+        report.enforced++
+      } catch (err) {
+        report.errors.push(
+          `enforce ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
+        )
+      }
+    }
+  }
+
+  // Proactive low-balance nudges for users we charged (self-gated to the
+  // warning band + once/day; never throws into the sync result).
+  for (const userId of chargedUsers) {
+    try {
+      await maybeWarnLowBalance(userId)
+    } catch (err) {
+      report.errors.push(
+        `warn ${userId}: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+  }
+
+  console.log(JSON.stringify({ kind: "openrouter_usage_sync", ...report }))
+  return report
+}
+
+/**
+ * Hard-stop an abusing / drained instance: disable the OpenRouter key, pause
+ * the bot, and notify the user + admin. Idempotent enough to re-run safely.
+ */
+async function enforce(
+  instance: Instance,
+  state: Awaited<ReturnType<typeof getRuntimeKey>>,
+  reason: string,
+  anomaly: boolean,
+): Promise<void> {
+  // 1. Disable the key (idempotent; skip if already disabled).
+  if (!state.disabled && instance.openRouterKeyId) {
+    await updateRuntimeKey(instance.openRouterKeyId, { disabled: true })
+  }
+
+  // 2. Pause the bot if it's running.
+  if (instance.status === "running") {
+    try {
+      await pauseBot(instance)
+    } catch (err) {
+      console.warn(`[usage-sync] pauseBot failed for ${instance.id}:`, err)
+    }
+  }
+
+  await logInstanceEvent({
+    instanceId: instance.id,
+    level: "warn",
+    stage: "usage_sync",
+    action: "enforce",
+    result: "ok",
+    detail: { reason, usageUsd: state.usageUsd, limitUsd: state.limitUsd },
+    message: `OpenRouter key disabled and bot paused: ${reason}.`,
+  })
+
+  // 3. Notify the user.
+  await notify({
+    userId: instance.userId,
+    category: "billing",
+    type: "low_balance",
+    title: `Agent "${instance.name}" paused`,
+    message: anomaly
+      ? `We paused "${instance.name}" after detecting unusually high AI usage (${reason}). Review activity, then top up to resume.`
+      : `"${instance.name}" was paused because ${reason}. Add credits to resume.`,
+    url: "/dashboard/billing",
+    instanceId: instance.id,
+  })
+
+  // 4. Alert admin (anomalies are the interesting case — possible leaked token).
+  await createAdminNotification({
+    type: anomaly ? "instance_stopped" : "low_balance",
+    userId: instance.userId,
+    instanceId: instance.id,
+    message: `Usage-sync enforced on "${instance.name}" (${reason}). Key disabled, bot paused. Current OpenRouter usage $${state.usageUsd.toFixed(2)}${
+      state.limitUsd != null ? ` / cap $${state.limitUsd.toFixed(2)}` : ""
+    }.`,
+  })
+}

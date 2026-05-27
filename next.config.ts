@@ -59,6 +59,12 @@ const nextConfig: NextConfig = {
   output: "standalone",
   ...(devOrigins.length > 0 ? { allowedDevOrigins: devOrigins } : {}),
   serverExternalPackages: ["ssh2", "node-ssh", "cpu-features"],
+  images: {
+    remotePatterns: [
+      // Ghost illustration used by the ghost-404-page component
+      { protocol: "https", hostname: "xubohuah.github.io" },
+    ],
+  },
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }]
   },

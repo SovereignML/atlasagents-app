@@ -1,20 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
-import crypto from "node:crypto"
 import { auth } from "@/auth"
-import { db, eq, and, asc, instances, instanceLogs, regions, serverConfigs, sshKeys, users, plans, subscriptions } from "@/db"
+import { db, eq, and, instances, instanceLogs, sshKeys, users, subscriptions } from "@/db"
 import { stripe, isStripeConfigured } from "@/lib/stripe"
-import { logAuditEvent } from "@/lib/audit"
-import { createSlug, encryptRootPassword, computeSshFingerprint, isValidPublicKey } from "@/lib/instance"
+import { encryptRootPassword, computeSshFingerprint, isValidPublicKey } from "@/lib/instance"
 import { planUnitAmountCents } from "@/lib/pricing"
 import { findPlanBySlug } from "@/configs/plans"
 import { BRANDING } from "@/configs/branding"
 import { parseAgentConfig } from "@/lib/agent-config"
-import { selectSkills } from "@/configs/skill-map"
-import { generateSoul } from "@/lib/soul"
-import { routeModel } from "@/lib/model-router"
 import { provisionBot } from "@/lib/provisioner"
 import { describeVmError } from "@/lib/vm-provider"
-import { grantCredits } from "@/lib/credits"
+import { depositToWallet } from "@/lib/wallet"
+import { createInstanceFromAgentFields } from "@/lib/agent-create"
 
 export async function POST(req: NextRequest) {
   const session = await auth()
@@ -83,53 +79,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const isVps = parsedAgentConfig?.ok
-    ? parsedAgentConfig.data.deployment_target === "vps"
-    : !!regionSlug
-
-  if (isVps) {
-    const required = [
-      "SSH_FLEET_PRIVATE_KEY",
-      "SSH_FLEET_PUBLIC_KEY",
-      "OPENROUTER_API_KEY",
-      "INSTANCE_ENCRYPTION_KEY",
-    ]
-    const missing = required.filter((k) => !process.env[k])
-    if (missing.length > 0) {
-      console.error("[deploy] VPS provisioning not configured; missing env:", missing.join(", "))
-      return NextResponse.json(
-        { error: "VPS provisioning is not configured on this server" },
-        { status: 503 }
-      )
-    }
-  }
-
-  // ── Resolve region + server config from plan ──────────────────────
-  let region = regionSlug
-    ? await db.query.regions.findFirst({ where: eq(regions.slug, regionSlug) })
-    : null
-
-  if (!region) {
-    region = await db.query.regions.findFirst({
-      where: eq(regions.available, true),
-      orderBy: asc(regions.sortOrder),
-    })
-  }
-
-  const serverConfig = await db.query.serverConfigs.findFirst({
-    where: eq(serverConfigs.slug, planConfig.serverConfigSlug),
-  })
-
-  if (!region) {
-    return NextResponse.json({ error: "No available region found" }, { status: 500 })
-  }
-  if (!serverConfig) {
-    return NextResponse.json({ error: "No active server config found" }, { status: 500 })
-  }
-  if (isVps && !region.available) {
-    return NextResponse.json({ error: "Invalid or unavailable region" }, { status: 400 })
-  }
-
   // ── SSH key ───────────────────────────────────────────────────────
   let sshKeyId: string | undefined
   if (sshPublicKey) {
@@ -156,81 +105,22 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── Agent fields ──────────────────────────────────────────────────
-  let agentFields: {
-    agentType: string | null
-    agentConfig: unknown
-    soulMd: string | null
-    skills: unknown
-    modelTier: string | null
-    botToken: string | null
-    deploymentTarget: string | null
-    interfaceKind: string | null
-  } = {
-    agentType: null,
-    agentConfig: null,
-    soulMd: null,
-    skills: null,
-    modelTier: null,
-    botToken: null,
-    deploymentTarget: null,
-    interfaceKind: null,
-  }
-  if (parsedAgentConfig?.ok) {
-    const cfg = parsedAgentConfig.data
-    const skills = selectSkills(cfg)
-    const soulMd = generateSoul(cfg, skills)
-    routeModel(cfg.budget_tier)
-    const botToken = "sk_bot_" + crypto.randomBytes(24).toString("hex")
-    agentFields = {
-      agentType: cfg.use_case,
-      agentConfig: cfg,
-      soulMd,
-      skills,
-      modelTier: cfg.budget_tier,
-      botToken,
-      deploymentTarget: cfg.deployment_target,
-      interfaceKind: cfg.interface,
-    }
-  }
-
-  // ── Insert instance ───────────────────────────────────────────────
-  const [instance] = await db
-    .insert(instances)
-    .values({
-      userId: session.user.id,
-      name: name.trim(),
-      slug: createSlug(name),
-      regionId: region.id,
-      serverConfigId: serverConfig.id,
-      sshKeyId,
-      storageGb: serverConfig.storageGb,
-      billingInterval,
-      status: "pending",
-      rootPasswordEnc: rootPassword ? encryptRootPassword(rootPassword) : undefined,
-      ...agentFields,
-    })
-    .returning()
-
-  await logAuditEvent({
+  // ── Resolve infra + create the pending instance (shared with restore) ─
+  const created = await createInstanceFromAgentFields({
     userId: session.user.id,
-    action: "instance.deploy",
-    targetType: "instance",
-    targetId: instance.id,
-    targetLabel: instance.name,
-    meta: { plan: planSlug, region: regionSlug, billingInterval },
+    name,
+    agentConfig: parsedAgentConfig?.ok ? parsedAgentConfig.data : null,
+    planSlug,
+    regionSlug,
+    billingInterval,
+    sshKeyId,
+    rootPasswordEnc: rootPassword ? encryptRootPassword(rootPassword) : undefined,
+    auditMeta: { plan: planSlug, region: regionSlug, billingInterval },
   })
-
-  // ── Resolve the DB plan row ───────────────────────────────────────
-  const dbPlan = await db.query.plans.findFirst({
-    where: and(eq(plans.tier, planConfig.tier), eq(plans.isActive, true)),
-  })
-
-  await db.insert(instanceLogs).values({
-    instanceId: instance.id,
-    level: "info",
-    message: `Instance created. Plan: ${planConfig.name}, Server: ${serverConfig.label}, Region: ${region.name}. Awaiting payment.`,
-  })
+  if (!created.ok) {
+    return NextResponse.json({ error: created.error }, { status: created.status })
+  }
+  const { instance, serverConfig, dbPlan } = created
 
   // ── Free tier: bypass Stripe, auto-provision ──────────────────────
   if (planConfig.tier === "free") {
@@ -265,16 +155,22 @@ export async function POST(req: NextRequest) {
 
     if (planConfig.creditsPerPeriod > 0) {
       try {
-        await grantCredits(userId, planConfig.creditsPerPeriod, `subscription:${planConfig.slug}:initial`)
+        await depositToWallet(
+          userId,
+          planConfig.creditsPerPeriod,
+          "plan_deposit",
+          `Free tier grant — ${planConfig.name}`,
+          instanceId,
+        )
       } catch (err) {
-        console.error("[deploy] grantCredits failed (free tier):", err)
+        console.error("[deploy] depositToWallet failed (free tier):", err)
       }
     }
 
     await db.insert(instanceLogs).values({
       instanceId,
       level: "info",
-      message: "Free tier: instance auto-activated (no payment required).",
+      message: `Free tier: instance auto-activated. ${planConfig.creditsPerPeriod.toLocaleString()} credits granted.`,
     })
 
     return NextResponse.json({ instanceId })
@@ -368,10 +264,26 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  // Dev mode: simulate the Stripe `invoice.paid` deposit so the user
+  // actually sees credits arrive when they deploy a paid plan.
+  if (planConfig.creditsPerPeriod > 0) {
+    try {
+      await depositToWallet(
+        userId,
+        planConfig.creditsPerPeriod,
+        "plan_deposit",
+        `Dev mode grant — ${planConfig.name} (${billingInterval})`,
+        instanceId,
+      )
+    } catch (err) {
+      console.error("[deploy] depositToWallet failed (dev path):", err)
+    }
+  }
+
   await db.insert(instanceLogs).values({
     instanceId,
     level: "info",
-    message: "Dev mode: instance auto-activated (Stripe not configured).",
+    message: `Dev mode: instance auto-activated. ${planConfig.creditsPerPeriod.toLocaleString()} credits granted (Stripe not configured).`,
   })
 
   return NextResponse.json({ instanceId })

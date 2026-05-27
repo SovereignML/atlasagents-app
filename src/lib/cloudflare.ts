@@ -1,3 +1,6 @@
+import { db, cloudflareConnections, eq } from "@/db"
+import { decryptSecret } from "./crypto-secret"
+
 const CF_API = "https://api.cloudflare.com/client/v4"
 
 export type CloudflareError = Error & {
@@ -6,32 +9,67 @@ export type CloudflareError = Error & {
   retryAfter?: number
 }
 
-function token(): string {
-  const t = process.env.CLOUDFLARE_API_TOKEN
+/**
+ * Per-call Cloudflare context. When omitted, calls fall back to the PLATFORM
+ * env credentials (CLOUDFLARE_API_TOKEN / CLOUDFLARE_ZONE_ID) — that path
+ * powers the managed `*.sovereignclaw.xyz` subdomains (src/lib/agent-dns.ts).
+ * When provided, the user's own token/zone is used (Bring-Your-Own-Cloudflare).
+ */
+export type CfCtx = { token?: string; zoneId?: string }
+
+/** Connection / auth errors, mirrored on the Drive integration shape. */
+export class CloudflareNotConnectedError extends Error {
+  constructor() {
+    super("Cloudflare is not connected")
+    this.name = "CloudflareNotConnectedError"
+  }
+}
+export class CloudflareAuthError extends Error {
+  constructor() {
+    super("Cloudflare token is invalid or lacks the required scopes")
+    this.name = "CloudflareAuthError"
+  }
+}
+
+function token(ctx?: CfCtx): string {
+  const t = ctx?.token ?? process.env.CLOUDFLARE_API_TOKEN
   if (!t) throw new Error("CLOUDFLARE_API_TOKEN is not set")
   return t
 }
 
-export function zoneId(): string {
-  const z = process.env.CLOUDFLARE_ZONE_ID
+export function zoneId(ctx?: CfCtx): string {
+  const z = ctx?.zoneId ?? process.env.CLOUDFLARE_ZONE_ID
   if (!z) throw new Error("CLOUDFLARE_ZONE_ID is not set")
   return z
 }
 
-export async function cfFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+type CfBody = {
+  success?: boolean
+  result?: unknown
+  result_info?: {
+    page?: number
+    per_page?: number
+    total_pages?: number
+    total_count?: number
+  }
+  errors?: Array<{ message?: string; code?: number }>
+}
+
+/** Low-level request that surfaces the FULL Cloudflare envelope (incl. result_info). */
+async function cfRequest(
+  path: string,
+  init: RequestInit = {},
+  ctx?: CfCtx,
+): Promise<CfBody> {
   const res = await fetch(`${CF_API}${path}`, {
     ...init,
     headers: {
-      Authorization: `Bearer ${token()}`,
+      Authorization: `Bearer ${token(ctx)}`,
       "Content-Type": "application/json",
       ...(init.headers ?? {}),
     },
   })
-  let body: {
-    success?: boolean
-    result?: unknown
-    errors?: Array<{ message?: string; code?: number }>
-  } = {}
+  let body: CfBody = {}
   try {
     body = await res.json()
   } catch {
@@ -52,6 +90,15 @@ export async function cfFetch<T>(path: string, init: RequestInit = {}): Promise<
     }
     throw err
   }
+  return body
+}
+
+export async function cfFetch<T>(
+  path: string,
+  init: RequestInit = {},
+  ctx?: CfCtx,
+): Promise<T> {
+  const body = await cfRequest(path, init, ctx)
   return body.result as T
 }
 
@@ -64,21 +111,29 @@ export type DnsRecord = {
   ttl: number
 }
 
-export async function findRecordByName(name: string): Promise<DnsRecord | null> {
+export async function findRecordByName(
+  name: string,
+  ctx?: CfCtx,
+): Promise<DnsRecord | null> {
   const recs = await cfFetch<DnsRecord[]>(
-    `/zones/${zoneId()}/dns_records?type=A&name=${encodeURIComponent(name)}`,
+    `/zones/${zoneId(ctx)}/dns_records?type=A&name=${encodeURIComponent(name)}`,
+    {},
+    ctx,
   )
   return recs[0] ?? null
 }
 
-export async function upsertDnsRecord(opts: {
-  name: string
-  ip: string
-  proxied?: boolean
-  ttl?: number
-}): Promise<DnsRecord> {
+export async function upsertDnsRecord(
+  opts: {
+    name: string
+    ip: string
+    proxied?: boolean
+    ttl?: number
+  },
+  ctx?: CfCtx,
+): Promise<DnsRecord> {
   const { name, ip, proxied = true, ttl = 1 } = opts
-  const existing = await findRecordByName(name)
+  const existing = await findRecordByName(name, ctx)
   if (existing) {
     if (
       existing.content === ip &&
@@ -88,29 +143,116 @@ export async function upsertDnsRecord(opts: {
       return existing
     }
     return cfFetch<DnsRecord>(
-      `/zones/${zoneId()}/dns_records/${existing.id}`,
+      `/zones/${zoneId(ctx)}/dns_records/${existing.id}`,
       {
         method: "PUT",
         body: JSON.stringify({ type: "A", name, content: ip, proxied, ttl }),
       },
+      ctx,
     )
   }
-  return cfFetch<DnsRecord>(`/zones/${zoneId()}/dns_records`, {
-    method: "POST",
-    body: JSON.stringify({ type: "A", name, content: ip, proxied, ttl }),
-  })
+  return cfFetch<DnsRecord>(
+    `/zones/${zoneId(ctx)}/dns_records`,
+    {
+      method: "POST",
+      body: JSON.stringify({ type: "A", name, content: ip, proxied, ttl }),
+    },
+    ctx,
+  )
 }
 
-export async function deleteDnsRecord(id: string): Promise<void> {
-  await cfFetch(`/zones/${zoneId()}/dns_records/${id}`, { method: "DELETE" })
+export async function deleteDnsRecord(id: string, ctx?: CfCtx): Promise<void> {
+  await cfFetch(`/zones/${zoneId(ctx)}/dns_records/${id}`, { method: "DELETE" }, ctx)
 }
 
 export async function patchZoneSetting(
   setting: string,
   value: string | number | boolean,
+  ctx?: CfCtx,
 ): Promise<void> {
-  await cfFetch(`/zones/${zoneId()}/settings/${setting}`, {
-    method: "PATCH",
-    body: JSON.stringify({ value }),
+  await cfFetch(
+    `/zones/${zoneId(ctx)}/settings/${setting}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ value }),
+    },
+    ctx,
+  )
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Bring-Your-Own-Cloudflare: user-token operations
+// ──────────────────────────────────────────────────────────────────────
+
+/** Verify a pasted token is active. GET /user/tokens/verify. */
+export async function verifyToken(
+  apiToken: string,
+): Promise<{ id: string; status: string }> {
+  return cfFetch<{ id: string; status: string }>(
+    "/user/tokens/verify",
+    {},
+    { token: apiToken },
+  )
+}
+
+export type CfZone = { id: string; name: string; status: string }
+
+/**
+ * List every zone the token can see. A scoped token only returns zones it has
+ * access to, so this doubles as a Zone:Read smoke-test. Paginates fully.
+ */
+export async function listZones(apiToken: string): Promise<CfZone[]> {
+  const ctx = { token: apiToken }
+  const zones: CfZone[] = []
+  let page = 1
+  // Hard cap pages defensively; zone lists are small in practice.
+  for (let i = 0; i < 20; i++) {
+    const body = await cfRequest(
+      `/zones?per_page=50&page=${page}`,
+      {},
+      ctx,
+    )
+    const batch = (body.result as CfZone[] | undefined) ?? []
+    for (const z of batch) zones.push({ id: z.id, name: z.name, status: z.status })
+    const totalPages = body.result_info?.total_pages ?? 1
+    if (page >= totalPages || batch.length === 0) break
+    page++
+  }
+  return zones
+}
+
+/** Current zone-wide SSL/TLS mode: "off" | "flexible" | "full" | "strict". */
+export async function getZoneSslMode(ctx: CfCtx): Promise<string | null> {
+  const result = await cfFetch<{ value?: string }>(
+    `/zones/${zoneId(ctx)}/settings/ssl`,
+    {},
+    ctx,
+  )
+  return result?.value ?? null
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Per-user connection helpers (DB-backed)
+// ──────────────────────────────────────────────────────────────────────
+
+export async function getCloudflareConnection(userId: string) {
+  return db.query.cloudflareConnections.findFirst({
+    where: eq(cloudflareConnections.userId, userId),
   })
+}
+
+/**
+ * Decrypt the user's stored Cloudflare token. Throws CloudflareNotConnectedError
+ * when no connection exists (→ 409 so the UI prompts a connect).
+ */
+export async function getCloudflareTokenForUser(userId: string): Promise<string> {
+  const conn = await getCloudflareConnection(userId)
+  if (!conn) throw new CloudflareNotConnectedError()
+  return decryptSecret(conn.apiTokenEnc)
+}
+
+/** True for token-level auth failures (revoked / wrong scope). */
+export function isCloudflareAuthError(err: unknown): boolean {
+  const status = (err as CloudflareError)?.status
+  return status === 401 || status === 403
 }

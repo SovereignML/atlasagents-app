@@ -16,7 +16,7 @@ export function CreditTerm({ children, className = "" }: Props) {
     >
       {children}
       <HelpCircle
-        className="w-3.5 h-3.5 shrink-0 text-[var(--text-secondary)]"
+        className="w-3.5 h-3.5 shrink-0 text-text-secondary"
         aria-hidden
       />
       <span className="sr-only">{CREDIT_TOOLTIP}</span>

@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { db, instances, eq } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
-import { sshInstallCaddyfile, sshRun, sshVmHasCloudflareOriginCerts } from "@/lib/ssh"
-import { OPENCLAW_SERVICE_NAME, renderCaddyfile } from "@/lib/openclaw"
-import { buildGatewayAllowedOrigins } from "@/lib/instance-gateway-access"
+import { sshInstallCaddyfile, sshRun, sshWriteFile, sshVmHasCloudflareOriginCerts } from "@/lib/ssh"
+import { getRuntime } from "@/lib/runtimes"
+import { decryptSecret } from "@/lib/crypto-secret"
+import { routeModel } from "@/lib/model-router"
+import type { BudgetTier } from "@/lib/agent-config"
 
 export async function POST(
   req: NextRequest,
@@ -40,12 +42,13 @@ export async function POST(
     return NextResponse.json({ error: "Invalid domain format" }, { status: 400 })
   }
 
-  const target = { host: instance.ipAddress }
+  const target = { host: instance.ipAddress, instanceId: instance.id }
+  const runtime = getRuntime(instance.runtime)
 
   try {
     const useCfOriginTls =
       Boolean(instance.managedSubdomain) && (await sshVmHasCloudflareOriginCerts(target))
-    const caddyContent = renderCaddyfile({
+    const caddyContent = runtime.renderCaddyfile({
       domain,
       managedSubdomain: instance.managedSubdomain,
       useCfOriginTls,
@@ -57,29 +60,44 @@ export async function POST(
       )
     }
 
-    const allowedOrigins = buildGatewayAllowedOrigins({
-      domain,
-      managedSubdomain: instance.managedSubdomain,
-      ipAddress: instance.ipAddress,
-      tlsStatus: domain ? (instance.tlsStatus ?? "pending") : null,
-    })
-    const OPENCLAW_DIR = "/opt/openclaw"
-    const originStep = await sshRun(
-      target,
-      `sudo -u openclaw HOME=${OPENCLAW_DIR} /usr/bin/openclaw config set gateway.controlUi.allowedOrigins '${JSON.stringify(allowedOrigins)}' 2>&1`,
-    )
-    if (originStep.code !== 0 && originStep.code !== null) {
-      throw new Error(
-        `openclaw config set allowedOrigins failed (exit ${originStep.code}): ${originStep.stderr || originStep.stdout}`,
+    // Re-render the full gateway config (which recomputes controlUi.allowedOrigins
+    // for the new domain) and write it back. This is runtime-agnostic — it avoids
+    // depending on a runtime-specific `config set` CLI. The gateway token is
+    // preserved by decrypting the persisted ciphertext; the LLM model fields come
+    // from the instance's tier. The OpenRouter key is not stored in this config
+    // (it lives in .env), so an empty placeholder is fine here.
+    if (instance.gatewayTokenEnc) {
+      const route = routeModel((instance.modelTier ?? "mid") as BudgetTier)
+      const configContent = runtime.renderConfig({
+        gatewayToken: decryptSecret(instance.gatewayTokenEnc),
+        openRouterApiKey: "",
+        model: route.model,
+        fallbackModel: route.fallback,
+        domain,
+        managedSubdomain: instance.managedSubdomain,
+        ipAddress: instance.ipAddress,
+        tlsStatus: domain ? (instance.tlsStatus ?? "pending") : null,
+      })
+      const writeStep = await sshWriteFile(target, runtime.paths.configPath, configContent)
+      if (writeStep.code !== 0 && writeStep.code !== null) {
+        throw new Error(
+          `writing ${runtime.displayName} config failed (exit ${writeStep.code}): ${writeStep.stderr || writeStep.stdout}`,
+        )
+      }
+      const owner = runtime.paths.systemUser
+      await sshRun(
+        target,
+        `chown -R ${owner}:${owner} '${runtime.paths.installDir}/${runtime.paths.configSubdir}'`,
       )
     }
+
     const restartStep = await sshRun(
       target,
-      `systemctl restart ${OPENCLAW_SERVICE_NAME} 2>&1`,
+      `systemctl restart ${runtime.serviceName} 2>&1`,
     )
     if (restartStep.code !== 0 && restartStep.code !== null) {
       throw new Error(
-        `systemctl restart ${OPENCLAW_SERVICE_NAME} failed (exit ${restartStep.code}): ${restartStep.stderr || restartStep.stdout}`,
+        `systemctl restart ${runtime.serviceName} failed (exit ${restartStep.code}): ${restartStep.stderr || restartStep.stdout}`,
       )
     }
   } catch (err) {

@@ -1,6 +1,25 @@
+import { redirect } from "next/navigation"
+import { KeyRound } from "lucide-react"
+
 import { auth } from "@/auth"
 import { db, eq, desc, sshKeys } from "@/db"
-import { redirect } from "next/navigation"
+import { Card, CardContent } from "@/components/ui/card"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
+import { PageContainer, PageHeader } from "@/components/layout/page-container"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 
 export default async function SshKeysPage() {
   const session = await auth()
@@ -12,34 +31,54 @@ export default async function SshKeysPage() {
   })
 
   return (
-    <div className="space-y-8 max-w-5xl">
-      <div>
-        <h1 className="text-2xl font-bold text-[var(--text-primary)]">SSH Keys</h1>
-        <p className="text-[var(--text-secondary)] mt-1">Manage SSH keys for your deployments</p>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="SSH Keys"
+        description="Manage SSH keys for your deployments"
+      />
 
       {keys.length === 0 ? (
-        <div className="bg-[var(--card-bg)] border border-[var(--border-color)] rounded-xl p-8 text-center">
-          <p className="text-[var(--text-secondary)]">No SSH keys yet. Keys are automatically added when you deploy with an SSH key.</p>
-        </div>
+        <Card>
+          <CardContent className="py-8">
+            <Empty>
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <KeyRound />
+                </EmptyMedia>
+                <EmptyTitle>No SSH keys yet</EmptyTitle>
+                <EmptyDescription>
+                  Keys are automatically added when you deploy with an SSH key.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          </CardContent>
+        </Card>
       ) : (
-        <div className="space-y-3">
-          {keys.map((key) => (
-            <div
-              key={key.id}
-              className="bg-[var(--card-bg)] border border-[var(--border-color)] rounded-xl p-5"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[var(--text-primary)] font-medium">{key.name}</p>
-                  <p className="text-xs text-[var(--text-secondary)] font-mono mt-1">{key.fingerprint}</p>
-                </div>
-                <p className="text-xs text-[var(--text-secondary)]">{key.createdAt.toISOString().slice(0, 10)}</p>
-              </div>
-            </div>
-          ))}
-        </div>
+        <Card className="overflow-hidden p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Fingerprint</TableHead>
+                <TableHead className="text-right">Added</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {keys.map((key) => (
+                <TableRow key={key.id}>
+                  <TableCell className="font-medium text-foreground">{key.name}</TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {key.fingerprint}
+                  </TableCell>
+                  <TableCell className="text-right text-xs text-muted-foreground">
+                    {key.createdAt.toISOString().slice(0, 10)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
       )}
-    </div>
+    </PageContainer>
   )
 }

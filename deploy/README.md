@@ -107,6 +107,8 @@ pm2 restart redesigned-giggle       # or: sudo systemctl restart redesigned-gigg
 Point nginx / Cloudflare Tunnel at `127.0.0.1:3000`. Standard Next.js
 reverse-proxy setup — no special headers required beyond `X-Forwarded-*`.
 
+For **per-team white-label custom dashboard domains**, the public listener must be **Caddy** (on-demand TLS) instead of nginx/Tunnel — see §10.
+
 ## 8. Cloudflare (managed agent hostnames / VPS edge)
 
 Provisioning can upsert **proxied DNS** for each instance via the Cloudflare API:
@@ -119,6 +121,39 @@ Provisioning can upsert **proxied DNS** for each instance via the Cloudflare API
 - **With** origin cert + key in env: the bootstrap can install them on the VM and Caddy can serve **HTTPS on the managed hostname** toward the origin; you can use **Full (strict)** in Cloudflare.
 
 Pin **`OPENCLAW_VERSION`** in `.env` to a semver you have tested so VPS bootstrap does not pull breaking CLI changes from `latest`.
+
+## 9. Google Drive backups (per-agent)
+
+Users can back up an agent's settings to their **own** Google Drive and restore them later. This reuses the existing **`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`** (the feature is hidden when Google OAuth isn't configured), via a dedicated consent flow separate from login.
+
+In the Google Cloud console for that OAuth client:
+
+- Add the Drive **Authorized redirect URI**: `<NEXT_PUBLIC_APP_URL>/api/integrations/drive/callback` (override with **`GOOGLE_DRIVE_REDIRECT_URI`** if needed). This is in addition to the NextAuth login callback `/api/auth/callback/google`.
+- On the **OAuth consent screen**, add the scope `https://www.googleapis.com/auth/drive.file` (app-created files only — minimal access).
+
+Backups contain agent **settings only** (config, persona, skills, model tier, interface) — never secrets, IPs, or tokens. The encrypted Drive refresh token is stored with **`INSTANCE_ENCRYPTION_KEY`** (same key used for other instance secrets). v1 "restore as a new agent" provisions on the free tier; use "restore in place" for existing paid agents.
+
+## 10. Custom dashboard domains (per-team white-label)
+
+Teams on **Scale/Enterprise** can serve the dashboard on their own domain (e.g. `app.agency.com`). This needs Caddy as the public **`:443`** listener in front of the Next app, because TLS for arbitrary customer domains is issued **on demand**.
+
+> A Cloudflare Tunnel **cannot** terminate TLS for third-party customer domains (it can't fetch Let's Encrypt certs for domains it doesn't control). So for white-label domains, Caddy — not a tunnel — must be the public listener. The app must bind to **`127.0.0.1:3000`** (loopback).
+
+**Setup:**
+
+1. Install Caddy on the app host and use **`deploy/Caddyfile`**:
+   - set the ACME **`email`** and replace **`app.example.com`** with your canonical dashboard host;
+   - the catch-all `https://` block issues per-domain certs on demand.
+2. The on-demand `ask` points at **`/api/internal/tls-authorize`** — Caddy calls it over loopback before issuing each cert; it returns `200` only when the SNI is a **verified** custom domain on a **currently-entitled** team. The Caddyfile also `respond 403`s `/api/internal/*` from the public site blocks so the endpoint isn't externally probeable. Optionally set **`TLS_AUTHORIZE_SECRET`** (an extra shared-secret header) if you front the ask with your own proxy.
+3. Tell customers to point their domain at you with a **CNAME** to the value shown in the branding settings UI (defaults to your canonical host; override with **`WHITELABEL_CNAME_TARGET`**).
+
+**Per-team flow** (in `/dashboard/settings/branding`): connect domain → publish the **`_sovereignml-verify.<domain>`** TXT record → **Verify** (proves ownership) → add the **CNAME** → first HTTPS hit triggers on-demand cert issuance. DNS/TLS status badges poll automatically.
+
+**OAuth on custom domains:** provider redirect URIs can't be pre-registered for arbitrary domains, so the login page on a custom host shows **email/password only** — OAuth (Google/Twitter/Apple) stays on the canonical domain. Register OAuth redirect URIs only for the canonical host.
+
+**Downgrade:** entitlement is re-checked live on every branding read and every cert `ask`, so a team that drops below Scale/Enterprise reverts to the default look and stops getting fresh certs — its stored config is kept (re-upgrading restores it).
+
+**Alternative:** Cloudflare for SaaS (custom hostnames) can offload TLS to Cloudflare's edge instead of Caddy on-demand; reuse `src/lib/cloudflare.ts`'s fetch wrapper against the `/custom_hostnames` API. The Caddy path is the default here (no extra Cloudflare product, self-hosted-friendly).
 
 ## When instance (VPS) provisioning fails
 

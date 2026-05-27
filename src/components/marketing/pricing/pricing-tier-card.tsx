@@ -14,7 +14,7 @@ function PriceBlock({ plan, interval }: Props) {
   if (plan.tier === "enterprise" && plan.enterprisePriceLabel) {
     return (
       <div className="mt-6">
-        <span className="text-2xl sm:text-3xl font-bold text-[var(--text-primary)] leading-tight">
+        <span className="text-2xl sm:text-3xl font-bold text-text-loud leading-tight">
           {plan.enterprisePriceLabel}
         </span>
       </div>
@@ -24,10 +24,10 @@ function PriceBlock({ plan, interval }: Props) {
   if (plan.tier === "free") {
     return (
       <div className="mt-6 flex items-baseline gap-1">
-        <span className="text-4xl font-bold text-[var(--text-primary)]">
+        <span className="text-4xl font-bold text-text-loud">
           {formatUsd(0)}
         </span>
-        <span className="text-[var(--text-secondary)] text-sm">/mo</span>
+        <span className="text-text-secondary text-sm">/mo</span>
       </div>
     )
   }
@@ -39,10 +39,10 @@ function PriceBlock({ plan, interval }: Props) {
   return (
     <div className="mt-6">
       <div className="flex items-baseline gap-1 flex-wrap">
-        <span className="text-4xl font-bold text-[var(--text-primary)]">
+        <span className="text-4xl font-bold text-text-loud">
           {formatUsd(amount)}
         </span>
-        <span className="text-[var(--text-secondary)]">{suffix}</span>
+        <span className="text-text-secondary">{suffix}</span>
       </div>
       {isYear && (
         <p className="mt-1 text-xs font-mono text-primary">
@@ -63,7 +63,7 @@ function Cta({ plan }: { plan: PlanConfig }) {
         href={BRANDING.demoUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className={`${base} border border-[var(--border-color)] text-[var(--text-primary)] hover:border-primary hover:text-primary`}
+        className={`${base} border border-border-muted text-text-loud hover:border-primary hover:text-primary`}
       >
         Contact Sales
       </a>
@@ -74,7 +74,7 @@ function Cta({ plan }: { plan: PlanConfig }) {
     return (
       <Link
         href="/login?deploy=true"
-        className={`${base} border border-[var(--border-color)] text-[var(--text-primary)] hover:border-primary hover:text-primary`}
+        className={`${base} border border-border-muted text-text-loud hover:border-primary hover:text-primary`}
       >
         Start Free
       </Link>
@@ -87,7 +87,7 @@ function Cta({ plan }: { plan: PlanConfig }) {
       className={`${base} ${
         plan.highlight
           ? "btn-gradient"
-          : "border border-[var(--border-color)] text-[var(--text-primary)] hover:border-primary hover:text-primary"
+          : "border border-border-muted text-text-loud hover:border-primary hover:text-primary"
       }`}
     >
       Get Started
@@ -100,10 +100,10 @@ export function PricingTierCard(props: Props) {
 
   return (
     <div
-      className={`relative flex flex-col h-full p-6 sm:p-8 rounded-2xl border transition-colors duration-200 shadow-[var(--shadow-sm)] ${
+      className={`relative flex flex-col h-full p-6 sm:p-8 rounded-2xl border transition-all duration-300 shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-hover)] ${
         plan.highlight
-          ? "border-2 border-primary bg-[var(--card-bg)] shadow-[0_0_20px_rgba(126,185,67,0.1)]"
-          : "border-[var(--border-color)] bg-[var(--card-bg)]"
+          ? "border-2 border-primary bg-[var(--card-bg)] shadow-[0_0_20px_rgba(209,241,20,0.12)]"
+          : "border-border-muted bg-[var(--card-bg)] hover:border-primary/50"
       } hover:bg-[var(--card-hover)]`}
     >
       {plan.highlight && (
@@ -112,10 +112,10 @@ export function PricingTierCard(props: Props) {
         </div>
       )}
 
-      <h2 className="text-xl sm:text-2xl font-bold text-[var(--text-primary)]">
+      <h2 className="text-xl sm:text-2xl font-bold text-text-loud">
         {plan.name}
       </h2>
-      <p className="mt-1 text-sm text-[var(--text-secondary)]">{plan.description}</p>
+      <p className="mt-1 text-sm text-text-secondary">{plan.description}</p>
 
       <PriceBlock {...props} />
 
@@ -123,11 +123,11 @@ export function PricingTierCard(props: Props) {
         {plan.features.map((f) => (
           <li key={f} className="flex items-start gap-2.5 text-sm">
             <Check className="w-4 h-4 text-primary shrink-0 mt-0.5" aria-hidden />
-            <span className="text-[var(--text-primary)] leading-snug">{f}</span>
+            <span className="text-text-loud leading-snug">{f}</span>
           </li>
         ))}
         {plan.restrictions?.map((r) => (
-          <li key={r} className="flex items-start gap-2.5 text-sm text-[var(--text-secondary)]">
+          <li key={r} className="flex items-start gap-2.5 text-sm text-text-secondary">
             <X className="w-4 h-4 shrink-0 mt-0.5 opacity-60" aria-hidden />
             <span className="leading-snug">{r}</span>
           </li>

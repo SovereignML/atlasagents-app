@@ -1,17 +1,53 @@
 "use client"
 
-import { useEffect, useMemo, useState, useCallback } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Badge } from "@/components/ui/badge"
+import { Loader2, Search, Trash2 } from "lucide-react"
 
-const STATUS_STYLES: Record<string, string> = {
-  pending: "bg-amber-500/10 text-amber-400 border-amber-500/30",
-  running: "bg-primary/10 text-primary border-primary/30",
-  provisioning: "bg-amber-500/10 text-amber-400 border-amber-500/30",
-  stopped: "bg-[var(--card-bg)] text-[var(--text-secondary)] border-[var(--border-color)]",
-  failed_provisioning: "bg-red-500/10 text-red-400 border-red-500/30",
-  deleting: "bg-zinc-800/20 text-zinc-400 border-zinc-800/30",
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { runtimeLabel } from "@/lib/runtimes/labels"
+
+type InstanceStatus =
+  | "pending"
+  | "running"
+  | "provisioning"
+  | "stopped"
+  | "failed_provisioning"
+  | "failed"
+  | "deleting"
+  | string
+
+function statusBadgeVariant(status: InstanceStatus): "default" | "secondary" | "destructive" | "outline" {
+  switch (status) {
+    case "running":
+      return "default"
+    case "failed":
+    case "failed_provisioning":
+      return "destructive"
+    case "provisioning":
+    case "pending":
+    case "deleting":
+      return "outline"
+    case "stopped":
+    default:
+      return "secondary"
+  }
 }
 
 type Item = {
@@ -20,6 +56,8 @@ type Item = {
   slug: string
   status: string
   ipAddress: string | null
+  runtime: string | null
+  deploymentTarget: string | null
   regionLabel: string
   serverLabel: string
   vcpu: number
@@ -45,6 +83,8 @@ function mapRowsToItems(
     slug: string
     status: string
     ipAddress: string | null
+    runtime?: string | null
+    deploymentTarget?: string | null
     region: { flag: string; name: string }
     serverConfig: { label: string; vcpu: number; ramGb: number }
     logs?: Array<{ id: string; level: string; message: string; createdAt: string | Date }>
@@ -58,6 +98,8 @@ function mapRowsToItems(
       slug: row.slug,
       status: row.status,
       ipAddress: row.ipAddress,
+      runtime: row.runtime ?? null,
+      deploymentTarget: row.deploymentTarget ?? null,
       regionLabel: `${row.region.flag} ${row.region.name}`,
       serverLabel: row.serverConfig.label,
       vcpu: row.serverConfig.vcpu,
@@ -82,16 +124,15 @@ export function InstancesFilter({ items: initialItems }: { items: Item[] }) {
   const [q, setQ] = useState("")
   const [status, setStatus] = useState<Filter>("all")
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<Item | null>(null)
 
-  const handleQuickDelete = useCallback(async (e: React.MouseEvent, instance: Item) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (!confirm(`Delete "${instance.name}"? This cannot be undone.`)) return
-    setDeletingId(instance.id)
+  const handleConfirmDelete = useCallback(async () => {
+    if (!pendingDelete) return
+    setDeletingId(pendingDelete.id)
     try {
-      const r = await fetch(`/api/instances/${instance.id}`, { method: "DELETE" })
+      const r = await fetch(`/api/instances/${pendingDelete.id}`, { method: "DELETE" })
       if (r.ok) {
-        setItems((prev) => prev.filter((i) => i.id !== instance.id))
+        setItems((prev) => prev.filter((i) => i.id !== pendingDelete.id))
         router.refresh()
       } else {
         const body = await r.json().catch(() => ({}))
@@ -101,7 +142,8 @@ export function InstancesFilter({ items: initialItems }: { items: Item[] }) {
       alert("Delete failed")
     }
     setDeletingId(null)
-  }, [router])
+    setPendingDelete(null)
+  }, [pendingDelete, router])
 
   const hasProvisioning = items.some(
     (i) => i.status === "pending" || i.status === "provisioning" || i.status === "deleting",
@@ -126,6 +168,8 @@ export function InstancesFilter({ items: initialItems }: { items: Item[] }) {
           slug: string
           status: string
           ipAddress: string | null
+          runtime?: string | null
+          deploymentTarget?: string | null
           region: { flag: string; name: string }
           serverConfig: { label: string; vcpu: number; ramGb: number }
           logs?: Array<{ id: string; level: string; message: string; createdAt: string | Date }>
@@ -159,107 +203,147 @@ export function InstancesFilter({ items: initialItems }: { items: Item[] }) {
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          type="text"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search by name or slug..."
-          className="flex-1 min-w-[16rem] bg-[var(--card-bg)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-sm font-mono text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]/50 focus:outline-none focus:border-primary"
-        />
-        <div className="flex gap-1">
+      <div className="flex flex-wrap items-center gap-3">
+        <InputGroup className="min-w-64 flex-1">
+          <InputGroupAddon align="inline-start">
+            <Search />
+          </InputGroupAddon>
+          <InputGroupInput
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search by name or slug..."
+          />
+        </InputGroup>
+        <ToggleGroup
+          value={[status]}
+          onValueChange={(v) => {
+            const next = v[0]
+            if (next) setStatus(next as Filter)
+          }}
+          variant="outline"
+          size="sm"
+        >
           {FILTERS.map((f) => (
-            <button
-              key={f}
-              onClick={() => setStatus(f)}
-              className={`px-3 py-2 rounded-lg text-[10px] font-mono border ${
-                status === f
-                  ? "border-primary text-primary bg-primary/10"
-                  : "border-[var(--border-color)] text-[var(--text-secondary)] hover:border-primary"
-              }`}
-            >
+            <ToggleGroupItem key={f} value={f} className="font-mono text-[10px]">
               {f}
-            </button>
+            </ToggleGroupItem>
           ))}
-        </div>
-        <p className="text-[10px] font-mono text-[var(--text-secondary)] ml-auto">
+        </ToggleGroup>
+        <p className="ml-auto font-mono text-[10px] text-muted-foreground">
           {filtered.length} / {items.length}
         </p>
       </div>
 
       {filtered.length === 0 ? (
-        <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-12 text-center">
-          <p className="text-[var(--text-secondary)]">No matches.</p>
-        </div>
+        <Card>
+          <CardContent className="py-8">
+            <Empty>
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Search />
+                </EmptyMedia>
+                <EmptyTitle>No matches</EmptyTitle>
+                <EmptyDescription>Try a different search or filter.</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          </CardContent>
+        </Card>
       ) : (
         <div className="space-y-4">
           {filtered.map((instance) => (
-            <Link
-              key={instance.id}
-              href={`/dashboard/instances/${instance.id}`}
-              className="block rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-6 space-y-4 hover:border-primary transition-colors"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-3">
-                    <h3 className="text-lg font-bold text-[var(--text-primary)]">
-                      {instance.name}
-                    </h3>
-                    <Badge className={STATUS_STYLES[instance.status] || STATUS_STYLES.stopped}>
-                      {instance.status}
-                    </Badge>
-                    {(instance.status === "provisioning" ||
-                      instance.status === "pending" ||
-                      instance.status === "deleting") && (
-                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                    )}
+            <Link key={instance.id} href={`/dashboard/instances/${instance.id}`} className="block">
+              <Card className="transition-colors hover:border-primary/50">
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-lg font-semibold text-foreground">{instance.name}</h3>
+                        <Badge variant={statusBadgeVariant(instance.status)}>{instance.status}</Badge>
+                        {instance.deploymentTarget === "vps" && (
+                          <Badge variant="outline">{runtimeLabel(instance.runtime)}</Badge>
+                        )}
+                        {(instance.status === "provisioning" ||
+                          instance.status === "pending" ||
+                          instance.status === "deleting") && (
+                          <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />
+                        )}
+                      </div>
+                      <p className="mt-1 font-mono text-xs text-muted-foreground">
+                        {instance.slug}
+                        {instance.ipAddress && (
+                          <>
+                            {" · "}
+                            <span className="text-primary">{instance.ipAddress}</span>
+                          </>
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {DELETABLE_STUCK_STATES.has(instance.status) && (
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          disabled={deletingId === instance.id}
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            setPendingDelete(instance)
+                          }}
+                        >
+                          {deletingId === instance.id ? (
+                            <Loader2 data-icon="inline-start" className="animate-spin" />
+                          ) : (
+                            <Trash2 data-icon="inline-start" />
+                          )}
+                          {deletingId === instance.id ? "Deleting..." : "Delete"}
+                        </Button>
+                      )}
+                      <span className="font-mono text-xs text-muted-foreground">→ Manage</span>
+                    </div>
                   </div>
-                  <p className="text-xs text-[var(--text-secondary)] mt-1 font-mono">
-                    {instance.slug}
-                    {instance.ipAddress && (
-                      <>
-                        {" · "}
-                        <span className="text-primary">
-                          {instance.ipAddress}
-                        </span>
-                      </>
-                    )}
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  {DELETABLE_STUCK_STATES.has(instance.status) && (
-                    <button
-                      onClick={(e) => handleQuickDelete(e, instance)}
-                      disabled={deletingId === instance.id}
-                      className="px-3 py-1.5 rounded-lg text-[10px] font-mono bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20 disabled:opacity-40"
-                    >
-                      {deletingId === instance.id ? "Deleting..." : "Delete"}
-                    </button>
-                  )}
-                  <span className="text-xs text-[var(--text-secondary)] font-mono">→ Manage</span>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                {[
-                  { label: "Region", value: instance.regionLabel },
-                  { label: "Server", value: instance.serverLabel },
-                  { label: "Specs", value: `${instance.vcpu} vCPU · ${instance.ramGb} GB` },
-                  { label: "IP", value: instance.ipAddress || "Pending", mono: true },
-                ].map((d) => (
-                  <div key={d.label} className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3">
-                    <p className="text-[var(--text-secondary)] text-xs font-mono">
-                      {d.label}
-                    </p>
-                    <p className={`text-[var(--text-primary)] mt-0.5 text-sm ${d.mono ? "font-mono text-xs" : ""}`}>
-                      {d.value}
-                    </p>
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                    {[
+                      { label: "Region", value: instance.regionLabel },
+                      { label: "Server", value: instance.serverLabel },
+                      { label: "Specs", value: `${instance.vcpu} vCPU · ${instance.ramGb} GB` },
+                      { label: "IP", value: instance.ipAddress || "Pending", mono: true },
+                    ].map((d) => (
+                      <div key={d.label} className="rounded-lg border bg-muted/40 p-3">
+                        <p className="font-mono text-xs text-muted-foreground">{d.label}</p>
+                        <p className={`mt-0.5 text-sm text-foreground ${d.mono ? "font-mono text-xs" : ""}`}>
+                          {d.value}
+                        </p>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </CardContent>
+              </Card>
             </Link>
           ))}
         </div>
       )}
+
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this agent?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDelete
+                ? `"${pendingDelete.name}" will be removed. This action cannot be undone.`
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDelete}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

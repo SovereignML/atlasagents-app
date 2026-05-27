@@ -34,7 +34,10 @@ export async function GET(
   // Probe the managed Cloudflare subdomain when present, otherwise the
   // user-supplied custom domain. If neither is set, DNS state stays NULL.
   const probeHost = instance.managedSubdomain ?? instance.domain
-  const isManaged = Boolean(instance.managedSubdomain)
+  // A proxied custom domain (Bring-Your-Own-Cloudflare) resolves to Cloudflare
+  // anycast IPs, never the origin — so treat it like a managed subdomain where
+  // any A record means DNS is live, rather than requiring an exact-IP match.
+  const isManaged = Boolean(instance.managedSubdomain) || instance.domainProxied
 
   if (!probeHost) {
     return NextResponse.json({

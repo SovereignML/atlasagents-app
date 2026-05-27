@@ -2,9 +2,10 @@ import { z } from "zod"
 
 export const ToneSchema = z.enum(["formal", "sales", "technical", "friendly"])
 export const InterfaceKindSchema = z.enum(["web", "telegram", "discord", "slack", "api"])
-export const DeploymentTargetSchema = z.enum(["vps", "shared", "serverless"])
+export const DeploymentTargetSchema = z.enum(["vps", "shared", "serverless", "byos"])
 export const KnowledgeSourceSchema = z.enum(["none", "url", "file"])
 export const BudgetTierSchema = z.enum(["low", "mid", "high"])
+export const RuntimeSchema = z.enum(["openclaw", "hermes"])
 
 /** Shape posted by the deploy wizard under `body.agentConfig`. */
 export const AgentConfigSchema = z.object({
@@ -16,6 +17,10 @@ export const AgentConfigSchema = z.object({
   deployment_target: DeploymentTargetSchema.default("shared"),
   knowledge_source: KnowledgeSourceSchema.default("none"),
   budget_tier: BudgetTierSchema.default("mid"),
+  // VPS-only: which agent runtime engine powers the bot.
+  runtime: RuntimeSchema.default("openclaw"),
+  // Hermes-only: provision Open WebUI as a Docker sidecar for a web chat UI.
+  webui_enabled: z.boolean().default(false),
 })
 
 export type AgentConfig = z.infer<typeof AgentConfigSchema>
@@ -24,6 +29,7 @@ export type InterfaceKind = z.infer<typeof InterfaceKindSchema>
 export type DeploymentTarget = z.infer<typeof DeploymentTargetSchema>
 export type KnowledgeSource = z.infer<typeof KnowledgeSourceSchema>
 export type BudgetTier = z.infer<typeof BudgetTierSchema>
+export type Runtime = z.infer<typeof RuntimeSchema>
 
 /**
  * Normalize: when deployment_target is "shared" or "serverless", infra-shaped
@@ -32,9 +38,15 @@ export type BudgetTier = z.infer<typeof BudgetTierSchema>
  * AgentConfig downstream.
  */
 export function normalizeAgentConfig(cfg: AgentConfig): AgentConfig {
-  if (cfg.deployment_target !== "vps") {
-    // No-op on AgentConfig today — VPS-only fields live on the Instance row,
-    // not the AgentConfig. Kept as a hook for future shape changes.
+  // Runtime engine is meaningful only where we install a runtime over SSH:
+  // the managed VPS path and the customer's own server (BYOS). Other targets
+  // always run the default runtime. Other infra fields live on the Instance row.
+  if (cfg.deployment_target !== "vps" && cfg.deployment_target !== "byos") {
+    return { ...cfg, runtime: "openclaw", webui_enabled: false }
+  }
+  // The Open WebUI sidecar only exists for Hermes.
+  if (cfg.runtime !== "hermes") {
+    return { ...cfg, webui_enabled: false }
   }
   return cfg
 }

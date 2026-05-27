@@ -1,7 +1,20 @@
+import Link from "next/link"
+import { redirect } from "next/navigation"
+import { Bot, Plus } from "lucide-react"
+
 import { auth } from "@/auth"
 import { db, desc, instances } from "@/db"
-import { redirect } from "next/navigation"
-import Link from "next/link"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
+import { PageContainer, PageHeader } from "@/components/layout/page-container"
 import { whereUserInstancesVisible } from "@/lib/instance-queries"
 import { InstancesFilter } from "./instances-filter"
 
@@ -30,6 +43,8 @@ export default async function InstancesPage() {
       slug: i.slug,
       status: i.status,
       ipAddress: i.ipAddress,
+      runtime: i.runtime,
+      deploymentTarget: i.deploymentTarget,
       regionLabel: `${i.region.flag} ${i.region.name}`,
       serverLabel: i.serverConfig.label,
       vcpu: i.serverConfig.vcpu,
@@ -43,29 +58,53 @@ export default async function InstancesPage() {
     }))
 
   return (
-    <div className="space-y-6 max-w-5xl">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--text-primary)]">
-            Instances
-          </h1>
-          <p className="text-[var(--text-secondary)] mt-1 text-sm">All your deployed AI agents</p>
-        </div>
-        <Link href="/dashboard/deploy" className="btn-gradient !py-2.5 !px-5 !text-sm">
-          + Deploy New
-        </Link>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Instances"
+        description="All your deployed AI agents"
+        actions={
+          <Button
+            variant="gradient"
+            size="pill"
+            render={
+              <Link href="/dashboard/deploy">
+                <Plus data-icon="inline-start" />
+                Deploy New
+              </Link>
+            }
+          />
+        }
+      />
 
       {items.length === 0 ? (
-        <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-12 text-center">
-          <p className="text-[var(--text-secondary)] mb-4">No instances yet.</p>
-          <Link href="/dashboard/deploy" className="btn-gradient inline-flex text-sm px-6 py-3">
-            Deploy Agent
-          </Link>
-        </div>
+        <Card>
+          <CardContent className="py-8">
+            <Empty>
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Bot />
+                </EmptyMedia>
+                <EmptyTitle>No instances yet</EmptyTitle>
+                <EmptyDescription>Deploy your first agent to populate this list.</EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <Button
+                  variant="gradient"
+                  size="pill"
+                  render={
+                    <Link href="/dashboard/deploy">
+                      <Plus data-icon="inline-start" />
+                      Deploy Agent
+                    </Link>
+                  }
+                />
+              </EmptyContent>
+            </Empty>
+          </CardContent>
+        </Card>
       ) : (
         <InstancesFilter items={items} />
       )}
-    </div>
+    </PageContainer>
   )
 }

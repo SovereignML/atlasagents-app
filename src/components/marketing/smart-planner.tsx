@@ -41,10 +41,10 @@ export function SmartPlanner() {
             exit={{ opacity: 0, scale: 0.98 }}
             transition={{ duration: 0.3, ease: easing.outExpo }}
           >
-            <h3 className="text-xl md:text-2xl font-bold text-[var(--text-primary)] mb-2">
+            <h3 className="text-xl md:text-2xl font-bold text-text-loud mb-2">
               What should your agent do?
             </h3>
-            <p className="text-sm text-[var(--text-secondary)] mb-6">
+            <p className="text-sm text-text-secondary mb-6">
               Select a task. We configure the rest.
             </p>
 
@@ -53,7 +53,7 @@ export function SmartPlanner() {
                 <button
                   key={uc.agentSlug}
                   onClick={() => setSelected(uc.agentSlug)}
-                  className="px-4 py-2 text-sm rounded-full border border-[var(--glass-border)] bg-transparent text-[var(--text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] hover:bg-[var(--color-primary)]/5 transition-all duration-200 cursor-pointer"
+                  className="px-4 py-2 text-sm rounded-full border border-border-ghost bg-transparent text-text-secondary hover:border-accent-blue-rest hover:text-accent-blue-rest hover:bg-accent-blue-rest/5 transition-all duration-200 cursor-pointer"
                 >
                   {uc.label}
                 </button>
@@ -71,7 +71,7 @@ export function SmartPlanner() {
             <div className="flex items-center justify-between mb-6">
               <button
                 onClick={() => setSelected(null)}
-                className="text-xs text-[var(--text-muted)] hover:text-[var(--color-primary)] transition-colors cursor-pointer"
+                className="text-xs text-text-muted hover:text-accent-blue-rest transition-colors cursor-pointer"
               >
                 &larr; back
               </button>
@@ -81,15 +81,15 @@ export function SmartPlanner() {
               <div className="flex flex-col md:flex-row gap-8">
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-4">
-                    <div className="w-10 h-10 rounded-xl bg-[var(--color-primary)]/10 flex items-center justify-center">
-                      <SelectedIcon className="w-5 h-5 text-[var(--color-primary)]" />
+                    <div className="w-10 h-10 rounded-xl bg-accent-blue-rest/10 flex items-center justify-center">
+                      <SelectedIcon className="w-5 h-5 text-accent-blue-rest" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-bold text-[var(--text-primary)]">{selectedAgent.name}</h3>
-                      <p className="text-xs text-[var(--text-muted)]">Recommended agent</p>
+                      <h3 className="text-lg font-bold text-text-loud">{selectedAgent.name}</h3>
+                      <p className="text-xs text-text-muted">Recommended agent</p>
                     </div>
                   </div>
-                  <p className="text-sm text-[var(--text-secondary)] leading-relaxed mb-6">
+                  <p className="text-sm text-text-secondary leading-relaxed mb-6">
                     {selectedAgent.description}
                   </p>
                   <div className="flex flex-wrap gap-3">
@@ -103,7 +103,7 @@ export function SmartPlanner() {
                       href={BRANDING.demoUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 text-sm px-6 py-3 rounded-full border border-[var(--glass-border)] text-[var(--text-primary)] hover:border-[var(--color-primary)] transition-colors"
+                      className="inline-flex items-center gap-2 text-sm px-6 py-3 rounded-full border border-border-ghost text-text-loud hover:border-accent-blue-rest transition-colors"
                     >
                       Talk to an expert
                     </a>
@@ -112,14 +112,14 @@ export function SmartPlanner() {
 
                 {/* Config preview */}
                 <div className="md:w-[280px] shrink-0">
-                  <div className="rounded-xl bg-[var(--code-bg)] border border-[var(--border-color)] p-4 font-mono text-xs">
-                    <div className="text-[var(--text-muted)] mb-2">config.yml</div>
-                    <div className="text-[var(--color-primary)]">agent: {selectedAgent.slug}</div>
-                    <div className="text-[var(--text-primary)]">compute: auto-scaled</div>
-                    <div className="text-[var(--text-primary)]">monitoring: enabled</div>
-                    <div className="text-[var(--text-primary)]">privacy: strict</div>
-                    <div className="text-[var(--text-primary)]">region: auto</div>
-                    <span className="inline-block w-1.5 h-3 bg-[var(--color-primary)] animate-[type-cursor_1s_step-end_infinite] ml-0.5" />
+                  <div className="rounded-xl bg-[var(--code-bg)] border border-border-muted p-4 font-mono text-xs">
+                    <div className="text-text-muted mb-2">config.yml</div>
+                    <div className="text-accent-blue-rest">agent: {selectedAgent.slug}</div>
+                    <div className="text-text-loud">compute: auto-scaled</div>
+                    <div className="text-text-loud">monitoring: enabled</div>
+                    <div className="text-text-loud">privacy: strict</div>
+                    <div className="text-text-loud">region: auto</div>
+                    <span className="inline-block w-1.5 h-3 bg-accent-blue-rest animate-[type-cursor_1s_step-end_infinite] ml-0.5" />
                   </div>
                 </div>
               </div>

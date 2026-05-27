@@ -17,15 +17,11 @@
 import "dotenv/config"
 import { LinodeProvider } from "../src/lib/linode"
 import {
-  buildBootstrapScript,
   sshWaitReady,
   sshRun,
   sshPollBootstrap,
 } from "../src/lib/ssh"
-import {
-  OPENCLAW_VERSION,
-  OPENCLAW_VPS_MIN_NODE,
-} from "../src/lib/openclaw"
+import { openclawRuntime } from "../src/lib/runtimes/openclaw"
 import crypto from "node:crypto"
 
 const BAKE_REGION = process.env.BAKE_REGION ?? "us-east"
@@ -38,9 +34,9 @@ async function main() {
 
   console.log(`[bake] Creating temporary Linode (${BAKE_PLAN} in ${BAKE_REGION})...`)
 
-  const bootstrapScript = buildBootstrapScript({
-    openclawVersion: OPENCLAW_VERSION(),
-    minNodeVersion: OPENCLAW_VPS_MIN_NODE,
+  // The golden image bakes the OpenClaw runtime (Node + Caddy + openclaw).
+  const bootstrapScript = openclawRuntime.renderBootstrap({
+    gatewayPort: openclawRuntime.gatewayPort,
   })
 
   const publicKey = process.env.SSH_FLEET_PUBLIC_KEY
@@ -100,7 +96,7 @@ async function main() {
     linodeId: vm.id,
     diskId,
     label: `sovereignml-golden-${new Date().toISOString().slice(0, 10)}`,
-    description: `Node ${OPENCLAW_VPS_MIN_NODE}+, Caddy, OpenClaw ${OPENCLAW_VERSION()}, Ubuntu 24.04`,
+    description: `Node ${openclawRuntime.minNode}+, Caddy, OpenClaw ${openclawRuntime.version()}, Ubuntu 24.04`,
     tags: ["sovereignml", "golden"],
   })
 

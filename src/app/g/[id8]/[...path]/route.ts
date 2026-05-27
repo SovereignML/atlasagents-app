@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { db, like, instances } from "@/db"
+import { db, eq, instances } from "@/db"
 
 /**
  * Path-based gateway: /g/<id8>/<...> proxies to the bot's container at
@@ -34,12 +34,17 @@ function buildHeaders(req: NextRequest, botToken: string): Headers {
 
 async function handle(req: NextRequest, params: { id8: string; path: string[] }) {
   const id8 = params.id8
-  if (!id8 || id8.length < 4) {
-    return NextResponse.json({ error: "invalid id8" }, { status: 400 })
+  // Require the full cuid2 (24 chars). Short prefix matching turned the gateway
+  // into an oracle: a 4-char `like(${id8}%)` lookup with distinct 404 ("not
+  // found") vs 409 ("ambiguous") responses lets an attacker enumerate the
+  // entire fleet in minutes. cuid2 has no UI today that uses short prefixes,
+  // so requiring the full id costs nothing.
+  if (!id8 || id8.length < 24) {
+    return NextResponse.json({ error: "not found" }, { status: 404 })
   }
 
-  const candidates = await db.query.instances.findMany({
-    where: like(instances.id, `${id8}%`),
+  const inst = await db.query.instances.findFirst({
+    where: eq(instances.id, id8),
     columns: {
       id: true,
       status: true,
@@ -47,15 +52,10 @@ async function handle(req: NextRequest, params: { id8: string; path: string[] })
       containerPort: true,
       botToken: true,
     },
-    limit: 2,
   })
-  if (candidates.length === 0) {
+  if (!inst) {
     return NextResponse.json({ error: "not found" }, { status: 404 })
   }
-  if (candidates.length > 1) {
-    return NextResponse.json({ error: "ambiguous id8 — use a longer prefix" }, { status: 409 })
-  }
-  const inst = candidates[0]
   if (inst.status === "deleted") {
     return NextResponse.json({ error: "not found" }, { status: 404 })
   }

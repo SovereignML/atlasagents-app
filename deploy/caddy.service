@@ -1,0 +1,35 @@
+; systemd unit for Caddy fronting the SovereignML dashboard.
+;
+; Most installs use the official Caddy apt/yum package, which already ships a
+; caddy.service reading /etc/caddy/Caddyfile — in that case just drop
+; deploy/Caddyfile at /etc/caddy/Caddyfile and `systemctl reload caddy`.
+;
+; Use THIS unit only for a manual (non-packaged) Caddy binary install:
+;   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+;   sudo cp deploy/caddy.service /etc/systemd/system/
+;   sudo systemctl daemon-reload
+;   sudo systemctl enable --now caddy
+;   journalctl -u caddy -f
+;
+; Assumes the `caddy` binary at /usr/bin/caddy and a `caddy` user/group exist.
+
+[Unit]
+Description=Caddy (white-label dashboard reverse proxy)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=caddy
+Group=caddy
+ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/Caddyfile
+ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force
+TimeoutStopSec=15
+LimitNOFILE=1048576
+; Caddy needs to bind :80 and :443 as a non-root user.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

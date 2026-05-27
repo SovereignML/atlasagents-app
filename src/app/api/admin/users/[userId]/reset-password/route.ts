@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { db, eq, users } from "@/db"
 import { hashPassword } from "@/lib/password"
+import { logAuditEvent } from "@/lib/audit"
 import { z } from "zod"
 
 const resetPasswordSchema = z.object({
@@ -46,6 +47,14 @@ export async function POST(
       .update(users)
       .set({ hashedPassword })
       .where(eq(users.id, userId))
+
+    await logAuditEvent({
+      userId: session.user.id as string,
+      action: "admin.reset_password",
+      targetType: "user",
+      targetId: userId,
+      targetLabel: user.email ?? undefined,
+    })
 
     return NextResponse.json({ message: "Password reset successfully" })
   } catch (error) {

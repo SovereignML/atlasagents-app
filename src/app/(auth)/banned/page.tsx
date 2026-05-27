@@ -1,32 +1,47 @@
 import Link from "next/link"
+import { Ban } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 
 export default function BannedPage() {
   return (
-    <div className="text-center space-y-6 max-w-md mx-auto">
-      <div className="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center mx-auto">
-        <svg className="w-8 h-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-        </svg>
-      </div>
-      <h1 className="text-2xl font-bold text-[var(--text-primary)]">Account Suspended</h1>
-      <p className="text-[var(--text-secondary)] leading-relaxed">
-        Your account has been suspended. If you believe this is a mistake,
-        please contact our support team for assistance.
-      </p>
-      <div className="flex flex-col gap-3 pt-2">
-        <Link
-          href="/community"
-          className="bg-blue-600 hover:bg-blue-500 text-[var(--text-primary)] font-medium px-6 py-3 rounded-xl transition-colors text-sm"
-        >
-          Contact Support
-        </Link>
-        <Link
-          href="/"
-          className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-sm transition-colors"
-        >
-          Back to Home
-        </Link>
-      </div>
-    </div>
+    <Card className="w-full">
+      <CardHeader className="items-center text-center">
+        <div className="mx-auto flex size-16 items-center justify-center rounded-full border border-destructive/20 bg-destructive/10">
+          <Ban className="size-8 text-destructive" />
+        </div>
+        <CardTitle className="text-2xl font-bold">Account Suspended</CardTitle>
+        <CardDescription className="text-balance">
+          Your account has been suspended. If you believe this is a mistake, please contact our
+          support team for assistance.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col gap-3">
+          <Button
+            variant="gradient"
+            size="pill"
+            className="w-full"
+            render={<Link href="/community" />}
+          >
+            Contact Support
+          </Button>
+          <Button
+            variant="ghost"
+            className="w-full text-muted-foreground"
+            render={<Link href="/" />}
+          >
+            Back to Home
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   )
 }

@@ -1,8 +1,20 @@
 import { NodeSSH } from "node-ssh"
+import { db, instances, eq } from "@/db"
+import { BOOTSTRAP_LOG, BOOTSTRAP_STATUS } from "./runtimes/bootstrap"
 
 export type SshTarget = {
   host: string
   username?: string
+  /** SSH port. Defaults to 22 (managed VPS); BYOS servers may use a custom port. */
+  port?: number
+  /**
+   * Instance ID for host-key pinning. When set, the first connect captures
+   * the remote host fingerprint and pins it on `instances.sshHostFingerprint`;
+   * subsequent connects verify against the pinned value (TOFU). When unset,
+   * connections accept any host key — only acceptable for the shared-host
+   * bootstrap path which has no instance row yet.
+   */
+  instanceId?: string
 }
 
 function loadPrivateKey(): string {
@@ -31,9 +43,14 @@ export function isValidPem(value: string): boolean {
 }
 
 async function connect(target: SshTarget): Promise<NodeSSH> {
+  if (target.instanceId) {
+    return connectAndPin(target, target.instanceId)
+  }
+  // Legacy path — no instance to pin against (shared-host bootstrap).
   const ssh = new NodeSSH()
   await ssh.connect({
     host: target.host,
+    port: target.port ?? 22,
     username: target.username ?? "root",
     privateKey: loadPrivateKey(),
     readyTimeout: 20_000,
@@ -43,7 +60,129 @@ async function connect(target: SshTarget): Promise<NodeSSH> {
   return ssh
 }
 
+/**
+ * Connect AND enforce host-key pinning via TOFU.
+ *
+ * On the first successful connect for a given instance, we capture the remote
+ * host's SHA256 fingerprint and store it on `instances.sshHostFingerprint`.
+ * On every subsequent connect we compare the observed fingerprint against the
+ * pinned one — mismatch means the host changed (MITM, reprovisioned VM, or
+ * compromised network path) and we abort with a logged error.
+ *
+ * Without this, every SSH call to a Linode VM accepts whatever host key the
+ * other side presents — an attacker on the network path could swap their own
+ * key in and capture the fleet private key + every command we send as root.
+ */
+async function connectAndPin(target: SshTarget, instanceId: string): Promise<NodeSSH> {
+  const ssh = new NodeSSH()
+  let observed: string | null = null
+  await ssh.connect({
+    host: target.host,
+    port: target.port ?? 22,
+    username: target.username ?? "root",
+    privateKey: loadPrivateKey(),
+    hostHash: "sha256",
+    // hostVerifier runs before the handshake completes. We accept the key
+    // unconditionally here and check it against the pin AFTER connect; this
+    // lets us write a clear "mismatch" error rather than ssh2's terse
+    // "all configured authentication methods failed" on a fingerprint reject.
+    hostVerifier: (hash: string) => {
+      observed = `sha256:${hash}`
+      return true
+    },
+    readyTimeout: 20_000,
+    keepaliveInterval: 10_000,
+    keepaliveCountMax: 3,
+  })
+
+  if (!observed) {
+    ssh.dispose()
+    throw new Error(`SSH host fingerprint not observed for instance ${instanceId}`)
+  }
+
+  const inst = await db.query.instances.findFirst({
+    where: eq(instances.id, instanceId),
+    columns: { sshHostFingerprint: true },
+  })
+
+  if (inst?.sshHostFingerprint) {
+    if (inst.sshHostFingerprint !== observed) {
+      ssh.dispose()
+      throw new Error(
+        `SSH host fingerprint mismatch for instance ${instanceId}: ` +
+          `expected ${inst.sshHostFingerprint}, got ${observed}. ` +
+          `Possible MITM, reprovisioned VM, or stale pin.`,
+      )
+    }
+  } else {
+    // First connect — pin it. Race with a concurrent first-connect is benign
+    // because two TOFU writers see the same observed value.
+    await db
+      .update(instances)
+      .set({ sshHostFingerprint: observed })
+      .where(eq(instances.id, instanceId))
+  }
+
+  return ssh
+}
+
+/**
+ * Transient SSH errors worth retrying. Excludes auth failures and host-key
+ * mismatches — those are not transient and a retry would waste time or risk
+ * an account lockout. "Connection lost before handshake" is the ssh2 error
+ * fired when sshd closes the TCP socket during version exchange (typically
+ * MaxStartups rate-limit on a freshly-provisioned VM).
+ */
+const TRANSIENT_SSH_ERROR_PATTERNS = [
+  "Connection lost before handshake",
+  "Timed out while waiting for handshake",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "EPIPE",
+] as const
+
+function isTransientSshError(err: unknown): boolean {
+  const code = (err as { code?: string })?.code
+  if (code && (TRANSIENT_SSH_ERROR_PATTERNS as readonly string[]).includes(code)) {
+    return true
+  }
+  const msg = err instanceof Error ? err.message : String(err)
+  return TRANSIENT_SSH_ERROR_PATTERNS.some((p) => msg.includes(p))
+}
+
+/**
+ * Bounded retry around `connect` for transient handshake/socket failures.
+ * 3 attempts total with ~1s, ~4s backoff. Non-transient errors (auth,
+ * host-key mismatch) fail immediately on the first attempt.
+ */
+async function connectWithRetry(target: SshTarget): Promise<NodeSSH> {
+  const backoffMs = [1_000, 4_000]
+  for (let attempt = 0; attempt <= backoffMs.length; attempt++) {
+    try {
+      return await connect(target)
+    } catch (err) {
+      const isLast = attempt === backoffMs.length
+      if (isLast || !isTransientSshError(err)) throw err
+      await new Promise((r) => setTimeout(r, backoffMs[attempt]))
+    }
+  }
+  // Unreachable — loop always returns or throws.
+  throw new Error("connectWithRetry: unreachable")
+}
+
 export type SshRunResult = { stdout: string; stderr: string; code: number | null }
+
+/**
+ * Default wall-clock budget for a single SSH command when the caller doesn't
+ * specify one. Without this, a remote step that hangs while the channel stays
+ * open (keepalives only detect dead TCP, not application stalls) would block
+ * the HTTP request indefinitely. Long operations (installs, bootstrap polling)
+ * pass their own larger explicit timeouts and are unaffected.
+ */
+const DEFAULT_SSH_CMD_TIMEOUT_MS = 120_000
 
 /**
  * Wall-clock guard around `ssh.execCommand`. node-ssh keepalives detect dead
@@ -84,9 +223,14 @@ export async function sshRun(
   command: string,
   opts: { timeoutMs?: number } = {},
 ): Promise<SshRunResult> {
-  const ssh = await connect(target)
+  const ssh = await connectWithRetry(target)
   try {
-    return await execWithTimeout(ssh, command, opts.timeoutMs, "ssh command")
+    return await execWithTimeout(
+      ssh,
+      command,
+      opts.timeoutMs ?? DEFAULT_SSH_CMD_TIMEOUT_MS,
+      "ssh command",
+    )
   } finally {
     ssh.dispose()
   }
@@ -103,9 +247,14 @@ export async function sshRunScript(
 ): Promise<SshRunResult> {
   const b64 = Buffer.from(bashScript, "utf8").toString("base64")
   const command = `echo '${b64}' | base64 -d | bash`
-  const ssh = await connect(target)
+  const ssh = await connectWithRetry(target)
   try {
-    return await execWithTimeout(ssh, command, opts.timeoutMs, "ssh script")
+    return await execWithTimeout(
+      ssh,
+      command,
+      opts.timeoutMs ?? DEFAULT_SSH_CMD_TIMEOUT_MS,
+      "ssh script",
+    )
   } finally {
     ssh.dispose()
   }
@@ -217,195 +366,17 @@ function shellEscape(value: string): string {
 /* VPS bootstrap — server-side script, immune to SSH drops             */
 /* ------------------------------------------------------------------ */
 
-export type BootstrapOpts = {
-  openclawVersion: string
-  /** Semver minimum; must match OpenClaw CLI (see OPENCLAW_VPS_MIN_NODE). */
-  minNodeVersion: string
-  cfOriginCertPem?: string
-  cfOriginKeyPem?: string
-}
+// Bootstrap script generation moved into runtime adapters
+// (src/lib/runtimes/bootstrap.ts + each runtime's renderBootstrap). This file
+// only retains `sshPollBootstrap` — the matching reader side that waits for
+// the bootstrap to finish — and reuses the shared status/log paths.
 
-const BOOTSTRAP_STATUS = "/tmp/bootstrap.status"
-const BOOTSTRAP_LOG = "/var/log/bootstrap.log"
-
-export function buildBootstrapScript(opts: BootstrapOpts): string {
-  let cfBlock = ""
-  if (opts.cfOriginCertPem && opts.cfOriginKeyPem) {
-    const certB64 = Buffer.from(opts.cfOriginCertPem, "utf8").toString("base64")
-    const keyB64 = Buffer.from(opts.cfOriginKeyPem, "utf8").toString("base64")
-    cfBlock = `
-step "cf_origin_cert"
-install -d -m 0750 -o caddy -g caddy /etc/caddy/cf
-echo '${certB64}' | base64 -d > /etc/caddy/cf/origin.pem
-echo '${keyB64}' | base64 -d > /etc/caddy/cf/origin.key
-chown caddy:caddy /etc/caddy/cf/origin.pem /etc/caddy/cf/origin.key
-chmod 0640 /etc/caddy/cf/origin.pem
-chmod 0600 /etc/caddy/cf/origin.key
-
-install -d -m 0755 /etc/caddy/snippets
-cat > /etc/caddy/snippets/sovereignclaw.caddy <<'CFSNIP'
-*.sovereignclaw.xyz {
-  tls /etc/caddy/cf/origin.pem /etc/caddy/cf/origin.key
-  reverse_proxy 127.0.0.1:18789
-}
-CFSNIP
-`
-  }
-
-  return `#!/bin/bash
-set -euo pipefail
-
-LOG="${BOOTSTRAP_LOG}"
-STATUS="${BOOTSTRAP_STATUS}"
-CURRENT_STEP="init"
-
-cleanup() {
-  local ec=$?
-  if [ $ec -ne 0 ]; then
-    echo "failed:\${CURRENT_STEP}" > "$STATUS"
-    echo "=== BOOTSTRAP FAILED at step \${CURRENT_STEP} (exit $ec) ===" >> "$LOG"
-  fi
-}
-trap cleanup EXIT
-
-echo "running" > "$STATUS"
-exec > >(tee -a "$LOG") 2>&1
-echo "=== Bootstrap started at $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
-
-step() { CURRENT_STEP="$1"; echo "=== STEP: $1 ===" ; }
-
-# P1 transient: mirror flakiness
-APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=120"
-OPENCLAW_PKG_SPEC=openclaw@${shellEscape(opts.openclawVersion)}
-
-install_openclaw_pkg() {
-  local max=3 a=1
-  while [ "$a" -le "$max" ]; do
-    echo "=== npm install attempt $a/$max ==="
-    if SHARP_IGNORE_GLOBAL_LIBVIPS=1 npm install -g --no-audit --no-fund --loglevel=warn --engine-strict "$OPENCLAW_PKG_SPEC"; then
-      return 0
-    fi
-    if [ "$a" -eq "$max" ]; then
-      return 1
-    fi
-    if [ "$a" -eq $((max - 1)) ]; then
-      npm cache clean --force 2>/dev/null || true
-    fi
-    sleep $((5 * a))
-    a=$((a + 1))
-  done
-  return 1
-}
-
-export DEBIAN_FRONTEND=noninteractive
-export NEEDRESTART_MODE=a
-
-step "apt_update"
-apt-get $APT_OPTS update -y
-
-step "build_deps"
-apt-get $APT_OPTS install -y ca-certificates curl gnupg ufw git debian-keyring debian-archive-keyring apt-transport-https
-
-step "caddy_repo"
-curl --retry 5 --retry-delay 3 -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl --retry 5 --retry-delay 3 -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
-
-step "nodejs_repo"
-curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors https://deb.nodesource.com/setup_22.x | bash -
-
-step "install_nodejs_caddy"
-apt-get $APT_OPTS install -y nodejs caddy
-node -v && npm -v
-
-step "verify_node"
-export OPENCLAW_MIN_NODE=${shellEscape(opts.minNodeVersion)}
-node <<'VERIFYNODE'
-const min = process.env.OPENCLAW_MIN_NODE
-if (!min) {
-  console.error("OPENCLAW_MIN_NODE not set")
-  process.exit(1)
-}
-const cur = process.version.slice(1)
-const parts = (s) => s.split(".").map((x) => parseInt(x, 10) || 0)
-const a = parts(cur)
-const b = parts(min)
-const n = Math.max(a.length, b.length)
-for (let i = 0; i < n; i++) {
-  const ai = a[i] ?? 0
-  const bi = b[i] ?? 0
-  if (ai > bi) process.exit(0)
-  if (ai < bi) {
-    console.error(
-      "openclaw: Node.js " + min + "+ is required (current: v" + cur + ").",
-    )
-    process.exit(1)
-  }
-}
-process.exit(0)
-VERIFYNODE
-
-step "create_user"
-id openclaw >/dev/null 2>&1 || useradd --system --home-dir /opt/openclaw --shell /usr/sbin/nologin openclaw
-mkdir -p /opt/openclaw
-chown -R openclaw:openclaw /opt/openclaw
-mkdir -p /var/tmp/openclaw-compile-cache
-chown openclaw:openclaw /var/tmp/openclaw-compile-cache
-
-step "swap"
-if [ ! -f /swapfile ]; then
-  fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
-  chmod 600 /swapfile
-  mkswap /swapfile
-  swapon /swapfile
-  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
-fi
-
-step "install_openclaw"
-export SHARP_IGNORE_GLOBAL_LIBVIPS=1
-install_openclaw_pkg
-
-step "verify_openclaw_cli"
-openclaw --version
-
-step "caddy_cf_snippets"
-${cfBlock}
-step "firewall"
-ufw allow 22/tcp || true
-ufw allow 80/tcp || true
-ufw allow 443/tcp || true
-yes | ufw enable || true
-
-echo "=== Bootstrap completed at $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
-echo "done" > "$STATUS"
-`
-}
-
-/**
- * Upload a bootstrap script and run it server-side with nohup.
- * The script is immune to SSH connection drops — it runs as a local
- * process on the VM. We poll a status file for completion.
- */
-export async function sshBootstrapVps(
-  target: SshTarget,
-  opts: BootstrapOpts,
-): Promise<void> {
-  const script = buildBootstrapScript(opts)
-  await sshWriteFile(target, "/tmp/bootstrap.sh", script, { mode: "755" })
-  await sshRun(target, `nohup bash /tmp/bootstrap.sh > /dev/null 2>&1 &`)
-  await sshPollBootstrap(target)
-}
-
-/**
- * Poll the bootstrap status file until the script finishes or times out.
- * SSH connection errors during polling are swallowed — the script keeps
- * running server-side regardless.
- */
 /** Last bytes of bootstrap.log (must be end of file — apt/npm can emit huge lines). */
 const BOOTSTRAP_LOG_TAIL_BYTES = 24_000
 
 export async function sshPollBootstrap(
   target: SshTarget,
-  /** Allow npm retries + slow mirrors (see bootstrap install_openclaw_pkg). */
+  /** Allow npm retries + slow mirrors (see bootstrap install_runtime_pkg). */
   timeoutMs = 1_200_000,
   pollMs = 5_000,
 ): Promise<void> {
@@ -523,7 +494,7 @@ function buildDockerRunCmd(opts: DockerRunOpts): string {
 
 /** Pull-then-run. On name collision we rm -f first so retries succeed. */
 export async function sshDockerRun(target: SshTarget, opts: DockerRunOpts): Promise<SshRunResult> {
-  const ssh = await connect(target)
+  const ssh = await connectWithRetry(target)
   try {
     if (opts.pullFirst !== false) {
       await ssh.execCommand(`docker pull ${shellEscape(opts.image)}`)
@@ -585,7 +556,6 @@ export async function sshConfigureUfw(target: SshTarget): Promise<SshRunResult> 
     "ufw allow 22/tcp || true",
     "ufw allow 80/tcp || true",
     "ufw allow 443/tcp || true",
-    "ufw allow 18789/tcp || true",
     "yes | ufw enable || true",
   ].join(" && ")
   return sshRun(target, script)

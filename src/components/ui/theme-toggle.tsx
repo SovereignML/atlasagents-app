@@ -2,28 +2,36 @@
 
 import { useTheme } from "next-themes"
 import { useEffect, useState } from "react"
-import { Sun, Moon } from "lucide-react"
+import { Moon, Sun } from "lucide-react"
 
-export function ThemeToggle({ className = "" }: { className?: string }) {
+import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
+
+export function ThemeToggle({ className }: { className?: string }) {
   const { theme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
 
-  useEffect(() => setMounted(true), [])
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true)
+  }, [])
 
   if (!mounted) {
-    return <div className={`w-12 h-12 ${className}`} />
+    return <Button variant="ghost" size="icon-sm" className={className} aria-hidden />
   }
 
   const isDark = theme === "dark"
 
   return (
-    <button
+    <Button
+      variant="ghost"
+      size="icon-sm"
       onClick={() => setTheme(isDark ? "light" : "dark")}
-      className={`w-12 h-12 flex items-center justify-center rounded-full bg-[var(--card-bg)] border border-[var(--border-color)] text-[var(--text-primary)] shadow-[var(--shadow-sm)] hover:scale-105 transition-transform duration-200 ${className}`}
+      className={cn(className)}
       aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
       title={isDark ? "Light mode" : "Dark mode"}
     >
-      {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-    </button>
+      {isDark ? <Sun /> : <Moon />}
+    </Button>
   )
 }

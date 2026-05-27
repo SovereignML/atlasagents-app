@@ -2,9 +2,35 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { Trash2 } from "lucide-react"
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { PageContainer, PageHeader } from "@/components/layout/page-container"
+import { Skeleton } from "@/components/ui/skeleton"
+import { TwoFactorCard } from "@/components/auth/two-factor-card"
+import { NotificationPreferencesCard } from "@/components/notifications/notification-preferences-card"
 
 interface AccountData {
   id: string
@@ -24,13 +50,11 @@ export default function AccountPage() {
   const [account, setAccount] = useState<AccountData | null>(null)
   const [loading, setLoading] = useState(true)
 
-  // Profile state
   const [name, setName] = useState("")
   const [nameSuccess, setNameSuccess] = useState("")
   const [nameError, setNameError] = useState("")
   const [nameSaving, setNameSaving] = useState(false)
 
-  // Socials state
   const [telegramId, setTelegramId] = useState("")
   const [twitterHandle, setTwitterHandle] = useState("")
   const [discordId, setDiscordId] = useState("")
@@ -38,7 +62,6 @@ export default function AccountPage() {
   const [socialsError, setSocialsError] = useState("")
   const [socialsSaving, setSocialsSaving] = useState(false)
 
-  // Password state
   const [currentPassword, setCurrentPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
@@ -66,7 +89,7 @@ export default function AccountPage() {
           setDiscordId(data.discordId || "")
         }
       } catch {
-        // ignore
+        /* ignore */
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -91,7 +114,7 @@ export default function AccountPage() {
       const data = await res.json()
       if (res.ok) {
         setNameSuccess(data.message)
-        setAccount((prev) => prev ? { ...prev, name } : prev)
+        setAccount((prev) => (prev ? { ...prev, name } : prev))
       } else {
         setNameError(data.error)
       }
@@ -128,7 +151,7 @@ export default function AccountPage() {
         setCurrentPassword("")
         setNewPassword("")
         setConfirmPassword("")
-        setAccount((prev) => prev ? { ...prev, hasPassword: true } : prev)
+        setAccount((prev) => (prev ? { ...prev, hasPassword: true } : prev))
       } else {
         setPasswordError(data.error)
       }
@@ -152,7 +175,9 @@ export default function AccountPage() {
       const data = await res.json()
       if (res.ok) {
         setSocialsSuccess(data.message)
-        setAccount((prev) => prev ? { ...prev, telegramId, twitterHandle, discordId } : prev)
+        setAccount((prev) =>
+          prev ? { ...prev, telegramId, twitterHandle, discordId } : prev
+        )
       } else {
         setSocialsError(data.error)
       }
@@ -165,184 +190,205 @@ export default function AccountPage() {
 
   if (loading) {
     return (
-      <div className="space-y-8 max-w-2xl">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--text-primary)]">Account Settings</h1>
-          <p className="text-[var(--text-secondary)] mt-1">Manage your profile and security</p>
-        </div>
-        <div className="bg-[var(--card-bg)] backdrop-blur-xl border border-[var(--border-color)] rounded-2xl p-6">
-          <p className="text-[var(--text-secondary)]">Loading...</p>
-        </div>
-      </div>
+      <PageContainer>
+        <PageHeader
+          title="Account Settings"
+          description="Manage your profile and security"
+        />
+        <Card>
+          <CardContent className="space-y-3 py-6">
+            <Skeleton className="h-5 w-32" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-24" />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="space-y-3 py-6">
+            <Skeleton className="h-5 w-32" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+          </CardContent>
+        </Card>
+      </PageContainer>
     )
   }
 
   if (!account) {
     return (
-      <div className="space-y-8 max-w-2xl">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--text-primary)]">Account Settings</h1>
-          <p className="text-[var(--text-secondary)] mt-1">Manage your profile and security</p>
-        </div>
-        <div className="bg-[var(--card-bg)] backdrop-blur-xl border border-[var(--border-color)] rounded-2xl p-6">
-          <p className="text-red-400">Failed to load account data.</p>
-        </div>
-      </div>
+      <PageContainer>
+        <PageHeader
+          title="Account Settings"
+          description="Manage your profile and security"
+        />
+        <Alert variant="destructive">
+          <AlertDescription>Failed to load account data.</AlertDescription>
+        </Alert>
+      </PageContainer>
     )
   }
 
   return (
-    <div className="space-y-8 max-w-2xl">
-      <div>
-        <h1 className="text-2xl font-bold text-[var(--text-primary)]">Account Settings</h1>
-        <p className="text-[var(--text-secondary)] mt-1">Manage your profile and security</p>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Account Settings"
+        description="Manage your profile and security"
+      />
 
-      {/* Profile Section */}
-      <div className="bg-[var(--card-bg)] backdrop-blur-xl border border-[var(--border-color)] rounded-2xl p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-[var(--text-primary)]">Profile</h2>
-        <div className="space-y-2">
-          <Label className="text-[var(--text-secondary)] text-sm">Display Name</Label>
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="bg-[var(--card-bg)] border-[var(--border-color)] text-[var(--text-primary)]"
-            placeholder="Your name"
-          />
-        </div>
-        {nameSuccess && <p className="text-emerald-400 text-sm">{nameSuccess}</p>}
-        {nameError && <p className="text-red-400 text-sm">{nameError}</p>}
-        <Button
-          onClick={handleNameSave}
-          disabled={nameSaving}
-          className="bg-blue-600 hover:bg-blue-700"
-        >
-          {nameSaving ? "Saving..." : "Save Name"}
-        </Button>
-      </div>
-
-      {/* Security Section */}
-      <div className="bg-[var(--card-bg)] backdrop-blur-xl border border-[var(--border-color)] rounded-2xl p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-[var(--text-primary)]">Security</h2>
-        {account.hasPassword ? (
-          <>
-            <div className="space-y-2">
-              <Label className="text-[var(--text-secondary)] text-sm">Current Password</Label>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Profile</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="display-name">Display Name</FieldLabel>
               <Input
-                type="password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                className="bg-[var(--card-bg)] border-[var(--border-color)] text-[var(--text-primary)]"
-                placeholder="Enter current password"
+                id="display-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Your name"
               />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-[var(--text-secondary)] text-sm">New Password</Label>
+            </Field>
+          </FieldGroup>
+          {nameSuccess && (
+            <Alert>
+              <AlertDescription>{nameSuccess}</AlertDescription>
+            </Alert>
+          )}
+          {nameError && (
+            <Alert variant="destructive">
+              <AlertDescription>{nameError}</AlertDescription>
+            </Alert>
+          )}
+          <Button onClick={handleNameSave} disabled={nameSaving}>
+            {nameSaving ? "Saving..." : "Save Name"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Security</CardTitle>
+          {!account.hasPassword && (
+            <CardDescription>
+              You signed up with Google and don&apos;t have a password yet. Set one to enable
+              email/password login.
+            </CardDescription>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <FieldGroup>
+            {account.hasPassword && (
+              <Field>
+                <FieldLabel htmlFor="current-password">Current Password</FieldLabel>
+                <Input
+                  id="current-password"
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  placeholder="Enter current password"
+                />
+              </Field>
+            )}
+            <Field>
+              <FieldLabel htmlFor="new-password">New Password</FieldLabel>
               <Input
+                id="new-password"
                 type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                className="bg-[var(--card-bg)] border-[var(--border-color)] text-[var(--text-primary)]"
                 placeholder="Enter new password"
               />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-[var(--text-secondary)] text-sm">Confirm New Password</Label>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="confirm-password">Confirm New Password</FieldLabel>
               <Input
+                id="confirm-password"
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="bg-[var(--card-bg)] border-[var(--border-color)] text-[var(--text-primary)]"
                 placeholder="Confirm new password"
               />
-            </div>
-          </>
-        ) : (
-          <>
-            <p className="text-[var(--text-secondary)] text-sm">
-              You signed up with Google and don&apos;t have a password yet. Set one to enable email/password login.
-            </p>
-            <div className="space-y-2">
-              <Label className="text-[var(--text-secondary)] text-sm">New Password</Label>
-              <Input
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                className="bg-[var(--card-bg)] border-[var(--border-color)] text-[var(--text-primary)]"
-                placeholder="Enter new password"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-[var(--text-secondary)] text-sm">Confirm Password</Label>
-              <Input
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="bg-[var(--card-bg)] border-[var(--border-color)] text-[var(--text-primary)]"
-                placeholder="Confirm password"
-              />
-            </div>
-          </>
-        )}
-        {passwordSuccess && <p className="text-emerald-400 text-sm">{passwordSuccess}</p>}
-        {passwordError && <p className="text-red-400 text-sm">{passwordError}</p>}
-        <Button
-          onClick={handlePasswordSave}
-          disabled={passwordSaving}
-          className="bg-blue-600 hover:bg-blue-700"
-        >
-          {passwordSaving ? "Saving..." : account.hasPassword ? "Update Password" : "Set Password"}
-        </Button>
-      </div>
+            </Field>
+          </FieldGroup>
+          {passwordSuccess && (
+            <Alert>
+              <AlertDescription>{passwordSuccess}</AlertDescription>
+            </Alert>
+          )}
+          {passwordError && (
+            <Alert variant="destructive">
+              <AlertDescription>{passwordError}</AlertDescription>
+            </Alert>
+          )}
+          <Button onClick={handlePasswordSave} disabled={passwordSaving}>
+            {passwordSaving
+              ? "Saving..."
+              : account.hasPassword
+                ? "Update Password"
+                : "Set Password"}
+          </Button>
+        </CardContent>
+      </Card>
 
-      {/* Contact & Socials */}
-      <div className="bg-[var(--card-bg)] backdrop-blur-xl border border-[var(--border-color)] rounded-2xl p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-[var(--text-primary)]">Contact & Socials</h2>
-        <div className="space-y-2">
-          <Label className="text-[var(--text-secondary)] text-sm">Telegram</Label>
-          <Input
-            value={telegramId}
-            onChange={(e) => setTelegramId(e.target.value)}
-            className="bg-[var(--card-bg)] border-[var(--border-color)] text-[var(--text-primary)]"
-            placeholder="@username"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-[var(--text-secondary)] text-sm">Twitter / X</Label>
-          <Input
-            value={twitterHandle}
-            onChange={(e) => setTwitterHandle(e.target.value)}
-            className="bg-[var(--card-bg)] border-[var(--border-color)] text-[var(--text-primary)]"
-            placeholder="@handle"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-[var(--text-secondary)] text-sm">Discord</Label>
-          <Input
-            value={discordId}
-            onChange={(e) => setDiscordId(e.target.value)}
-            className="bg-[var(--card-bg)] border-[var(--border-color)] text-[var(--text-primary)]"
-            placeholder="username#1234"
-          />
-        </div>
-        {socialsSuccess && <p className="text-emerald-400 text-sm">{socialsSuccess}</p>}
-        {socialsError && <p className="text-red-400 text-sm">{socialsError}</p>}
-        <Button
-          onClick={handleSocialsSave}
-          disabled={socialsSaving}
-          className="bg-blue-600 hover:bg-blue-700"
-        >
-          {socialsSaving ? "Saving..." : "Save Socials"}
-        </Button>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Contact &amp; Socials</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="telegram">Telegram</FieldLabel>
+              <Input
+                id="telegram"
+                value={telegramId}
+                onChange={(e) => setTelegramId(e.target.value)}
+                placeholder="@username"
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="twitter">Twitter / X</FieldLabel>
+              <Input
+                id="twitter"
+                value={twitterHandle}
+                onChange={(e) => setTwitterHandle(e.target.value)}
+                placeholder="@handle"
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="discord">Discord</FieldLabel>
+              <Input
+                id="discord"
+                value={discordId}
+                onChange={(e) => setDiscordId(e.target.value)}
+                placeholder="username#1234"
+              />
+            </Field>
+          </FieldGroup>
+          {socialsSuccess && (
+            <Alert>
+              <AlertDescription>{socialsSuccess}</AlertDescription>
+            </Alert>
+          )}
+          {socialsError && (
+            <Alert variant="destructive">
+              <AlertDescription>{socialsError}</AlertDescription>
+            </Alert>
+          )}
+          <Button onClick={handleSocialsSave} disabled={socialsSaving}>
+            {socialsSaving ? "Saving..." : "Save Socials"}
+          </Button>
+        </CardContent>
+      </Card>
 
-      {/* Connected Accounts */}
-      <div className="bg-[var(--card-bg)] backdrop-blur-xl border border-[var(--border-color)] rounded-2xl p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-[var(--text-primary)]">Connected Accounts</h2>
-        <div className="flex items-center gap-3">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Connected Accounts</CardTitle>
+        </CardHeader>
+        <CardContent>
           {account.hasGoogle ? (
-            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--card-bg)] border border-[var(--border-color)] text-sm text-[var(--text-primary)]">
-              <svg className="w-4 h-4" viewBox="0 0 24 24">
+            <Badge variant="outline" className="gap-2 px-3 py-1.5">
+              <svg className="size-4" viewBox="0 0 24 24" aria-hidden>
                 <path
                   fill="currentColor"
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
@@ -361,96 +407,78 @@ export default function AccountPage() {
                 />
               </svg>
               Google Connected
-            </span>
+            </Badge>
           ) : (
-            <p className="text-[var(--text-secondary)] text-sm">No connected accounts</p>
+            <p className="text-sm text-muted-foreground">No connected accounts</p>
           )}
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
-      {/* Two-Factor */}
-      <div className="bg-[var(--card-bg)] backdrop-blur-xl border border-[var(--border-color)] rounded-2xl p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Two-Factor Authentication</h2>
-            <p className="text-[var(--text-secondary)] text-sm mt-1">Add an extra layer of security via TOTP app.</p>
-          </div>
-          <span className="text-[10px] uppercase tracking-[0.08em] font-mono px-2 py-0.5 border border-[var(--border-color)] text-[var(--text-secondary)]">
-            disabled
-          </span>
-        </div>
-        <Button className="bg-blue-600 hover:bg-blue-700">Enable 2FA</Button>
-        <p className="text-[10px] font-mono text-amber-400/80">⚠ TOTP enrollment + backup codes pending</p>
-      </div>
+      <TwoFactorCard />
 
-      {/* Active Sessions */}
-      <div className="bg-[var(--card-bg)] backdrop-blur-xl border border-[var(--border-color)] rounded-2xl p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-[var(--text-primary)]">Active Sessions</h2>
-          <button className="text-xs uppercase tracking-[0.08em] font-mono text-red-400 hover:underline">
-            Sign out all
-          </button>
-        </div>
-        <div className="space-y-2">
-          {[
-            { device: "MacBook Pro · Chrome", ip: "73.210.x.x", loc: "Brooklyn, US", current: true, last: "now" },
-            { device: "iPhone · Safari", ip: "73.210.x.x", loc: "Brooklyn, US", current: false, last: "3h ago" },
-            { device: "Linux · Firefox", ip: "51.158.x.x", loc: "Paris, FR", current: false, last: "2 days ago" },
-          ].map((s, i) => (
-            <div key={i} className="flex items-center justify-between py-2 border-b border-[var(--border-color)]/50 last:border-b-0">
-              <div>
-                <p className="text-sm text-[var(--text-primary)]">{s.device}</p>
-                <p className="text-[10px] font-mono text-[var(--text-secondary)]">
-                  {s.ip} · {s.loc} · {s.last}
-                </p>
-              </div>
-              {s.current ? (
-                <span className="text-[10px] uppercase tracking-[0.08em] font-mono text-[var(--accent-color)] border border-[var(--accent-color)]/40 px-2 py-0.5">
-                  current
-                </span>
-              ) : (
-                <button className="text-xs uppercase tracking-[0.08em] font-mono text-red-400 hover:underline">
-                  Revoke
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-        <p className="text-[10px] font-mono text-amber-400/80">⚠ session store pending</p>
-      </div>
+      <NotificationPreferencesCard />
 
-      {/* Account Info */}
-      <div className="bg-[var(--card-bg)] backdrop-blur-xl border border-[var(--border-color)] rounded-2xl p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-[var(--text-primary)]">Account Info</h2>
-        <div className="space-y-3">
-          <div>
-            <Label className="text-[var(--text-secondary)] text-sm">Email</Label>
-            <p className="text-[var(--text-primary)] mt-1">{account.email}</p>
-          </div>
-          <div>
-            <Label className="text-[var(--text-secondary)] text-sm">Member Since</Label>
-            <p className="text-[var(--text-primary)] mt-1">
-              {new Date(account.createdAt).toLocaleDateString("en-US", {
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              })}
-            </p>
-          </div>
-        </div>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Account Info</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <FieldGroup>
+            <Field>
+              <FieldLabel>Email</FieldLabel>
+              <FieldDescription className="text-foreground">{account.email}</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel>Member Since</FieldLabel>
+              <FieldDescription className="text-foreground">
+                {new Date(account.createdAt).toLocaleDateString("en-US", {
+                  year: "numeric",
+                  month: "long",
+                  day: "numeric",
+                })}
+              </FieldDescription>
+            </Field>
+          </FieldGroup>
+        </CardContent>
+      </Card>
 
-      {/* Delete Account */}
-      <div className="border border-red-500/30 bg-red-500/5 rounded-2xl p-6 space-y-3">
-        <h2 className="text-lg font-semibold text-red-400">Delete Account</h2>
-        <p className="text-[var(--text-secondary)] text-sm">
-          Permanently delete your account, all agents, subscriptions, and data. This cannot be undone.
-        </p>
-        <button className="px-4 py-2 text-xs uppercase tracking-[0.08em] font-mono bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20">
-          Delete Account
-        </button>
-        <p className="text-[10px] font-mono text-amber-400/80">⚠ deletion workflow + grace period pending</p>
-      </div>
-    </div>
+      <Card className="border-destructive/30 bg-destructive/5">
+        <CardHeader>
+          <CardTitle className="text-lg text-destructive">Delete Account</CardTitle>
+          <CardDescription>
+            Permanently delete your account, all agents, subscriptions, and data. This cannot be
+            undone.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <AlertDialog>
+            <AlertDialogTrigger
+              render={
+                <Button variant="destructive">
+                  <Trash2 data-icon="inline-start" />
+                  Delete Account
+                </Button>
+              }
+            />
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete your account?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  All agents, subscriptions, and data will be permanently removed. This cannot be
+                  undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction>I understand, delete</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+          <p className="font-mono text-[10px] text-amber-500/80">
+            ⚠ deletion workflow + grace period pending
+          </p>
+        </CardContent>
+      </Card>
+    </PageContainer>
   )
 }

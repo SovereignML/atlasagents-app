@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import crypto from "node:crypto"
 import { auth } from "@/auth"
 import { db, instances, instanceLogs, eq } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
@@ -71,12 +72,17 @@ export async function POST(
     )
   }
 
-  // Set webhook to our centralized router.
-  const webhookUrl = `${GATEWAY_BASE()}/tg/${instance.botToken}`
+  // Set webhook to our centralized router. The URL carries a non-secret random
+  // id (never the bot token — that leaks into proxy/CDN logs), and Telegram
+  // echoes our secret_token back in the X-Telegram-Bot-Api-Secret-Token header
+  // so the receiver can reject spoofed updates.
+  const webhookId = crypto.randomBytes(16).toString("hex")
+  const webhookSecret = crypto.randomBytes(24).toString("hex")
+  const webhookUrl = `${GATEWAY_BASE()}/tg/${webhookId}`
   const setHook = await telegramApi<{ ok: boolean; description?: string }>(
     body.token,
     "setWebhook",
-    { url: webhookUrl, allowed_updates: ["message"] }
+    { url: webhookUrl, allowed_updates: ["message"], secret_token: webhookSecret }
   )
   if (!setHook.ok) {
     return NextResponse.json(
@@ -91,6 +97,8 @@ export async function POST(
     .set({
       telegramBotTokenEnc: encryptSecret(body.token),
       telegramUsername: me.result.username ?? null,
+      telegramWebhookId: webhookId,
+      telegramWebhookSecretEnc: encryptSecret(webhookSecret),
       interfaceKind: "telegram",
     })
     .where(eq(instances.id, instanceId))

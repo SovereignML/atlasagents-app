@@ -32,27 +32,26 @@ export function CapabilityTimeline() {
     <section id="features" className="py-32 overflow-hidden">
       <div className="max-w-[1100px] mx-auto px-8">
         <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, amount: 0.3 }}
+          initial={{ opacity: 0, y: 48, filter: "blur(4px)" }}
+          whileInView={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+          viewport={{ once: true, amount: 0.15 }}
           transition={{ duration: 0.8, ease: easing.outExpo }}
           className="text-center mb-20"
         >
-          <p className="text-xs text-[var(--color-primary)] uppercase tracking-[0.2em] mb-4 font-medium">Capabilities</p>
-          <h2 className="text-[clamp(2rem,4vw,48px)] font-bold text-[var(--text-primary)] tracking-[-1.5px] mb-5">
+          <p className="text-xs text-accent-blue-rest uppercase tracking-[0.2em] mb-4 font-medium">Capabilities</p>
+          <h2 className="text-[clamp(2rem,4vw,48px)] font-bold text-text-loud tracking-[-1.5px] mb-5">
             Full control over every layer.
           </h2>
-          <p className="text-[var(--text-secondary)] text-lg max-w-[480px] mx-auto">
+          <p className="text-text-secondary text-lg max-w-[480px] mx-auto">
             From first deploy to global scale — own the entire lifecycle.
           </p>
         </motion.div>
 
         {/* Desktop: Helix layout */}
         <div ref={containerRef} className="relative hidden md:block">
-          {/* Central spine */}
-          <div className="absolute left-1/2 top-0 -translate-x-1/2 w-px h-full bg-[var(--border-color)]">
+          <div className="absolute left-1/2 top-0 -translate-x-1/2 w-px h-full bg-border-muted">
             <motion.div
-              className="w-full bg-gradient-to-b from-[var(--color-primary)] to-[var(--color-primary)]/30 origin-top"
+              className="w-full bg-gradient-to-b from-accent-blue-rest to-accent-blue-rest/30 origin-top"
               style={{ height: lineHeight }}
             />
           </div>
@@ -64,8 +63,8 @@ export function CapabilityTimeline() {
               return (
                 <motion.div
                   key={f.title}
-                  initial={{ opacity: 0, x: isLeft ? -50 : 50 }}
-                  whileInView={{ opacity: 1, x: 0 }}
+                  initial={{ opacity: 0, x: isLeft ? -50 : 50, filter: "blur(4px)" }}
+                  whileInView={{ opacity: 1, x: 0, filter: "blur(0px)" }}
                   viewport={{ once: true, amount: 0.5 }}
                   transition={{ duration: 0.7, ease: easing.outExpo }}
                   className={`flex items-center gap-6 ${isLeft ? "flex-row" : "flex-row-reverse"}`}
@@ -73,20 +72,19 @@ export function CapabilityTimeline() {
                   <div className={`w-[calc(50%-28px)] ${isLeft ? "text-right" : "text-left"}`}>
                     <div className={`inline-block glass-glow rounded-2xl p-5 hover:scale-[1.02] transition-transform duration-300 ${isLeft ? "ml-auto" : ""}`}>
                       <div className={`flex items-center gap-3 mb-2 ${isLeft ? "justify-end" : ""}`}>
-                        <Icon className={`w-5 h-5 text-[var(--color-primary)] ${isLeft ? "order-2" : ""}`} />
-                        <h3 className="text-base font-bold text-[var(--text-primary)]">{f.title}</h3>
+                        <Icon className={`w-5 h-5 text-accent-blue-rest ${isLeft ? "order-2" : ""}`} />
+                        <h3 className="text-base font-bold text-text-loud">{f.title}</h3>
                       </div>
-                      <p className="text-sm text-[var(--text-secondary)] leading-relaxed">{f.desc}</p>
+                      <p className="text-sm text-text-secondary leading-relaxed">{f.desc}</p>
                     </div>
                   </div>
 
-                  {/* Node */}
                   <motion.div
                     initial={{ scale: 0 }}
                     whileInView={{ scale: 1 }}
                     viewport={{ once: true, amount: 0.5 }}
                     transition={{ duration: 0.4, delay: 0.2, ease: easing.outExpo }}
-                    className="w-3 h-3 rounded-full bg-[var(--color-primary)] shadow-[0_0_16px_rgba(126,185,67,0.5)] shrink-0 z-10 border-2 border-[var(--bg-color)]"
+                    className="w-3 h-3 rounded-full bg-accent-blue-rest shadow-[0_0_16px_rgba(1,94,254,0.5)] shrink-0 z-10 border-2 border-background-plain"
                   />
 
                   <div className="w-[calc(50%-28px)]" />
@@ -96,27 +94,39 @@ export function CapabilityTimeline() {
           </div>
         </div>
 
-        {/* Mobile */}
-        <div className="md:hidden grid grid-cols-1 gap-3">
-          {features.map((f, i) => {
-            const Icon = f.icon;
-            return (
-              <motion.div
-                key={f.title}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, amount: 0.3 }}
-                transition={{ duration: 0.5, delay: i * 0.04, ease: easing.outExpo }}
-                className="glass-subtle rounded-2xl p-5"
-              >
-                <div className="flex items-center gap-3 mb-2">
-                  <Icon className="w-5 h-5 text-[var(--color-primary)]" />
-                  <h3 className="text-sm font-bold text-[var(--text-primary)]">{f.title}</h3>
-                </div>
-                <p className="text-sm text-[var(--text-secondary)] leading-relaxed">{f.desc}</p>
-              </motion.div>
-            );
-          })}
+        {/* Mobile: single-column timeline with a left rail + node per card. */}
+        <div className="md:hidden relative">
+          <div
+            aria-hidden
+            className="absolute left-[6px] top-2 bottom-2 w-px bg-gradient-to-b from-accent-blue-rest/50 via-border-muted to-transparent"
+          />
+          <div className="space-y-3">
+            {features.map((f, i) => {
+              const Icon = f.icon;
+              return (
+                <motion.div
+                  key={f.title}
+                  initial={{ opacity: 0, y: 20, filter: "blur(4px)" }}
+                  whileInView={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                  viewport={{ once: true, amount: 0.15 }}
+                  transition={{ duration: 0.5, delay: i * 0.04, ease: easing.outExpo }}
+                  className="relative pl-8"
+                >
+                  <span
+                    aria-hidden
+                    className="absolute left-0 top-5 w-3.5 h-3.5 rounded-full bg-accent-blue-rest border-2 border-background-plain shadow-[0_0_12px_rgba(1,94,254,0.4)]"
+                  />
+                  <div className="glass-subtle rounded-2xl p-5">
+                    <div className="flex items-center gap-3 mb-2">
+                      <Icon className="w-5 h-5 text-accent-blue-rest" />
+                      <h3 className="text-sm font-bold text-text-loud">{f.title}</h3>
+                    </div>
+                    <p className="text-sm text-text-secondary leading-relaxed">{f.desc}</p>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
         </div>
       </div>
     </section>
