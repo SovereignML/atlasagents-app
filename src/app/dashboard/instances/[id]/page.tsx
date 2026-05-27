@@ -1,20 +1,42 @@
-import { auth } from "@/auth"
-import { db } from "@/db"
-import { notFound, redirect } from "next/navigation"
-import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import Link from "next/link"
-import { Badge } from "@/components/ui/badge"
-import { InstanceTabs } from "./instance-tabs"
-import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
+import { notFound, redirect } from "next/navigation"
 
-const STATUS_STYLES: Record<string, string> = {
-  pending: "bg-amber-500/10 text-amber-400 border-amber-500/30",
-  running: "bg-[var(--accent-dim)] text-[var(--accent-color)] border-[var(--accent-color)]/30",
-  provisioning: "bg-amber-500/10 text-amber-400 border-amber-500/30",
-  stopped: "bg-[var(--card-bg)] text-[var(--text-secondary)] border-[var(--border-color)]",
-  failed_provisioning: "bg-red-500/10 text-red-400 border-red-500/30",
-  deleting: "bg-zinc-800/20 text-zinc-400 border-zinc-800/30",
-  deleted: "bg-[var(--card-bg)] text-[var(--text-secondary)]/50 border-[var(--border-color)]",
+import { auth } from "@/auth"
+import { db, eq, desc, driveConnections, cloudflareConnections, backupRecords } from "@/db"
+import { isDriveConfigured } from "@/lib/google-drive"
+import { isKumaConfigured } from "@/lib/uptime-kuma"
+import { Badge } from "@/components/ui/badge"
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
+import { PageContainer } from "@/components/layout/page-container"
+import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
+import { whereUserInstanceVisible } from "@/lib/instance-queries"
+import { getRuntime } from "@/lib/runtimes"
+import { InstanceTabs } from "./instance-tabs"
+
+function statusBadgeVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
+  switch (status) {
+    case "running":
+      return "default"
+    case "failed":
+    case "failed_provisioning":
+      return "destructive"
+    case "pending":
+    case "provisioning":
+    case "deleting":
+      return "outline"
+    case "deleted":
+    case "stopped":
+    default:
+      return "secondary"
+  }
 }
 
 export default async function InstanceDetailPage({
@@ -44,6 +66,17 @@ export default async function InstanceDetailPage({
 
   if (!instance) notFound()
 
+  const driveConn = await db.query.driveConnections.findFirst({
+    where: eq(driveConnections.userId, session.user.id),
+  })
+  const cloudflareConn = await db.query.cloudflareConnections.findFirst({
+    where: eq(cloudflareConnections.userId, session.user.id),
+  })
+  const backupRows = await db.query.backupRecords.findMany({
+    where: eq(backupRecords.instanceId, instance.id),
+    orderBy: desc(backupRecords.createdAt),
+  })
+
   const access = buildPublicGatewayUrl({
     ipAddress: instance.ipAddress,
     domain: instance.domain,
@@ -52,75 +85,79 @@ export default async function InstanceDetailPage({
   })
 
   return (
-    <div className="space-y-6 max-w-6xl">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <Link
-            href="/dashboard/instances"
-            className="text-xs text-[var(--text-secondary)] hover:text-[var(--accent-color)] font-mono"
-          >
-            ← Back to agents
-          </Link>
-          <div className="flex items-center gap-3 mt-2">
-            <h1
-              className="text-3xl font-bold uppercase tracking-[0.02em] text-[var(--text-primary)]"
-              style={{ fontFamily: "var(--font-display)" }}
-            >
-              {instance.name}
-            </h1>
-            <Badge className={STATUS_STYLES[instance.status] || STATUS_STYLES.stopped}>
-              {instance.status}
-            </Badge>
+    <PageContainer>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-2">
+          <Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem>
+                <BreadcrumbLink render={<Link href="/dashboard">Dashboard</Link>} />
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbLink render={<Link href="/dashboard/instances">Instances</Link>} />
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbPage>{instance.name}</BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-3xl font-bold tracking-tight">{instance.name}</h1>
+            <Badge variant={statusBadgeVariant(instance.status)}>{instance.status}</Badge>
           </div>
-          <p className="text-xs text-[var(--text-secondary)] mt-1 font-mono">
-            {instance.slug}
-          </p>
+          <p className="font-mono text-xs text-muted-foreground">{instance.slug}</p>
         </div>
       </div>
 
-      <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] p-4">
-        <p className="text-[10px] text-[var(--text-secondary)] uppercase tracking-[0.1em] font-mono mb-2">
-          Access
-        </p>
-        {access ? (
-          <>
-            <a
-              href={access.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-mono text-sm text-[var(--text-primary)] hover:text-[var(--accent-color)] break-all"
-            >
-              {access.url}
-            </a>
-            {access.scheme === "http" && instance.domain && (
-              <p className="text-xs text-amber-400 mt-2 font-mono">
-                TLS certificate pending — accessed over HTTP until Let&apos;s Encrypt completes.
-              </p>
-            )}
-            {access.scheme === "http" && !instance.domain && !instance.managedSubdomain && (
-              <p className="text-xs text-[var(--text-secondary)] mt-2">
-                Raw IP access over HTTP. A managed hostname or custom domain enables HTTPS.
-              </p>
-            )}
-            {access.scheme === "https" && instance.domain && (
-              <p className="text-xs text-[var(--text-secondary)] mt-2">
-                {instance.tlsStatus === "issued"
-                  ? "Served with Let&apos;s Encrypt certificate."
-                  : "TLS certificate pending — check DNS for your custom domain."}
-              </p>
-            )}
-            {access.scheme === "https" && instance.managedSubdomain && !instance.domain && (
-              <p className="text-xs text-[var(--text-secondary)] mt-2">
-                HTTPS via Cloudflare to your agent hostname. Direct IP access may use HTTP on port 80.
-              </p>
-            )}
-          </>
-        ) : (
-          <p className="font-mono text-sm text-[var(--text-secondary)]">
-            Provisioning… no public access yet.
-          </p>
-        )}
-      </div>
+      <Card>
+        <CardHeader>
+          <CardDescription className="font-mono text-[10px] tracking-[0.1em] uppercase">
+            Access
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {access ? (
+            <>
+              <a
+                href={access.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="break-all font-mono text-sm text-foreground hover:text-primary"
+              >
+                {access.url}
+              </a>
+              {access.scheme === "http" && instance.domain && (
+                <p className="mt-2 font-mono text-xs text-amber-500">
+                  TLS certificate pending — accessed over HTTP until Let&apos;s Encrypt completes.
+                </p>
+              )}
+              {access.scheme === "http" && !instance.domain && !instance.managedSubdomain && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Raw IP access over HTTP. A managed hostname or custom domain enables HTTPS.
+                </p>
+              )}
+              {access.scheme === "https" && instance.domain && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {instance.tlsStatus === "issued"
+                    ? "Served with Let's Encrypt certificate."
+                    : "TLS certificate pending — check DNS for your custom domain."}
+                </p>
+              )}
+              {access.scheme === "https" && instance.managedSubdomain && !instance.domain && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  HTTPS via Cloudflare to your agent hostname. Direct IP access may use HTTP on port 80.
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="font-mono text-sm text-muted-foreground">
+              Provisioning… no public access yet.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <InstanceTabs
         active={tab || "overview"}
@@ -138,6 +175,8 @@ export default async function InstanceDetailPage({
           managedSubdomain: instance.managedSubdomain,
           dnsStatus: instance.dnsStatus,
           tlsStatus: instance.tlsStatus,
+          domainProxied: Boolean(instance.domainProxied),
+          cfZoneId: instance.cfZoneId ?? null,
           openclawAdminEmail: instance.openclawAdminEmail,
           hasOpenclawPassword: Boolean(instance.openclawAdminPasswordEnc),
           hasRootPassword: Boolean(instance.rootPasswordEnc),
@@ -145,6 +184,13 @@ export default async function InstanceDetailPage({
           deploymentTarget: instance.deploymentTarget,
           provisionStage: instance.provisionStage ?? null,
           agentType: instance.agentType ?? null,
+          runtime: instance.runtime ?? null,
+          runtimeLabel: getRuntime(instance.runtime).displayName,
+          webuiEnabled: Boolean(instance.webuiEnabled),
+          byosHost: instance.byosHost ?? null,
+          byosPort: instance.byosPort ?? null,
+          byosUser: instance.byosUser ?? null,
+          byosLlmMode: instance.byosLlmMode ?? null,
         }}
         logs={instance.logs.map((l) => ({
           id: l.id,
@@ -152,7 +198,30 @@ export default async function InstanceDetailPage({
           message: l.message,
           createdAt: l.createdAt.toISOString(),
         }))}
+        drive={{
+          configured: isDriveConfigured(),
+          connected: Boolean(driveConn),
+          email: driveConn?.googleEmail ?? null,
+        }}
+        cloudflare={{
+          connected: Boolean(cloudflareConn),
+        }}
+        kuma={{
+          configured: isKumaConfigured(),
+          status: instance.kumaStatus,
+          responseTimeMs: instance.kumaResponseTimeMs,
+          uptimeRatio: instance.kumaUptimeRatio,
+          certDaysRemaining: instance.kumaCertDaysRemaining,
+          checkedAt: instance.kumaCheckedAt ? instance.kumaCheckedAt.toISOString() : null,
+        }}
+        backups={backupRows.map((b) => ({
+          id: b.id,
+          fileName: b.fileName,
+          agentName: b.agentName,
+          sizeBytes: b.sizeBytes,
+          createdAt: b.createdAt.toISOString(),
+        }))}
       />
-    </div>
+    </PageContainer>
   )
 }

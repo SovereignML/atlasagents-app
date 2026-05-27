@@ -156,6 +156,33 @@ export async function withInstanceLock<T>(
 }
 
 /**
+ * Best-effort: drive a still-non-terminal instance to `failed_provisioning`.
+ *
+ * The target-specific provisioners already mark failed via `rollbackProvisioning`,
+ * but failures that throw earlier (the dev/mock path, an error before a target
+ * function runs) would otherwise leave the row stuck in `provisioning` until the
+ * reconciler TTL reclaims it ~20 min later. This closes that window. It is a
+ * no-op — with no illegal-transition noise — when the row is already terminal or
+ * running, so calling it on top of an already-handled failure is safe.
+ */
+export async function ensureProvisioningFailed(
+  instanceId: string,
+  error: string,
+): Promise<void> {
+  const row = await db.query.instances.findFirst({
+    where: eq(instances.id, instanceId),
+    columns: { status: true },
+  })
+  if (row?.status !== "pending" && row?.status !== "provisioning") return
+  try {
+    await transitionInstance(instanceId, [row.status], "failed_provisioning", { error })
+  } catch {
+    // Raced with another writer (e.g. rollbackProvisioning) — the status is no
+    // longer ours to set, which is the desired end state anyway.
+  }
+}
+
+/**
  * Structured log writer. All provisioner/reconciler/delete paths should use
  * this instead of `db.insert(instanceLogs).values({...})` directly, so
  * downstream log consumers get a consistent shape.

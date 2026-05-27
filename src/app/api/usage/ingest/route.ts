@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from "next/server"
-import { db, eq, instances, usageEvents, instanceLogs } from "@/db"
-import { consumeCredits } from "@/lib/credits"
-import { pauseBot } from "@/lib/provisioner"
+import { db, eq, instances, usageEvents } from "@/db"
+import { rateLimit } from "@/lib/rate-limit"
 
 /**
- * Bot runtimes POST usage events here. Each event decrements the owner's
- * credit balance. When a user runs out of credits we pause the bot.
+ * Bot runtimes POST usage events here. This endpoint is ANALYTICS-ONLY: it
+ * records the event and bumps `lastActiveAt`. It does NOT charge the wallet.
+ *
+ * Wallet billing is now driven by REAL OpenRouter spend, polled per-key by the
+ * usage-sync job (src/lib/openrouter-usage.ts) and marked up by the margin.
+ * The per-key OpenRouter cap (= funded credits × margin) is the hard cost
+ * ceiling. The synthetic per-request/token rates that used to live here
+ * (USAGE_COST_PER_* env vars) are DEPRECATED and no longer read.
  *
  * Auth: X-Bot-Token header must match Instance.botToken. This is a shared
  * secret baked into the container's env at provision time.
- *
- * Credit cost rules (v1 — tune as we learn):
- *   - request → 1 credit
- *   - tokens_in → 1 credit per 1000 tokens (rounded up, min 1)
- *   - tokens_out → 2 credits per 1000 tokens (rounded up, min 1)
  */
 
 type IngestBody = {
@@ -23,16 +23,12 @@ type IngestBody = {
   instanceId?: string
 }
 
-function computeCreditCost(kind: IngestBody["kind"], amount: number): number {
-  if (amount <= 0) return 0
-  switch (kind) {
-    case "request":
-      return amount
-    case "tokens_in":
-      return Math.max(1, Math.ceil(amount / 1000))
-    case "tokens_out":
-      return Math.max(1, Math.ceil(amount / 1000) * 2)
-  }
+// Per-kind upper bounds. Kept as a sanity guard so a leaked bot token can't
+// flood the usageEvents table with absurd amounts.
+const MAX_AMOUNTS: Record<IngestBody["kind"], number> = {
+  request: 1,
+  tokens_in: 200_000,
+  tokens_out: 200_000,
 }
 
 export async function POST(req: NextRequest) {
@@ -51,6 +47,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid bot token" }, { status: 401 })
   }
 
+  // Cap per-token request rate. 600/min ≈ 10/s — orders of magnitude above any
+  // legitimate bot's usage cadence, but prevents a leaked token from being
+  // replayed in a tight loop to drain the wallet via wave-of-small-events.
+  if (!(await rateLimit(`usage:${instance.id}`, 600, 60_000))) {
+    return NextResponse.json({ error: "rate limit exceeded" }, { status: 429 })
+  }
+
   let body: IngestBody
   try {
     body = (await req.json()) as IngestBody
@@ -59,6 +62,19 @@ export async function POST(req: NextRequest) {
   }
   if (!body.kind || typeof body.amount !== "number") {
     return NextResponse.json({ error: "kind and amount are required" }, { status: 400 })
+  }
+  if (!Number.isFinite(body.amount) || body.amount < 0) {
+    return NextResponse.json({ error: "amount must be a non-negative finite number" }, { status: 400 })
+  }
+  const maxForKind = MAX_AMOUNTS[body.kind]
+  if (maxForKind === undefined) {
+    return NextResponse.json({ error: `unknown kind: ${body.kind}` }, { status: 400 })
+  }
+  if (body.amount > maxForKind) {
+    return NextResponse.json(
+      { error: `amount ${body.amount} exceeds max ${maxForKind} for kind ${body.kind}` },
+      { status: 400 },
+    )
   }
 
   await db.insert(usageEvents).values({
@@ -76,28 +92,7 @@ export async function POST(req: NextRequest) {
       .where(eq(instances.id, instance.id))
   }
 
-  const cost = computeCreditCost(body.kind, body.amount)
-  if (cost <= 0) {
-    return NextResponse.json({ ok: true, cost: 0, balance: null })
-  }
-
-  const result = await consumeCredits(instance.userId, cost, `consume:${instance.id}:${body.kind}`)
-  if (!result.ok) {
-    try {
-      await pauseBot(instance)
-    } catch (err) {
-      console.warn(`[usage] pauseBot failed for ${instance.id}:`, err)
-    }
-    await db.insert(instanceLogs).values({
-      instanceId: instance.id,
-      level: "warn",
-      message: "Credits exhausted. Bot paused. Top up to resume.",
-    })
-    return NextResponse.json(
-      { ok: false, reason: "credits_exhausted", balance: result.balance },
-      { status: 402 }
-    )
-  }
-
-  return NextResponse.json({ ok: true, cost, balance: result.balance })
+  // Analytics-only — billing is reconciled from real OpenRouter spend by the
+  // usage-sync job, not from these synthetic event counts.
+  return NextResponse.json({ ok: true })
 }

@@ -29,6 +29,21 @@ export async function GET(
     return NextResponse.json({ error: "Instance not found" }, { status: 404 })
   }
 
+  // Hermes authenticates with a single bearer token (API_SERVER_KEY), not an
+  // admin email/password. The exception is when the Open WebUI sidecar is
+  // enabled: then the openclawAdmin* columns hold the Open WebUI login, which
+  // we surface below like any other admin login. Without the sidecar there is
+  // no admin login at all, so tell the dashboard to hide the card.
+  if (instance.runtime === "hermes" && !instance.webuiEnabled) {
+    return NextResponse.json(
+      {
+        error: "Hermes runtime has no admin login. Use the gateway token instead.",
+        code: "NO_ADMIN_FOR_HERMES",
+      },
+      { status: 409 }
+    )
+  }
+
   if (!instance.openclawAdminEmail || !instance.openclawAdminPasswordEnc) {
     return NextResponse.json(
       { error: "Credentials not yet available. Provisioning may still be in progress." },

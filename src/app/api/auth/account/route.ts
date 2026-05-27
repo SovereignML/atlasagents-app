@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { db, users, accounts, eq, and } from "@/db"
 import { hashPassword, verifyPassword } from "@/lib/password"
+import { notify } from "@/lib/notifications/dispatch"
 
 export async function GET() {
   try {
@@ -80,6 +81,15 @@ export async function PATCH(request: Request) {
 
       const hashed = await hashPassword(newPassword)
       await db.update(users).set({ hashedPassword: hashed }).where(eq(users.id, session.user.id))
+      await notify({
+        userId: session.user.id,
+        category: "security",
+        type: "password_changed",
+        title: "Your password was changed",
+        message:
+          "The password on your SovereignML account was just updated. If this wasn't you, reset your password immediately.",
+        url: "/dashboard/account",
+      })
       return NextResponse.json({ message: "Password updated" })
     }
 

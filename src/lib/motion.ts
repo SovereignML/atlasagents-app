@@ -12,7 +12,7 @@ export const spring = {
   bouncy: { type: "spring" as const, stiffness: 400, damping: 25 },
 };
 
-export const duration = { fast: 0.3, medium: 0.6, slow: 1.0 };
+export const duration = { fast: 0.3, medium: 0.8, slow: 1.0 };
 
 export const staggerDelay = {
   fast: 0.05,
@@ -21,7 +21,7 @@ export const staggerDelay = {
 };
 
 export const viewport = {
-  once: { once: true, amount: 0.3 },
+  once: { once: true, amount: 0.15 },
   repeat: { amount: 0.1 },
   half: { once: true, amount: 0.5 },
 };
@@ -29,6 +29,28 @@ export const viewport = {
 export const morphTransition = {
   duration: 1.2,
   ease: [0.16, 1, 0.3, 1] as const,
+};
+
+// Shared entrance variants used by <Reveal> / <RevealGroup>. Pulls the
+// site-wide "fade up + de-blur" pattern into one place so every section reads
+// the same. Wrap consumers in <MotionConfig reducedMotion="user"> so the
+// transform/blur is dropped (opacity kept) when the OS requests reduced motion.
+export const revealVariants = {
+  hidden: { opacity: 0, y: 24, filter: "blur(4px)" },
+  show: {
+    opacity: 1,
+    y: 0,
+    filter: "blur(0px)",
+    transition: { duration: 0.7, ease: easing.outExpo },
+  },
+};
+
+// Container variant: children inherit `revealVariants` and reveal in sequence.
+export const revealGroupVariants = {
+  hidden: {},
+  show: {
+    transition: { staggerChildren: staggerDelay.medium },
+  },
 };
 
 export function parallaxRange(

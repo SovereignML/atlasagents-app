@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { easing } from "@/lib/motion";
 
 const STATUS_AGENTS = [
@@ -34,6 +34,7 @@ const DECISION_LOG = [
 ];
 
 export function MissionControlPlanner() {
+  const reduceMotion = useReducedMotion();
   const [visibleTasks, setVisibleTasks] = useState(TASK_FEED.slice(0, 4));
   const taskIndex = useRef(4);
 
@@ -46,79 +47,77 @@ export function MissionControlPlanner() {
   }, []);
 
   useEffect(() => {
+    // Respect "Reduce Motion": keep the task feed static (no auto-rotation).
+    if (reduceMotion) return;
     const interval = setInterval(rotateTasks, 2800);
     return () => clearInterval(interval);
-  }, [rotateTasks]);
+  }, [rotateTasks, reduceMotion]);
 
   return (
     <section id="planner" className="relative py-32 overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[var(--bg-secondary)] to-transparent opacity-60" />
+      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-background-faint to-transparent opacity-60" />
       <div
         className="absolute inset-0 opacity-[0.015] pointer-events-none"
         style={{
-          backgroundImage: "linear-gradient(var(--color-primary) 1px, transparent 1px), linear-gradient(90deg, var(--color-primary) 1px, transparent 1px)",
+          backgroundImage: "linear-gradient(var(--color-accent-blue-rest) 1px, transparent 1px), linear-gradient(90deg, var(--color-accent-blue-rest) 1px, transparent 1px)",
           backgroundSize: "60px 60px",
         }}
       />
 
       <div className="max-w-[1200px] mx-auto px-8 relative z-10">
         <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, amount: 0.3 }}
+          initial={{ opacity: 0, y: 48, filter: "blur(4px)" }}
+          whileInView={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+          viewport={{ once: true, amount: 0.15 }}
           transition={{ duration: 0.8, ease: easing.outExpo }}
           className="text-center mb-16"
         >
-          <p className="text-xs text-[var(--color-primary)] uppercase tracking-[0.2em] mb-4 font-medium">Live Operations</p>
-          <h2 className="text-[clamp(2rem,4vw,48px)] font-bold text-[var(--text-primary)] tracking-[-1.5px] mb-4">
+          <p className="text-xs text-accent-blue-rest uppercase tracking-[0.2em] mb-4 font-medium">Live Operations</p>
+          <h2 className="text-[clamp(2rem,4vw,48px)] font-bold text-text-loud tracking-[-1.5px] mb-4">
             Your agents are working right now.
           </h2>
-          <p className="text-[var(--text-secondary)] text-lg max-w-[500px] mx-auto">
+          <p className="text-text-secondary text-lg max-w-[500px] mx-auto">
             Real-time view of agent activity, decisions, and system health.
           </p>
         </motion.div>
 
         <motion.div
-          initial={{ opacity: 0, y: 40 }}
-          whileInView={{ opacity: 1, y: 0 }}
+          initial={{ opacity: 0, y: 48, filter: "blur(4px)" }}
+          whileInView={{ opacity: 1, y: 0, filter: "blur(0px)" }}
           viewport={{ once: true, amount: 0.15 }}
           transition={{ duration: 0.9, ease: easing.outExpo }}
           className="glass rounded-3xl p-1"
         >
-          <div className="rounded-[22px] bg-[var(--bg-color)]/80 backdrop-blur-sm border border-[var(--glass-border)] overflow-hidden">
-            {/* Terminal header */}
-            <div className="flex items-center gap-2 px-5 py-3 border-b border-[var(--border-color)]">
+          <div className="rounded-[22px] bg-background-plain/80 backdrop-blur-sm border border-border-ghost overflow-hidden">
+            <div className="flex items-center gap-2 px-5 py-3 border-b border-border-muted">
               <div className="w-2.5 h-2.5 rounded-full bg-red-400/60" />
               <div className="w-2.5 h-2.5 rounded-full bg-yellow-400/60" />
               <div className="w-2.5 h-2.5 rounded-full bg-green-400/60" />
-              <span className="ml-3 text-[11px] font-mono text-[var(--text-muted)]">mission-control — live</span>
+              <span className="ml-3 text-[11px] font-mono text-text-muted">mission-control — live</span>
               <div className="ml-auto flex items-center gap-2">
                 <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
                 <span className="text-[10px] font-mono text-green-400/80">CONNECTED</span>
               </div>
             </div>
 
-            {/* Three columns */}
-            <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-[var(--border-color)]">
-              {/* Agent Status */}
+            <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-border-muted">
               <div className="p-5">
-                <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-muted)] mb-4">Agent Status</p>
+                <p className="text-[10px] font-mono uppercase tracking-widest text-text-muted mb-4">Agent Status</p>
                 <div className="space-y-3">
                   {STATUS_AGENTS.map((a) => (
                     <div key={a.name} className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <div className={`w-1.5 h-1.5 rounded-full ${a.status === "active" ? "bg-green-400 animate-pulse" : "bg-[var(--text-muted)] opacity-40"}`} />
-                        <span className="text-xs text-[var(--text-primary)] font-medium">{a.name}</span>
+                        <div className={`w-1.5 h-1.5 rounded-full ${a.status === "active" ? "bg-green-400 animate-pulse" : "bg-text-muted opacity-40"}`} />
+                        <span className="text-xs text-text-loud font-medium">{a.name}</span>
                       </div>
-                      <span className="text-[10px] font-mono text-[var(--text-muted)]">{a.uptime}</span>
+                      <span className="text-[10px] font-mono text-text-muted">{a.uptime}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* Active Tasks */}
               <div className="p-5">
-                <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-muted)] mb-4">Active Tasks</p>
+                <p className="text-[10px] font-mono uppercase tracking-widest text-text-muted mb-4">Active Tasks</p>
                 <div className="space-y-2.5 overflow-hidden">
                   {visibleTasks.map((task, i) => (
                     <motion.div
@@ -128,19 +127,18 @@ export function MissionControlPlanner() {
                       transition={{ duration: 0.4, ease: easing.outExpo }}
                       className="flex items-start gap-2"
                     >
-                      <span className="text-[var(--color-primary)] font-mono text-[10px] mt-0.5 shrink-0">&gt;</span>
-                      <span className="text-xs text-[var(--text-secondary)] leading-relaxed">{task}</span>
+                      <span className="text-accent-blue-rest font-mono text-[10px] mt-0.5 shrink-0">&gt;</span>
+                      <span className="text-xs text-text-secondary leading-relaxed">{task}</span>
                     </motion.div>
                   ))}
                   <div className="flex items-center gap-1 mt-1">
-                    <span className="w-1.5 h-3 bg-[var(--color-primary)] animate-[type-cursor_1s_step-end_infinite]" />
+                    <span className="w-1.5 h-3 bg-accent-blue-rest animate-[type-cursor_1s_step-end_infinite]" />
                   </div>
                 </div>
               </div>
 
-              {/* Decision Log */}
               <div className="p-5">
-                <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-muted)] mb-4">Decision Log</p>
+                <p className="text-[10px] font-mono uppercase tracking-widest text-text-muted mb-4">Decision Log</p>
                 <div className="space-y-3">
                   {DECISION_LOG.slice(0, 5).map((d, i) => (
                     <motion.div
@@ -152,10 +150,10 @@ export function MissionControlPlanner() {
                       className="group"
                     >
                       <div className="flex items-center gap-2 mb-0.5">
-                        <span className="text-[9px] font-mono text-[var(--text-muted)]">{d.time}</span>
-                        <span className="text-[9px] font-mono text-[var(--color-primary)] opacity-60">{d.agent}</span>
+                        <span className="text-[9px] font-mono text-text-muted">{d.time}</span>
+                        <span className="text-[9px] font-mono text-accent-blue-rest opacity-60">{d.agent}</span>
                       </div>
-                      <p className="text-xs text-[var(--text-secondary)] leading-snug">{d.msg}</p>
+                      <p className="text-xs text-text-secondary leading-snug">{d.msg}</p>
                     </motion.div>
                   ))}
                 </div>

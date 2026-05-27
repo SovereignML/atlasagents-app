@@ -6,7 +6,12 @@ import {
   handleSubscriptionDeleted,
   handleInvoicePaid,
   handleInvoicePaymentFailed,
+  handleChargeRefunded,
+  handleChargeDisputeCreated,
+  handleChargeDisputeClosed,
+  handleInvoiceVoided,
 } from "@/lib/stripe-events"
+import { claimEvent, releaseEvent } from "@/lib/idempotency"
 
 export async function POST(req: NextRequest) {
   const body = await req.text()
@@ -31,6 +36,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 })
   }
 
+  // Idempotency — Stripe retries on 5xx and sometimes redelivers on its own.
+  // Without dedup, `invoice.paid` retries cause duplicate plan-credit deposits.
+  // We claim the event up-front; on handler error we release so the retry can
+  // re-attempt. See src/lib/idempotency.ts.
+  const claimed = await claimEvent("stripe", event.id, event)
+  if (!claimed) {
+    return NextResponse.json({ received: true, dedup: true })
+  }
+
   try {
     switch (event.type) {
       case "checkout.session.completed":
@@ -48,10 +62,24 @@ export async function POST(req: NextRequest) {
       case "invoice.payment_failed":
         await handleInvoicePaymentFailed(event.data.object)
         break
+      case "invoice.voided":
+        await handleInvoiceVoided(event.data.object)
+        break
+      case "charge.refunded":
+        await handleChargeRefunded(event.data.object)
+        break
+      case "charge.dispute.created":
+        await handleChargeDisputeCreated(event.data.object)
+        break
+      case "charge.dispute.closed":
+        await handleChargeDisputeClosed(event.data.object)
+        break
       default:
         console.log(`[stripe webhook] Unhandled event type: ${event.type}`)
     }
   } catch (err) {
+    // Roll back the claim so Stripe's retry can re-attempt.
+    await releaseEvent("stripe", event.id)
     console.error(`[stripe webhook] Error handling ${event.type}:`, err)
     return NextResponse.json({ error: "Handler failed" }, { status: 500 })
   }

@@ -1,23 +1,59 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useCallback, useEffect, useState } from "react"
+import { Search } from "lucide-react"
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import {
+  Card,
+  CardContent,
+} from "@/components/ui/card"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
+import { PageContainer, PageHeader } from "@/components/layout/page-container"
+import { Skeleton } from "@/components/ui/skeleton"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
-const statusStyles: Record<string, string> = {
-  active: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
-  past_due: "bg-amber-500/20 text-amber-400 border-amber-500/30",
-  canceled: "bg-red-500/20 text-red-400 border-red-500/30",
-  incomplete: "bg-zinc-500/20 text-zinc-400 border-zinc-500/30",
+function statusBadgeVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
+  switch (status) {
+    case "active":
+      return "default"
+    case "canceled":
+      return "destructive"
+    case "past_due":
+      return "outline"
+    default:
+      return "secondary"
+  }
 }
 
 const tabs = [
-  { label: "All", value: "" },
+  { label: "All", value: "all" },
   { label: "Active", value: "active" },
   { label: "Canceled", value: "canceled" },
   { label: "Past Due", value: "past_due" },
-]
+] as const
 
 interface Sub {
   id: string
@@ -38,14 +74,14 @@ export default function AdminSubscriptionsPage() {
   const [subs, setSubs] = useState<Sub[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
-  const [statusFilter, setStatusFilter] = useState("")
+  const [statusFilter, setStatusFilter] = useState("all")
 
   const fetchSubs = useCallback(async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
       if (search) params.set("search", search)
-      if (statusFilter) params.set("status", statusFilter)
+      if (statusFilter && statusFilter !== "all") params.set("status", statusFilter)
       const res = await fetch(`/api/admin/subscriptions?${params.toString()}`)
       if (res.ok) setSubs(await res.json())
     } catch {
@@ -55,10 +91,11 @@ export default function AdminSubscriptionsPage() {
     }
   }, [search, statusFilter])
 
-  useEffect(() => { fetchSubs() }, [fetchSubs])
+  useEffect(() => {
+    fetchSubs()
+  }, [fetchSubs])
 
   async function handleAction(id: string, action: "cancel" | "activate" | "delete") {
-    if (action === "delete" && !confirm("Delete this subscription?")) return
     if (action === "delete") {
       await fetch(`/api/admin/subscriptions/${id}`, { method: "DELETE" })
     } else {
@@ -72,77 +109,114 @@ export default function AdminSubscriptionsPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-6xl">
-      <h1 className="text-2xl font-bold text-white">All Subscriptions</h1>
+    <PageContainer>
+      <PageHeader title="All Subscriptions" description="Manage every subscription across users." />
 
-      <Input
-        placeholder="Search by user email or name..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="bg-white/5 border-white/10 text-white max-w-md"
-      />
+      <InputGroup className="max-w-md">
+        <InputGroupAddon>
+          <Search />
+        </InputGroupAddon>
+        <InputGroupInput
+          placeholder="Search by user email or name..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </InputGroup>
 
-      <div className="flex gap-2 flex-wrap">
+      <ToggleGroup
+        multiple={false}
+        value={[statusFilter]}
+        onValueChange={(v) => {
+          const next = v[0]
+          if (next) setStatusFilter(next)
+        }}
+        variant="outline"
+        spacing={2}
+      >
         {tabs.map((tab) => (
-          <button
-            key={tab.value}
-            onClick={() => setStatusFilter(tab.value)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              statusFilter === tab.value
-                ? "bg-white/10 text-white border border-white/20"
-                : "text-zinc-400 hover:text-white hover:bg-white/5 border border-transparent"
-            }`}
-          >
+          <ToggleGroupItem key={tab.value} value={tab.value}>
             {tab.label}
-          </button>
+          </ToggleGroupItem>
         ))}
-      </div>
+      </ToggleGroup>
 
       {loading ? (
-        <div className="bg-white/5 border border-white/10 rounded-xl p-12 text-center">
-          <p className="text-zinc-400">Loading...</p>
+        <div className="space-y-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 w-full" />
+          ))}
         </div>
       ) : subs.length === 0 ? (
-        <div className="bg-white/5 border border-white/10 rounded-xl p-12 text-center">
-          <p className="text-zinc-400">No subscriptions found</p>
-        </div>
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>No subscriptions found</EmptyTitle>
+            <EmptyDescription>Try adjusting your search or filters.</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <div className="space-y-3">
           {subs.map((sub) => (
-            <div key={sub.id} className="bg-white/5 border border-white/10 rounded-xl p-5">
-              <div className="flex items-center justify-between">
+            <Card key={sub.id}>
+              <CardContent className="flex items-center justify-between gap-4">
                 <div>
                   <div className="flex items-center gap-3">
-                    <p className="text-white font-medium">{sub.plan.name} Plan</p>
-                    <Badge className={statusStyles[sub.status] || ""}>{sub.status}</Badge>
+                    <p className="font-medium text-foreground">{sub.plan.name} Plan</p>
+                    <Badge variant={statusBadgeVariant(sub.status)}>{sub.status}</Badge>
                   </div>
-                  <p className="text-sm text-zinc-400 mt-1">{sub.user.email}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{sub.user.email}</p>
                   {sub.instance && (
-                    <p className="text-xs text-zinc-500 mt-0.5">
-                      {sub.instance.name} &middot; {sub.instance.region.name} &middot; {sub.instance.serverConfig.label}
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {sub.instance.name} &middot; {sub.instance.region.name} &middot;{" "}
+                      {sub.instance.serverConfig.label}
                     </p>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
                   {sub.status !== "active" && (
-                    <Button size="sm" onClick={() => handleAction(sub.id, "activate")} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs">
+                    <Button size="sm" onClick={() => handleAction(sub.id, "activate")}>
                       Activate
                     </Button>
                   )}
                   {sub.status === "active" && (
-                    <Button size="sm" onClick={() => handleAction(sub.id, "cancel")} className="bg-amber-600 hover:bg-amber-700 text-white text-xs">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleAction(sub.id, "cancel")}
+                    >
                       Cancel
                     </Button>
                   )}
-                  <Button size="sm" onClick={() => handleAction(sub.id, "delete")} className="bg-red-600 hover:bg-red-700 text-white text-xs">
-                    Delete
-                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger
+                      render={
+                        <Button size="sm" variant="destructive">
+                          Delete
+                        </Button>
+                      }
+                    />
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete this subscription?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This permanently removes the subscription record. This action cannot be
+                          undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={() => handleAction(sub.id, "delete")}
+                          render={<Button variant="destructive">Delete</Button>}
+                        />
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
-              </div>
-            </div>
+              </CardContent>
+            </Card>
           ))}
         </div>
       )}
-    </div>
+    </PageContainer>
   )
 }

@@ -1,11 +1,19 @@
 "use client"
 
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import Link from "next/link"
+import { useState } from "react"
+
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
 
 export default function ForgotPasswordPage() {
   const [error, setError] = useState("")
@@ -43,42 +51,47 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <Card className="w-full bg-[var(--card-bg)] backdrop-blur-xl border-[var(--border-color)]">
-      <CardHeader className="text-center pb-4 pt-8 px-8">
-        <CardTitle className="text-2xl font-bold text-[var(--text-primary)]">Forgot Password</CardTitle>
-        <CardDescription className="text-[var(--text-secondary)]">
-          Enter your email and we&apos;ll send you a reset link
-        </CardDescription>
+    <Card className="w-full">
+      <CardHeader className="text-center">
+        <CardTitle className="text-2xl font-bold">Forgot Password</CardTitle>
+        <CardDescription>Enter your email and we&apos;ll send you a reset link</CardDescription>
       </CardHeader>
-      <CardContent className="px-8 pb-8">
+      <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
           {error && (
-            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-              {error}
-            </div>
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           )}
           {success && (
-            <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm">
-              {success}
-            </div>
+            <Alert>
+              <AlertDescription>{success}</AlertDescription>
+            </Alert>
           )}
-          <div className="space-y-2">
-            <Label htmlFor="email" className="text-[var(--text-primary)]">Email</Label>
-            <Input
-              id="email"
-              name="email"
-              type="email"
-              placeholder="you@example.com"
-              required
-              className="bg-[var(--card-bg)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]"
-            />
-          </div>
-          <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700" disabled={loading}>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="email">Email</FieldLabel>
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                placeholder="you@example.com"
+                required
+              />
+            </Field>
+          </FieldGroup>
+          <Button
+            type="submit"
+            variant="gradient"
+            size="pill"
+            className="w-full"
+            disabled={loading}
+          >
             {loading ? "Sending..." : "Send Reset Link"}
           </Button>
-          <p className="text-center text-sm text-[var(--text-secondary)]">
+          <p className="text-center text-sm text-muted-foreground">
             Remember your password?{" "}
-            <Link href="/login" className="text-blue-400 hover:text-blue-300">
+            <Link href="/login" className="text-primary hover:underline">
               Sign in
             </Link>
           </p>

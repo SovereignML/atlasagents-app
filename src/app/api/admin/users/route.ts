@@ -49,6 +49,16 @@ export async function GET(request: Request) {
 
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
+    // Hard cap to prevent OOM on large user tables. Admin UI surfaces a
+    // search box and status filter, so narrowing within the 500-newest
+    // window is the expected workflow. Add explicit pagination UI later
+    // if the admin team regularly needs to scroll beyond that.
+    const HARD_LIMIT = 500;
+    const requestedLimit = Math.min(
+      Number(searchParams.get("limit") || HARD_LIMIT),
+      HARD_LIMIT,
+    );
+
     const rows = await db.query.users.findMany({
       where,
       columns: {
@@ -65,6 +75,7 @@ export async function GET(request: Request) {
         createdAt: true,
       },
       orderBy: desc(users.createdAt),
+      limit: requestedLimit,
     });
 
     const userIds = rows.map((r) => r.id);

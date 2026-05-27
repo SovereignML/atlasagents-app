@@ -2,16 +2,71 @@
 
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
+import { Plus } from "lucide-react"
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import { PageContainer, PageHeader } from "@/components/layout/page-container"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import type { TeamRole } from "@/lib/team"
 
 type Member = { userId: string; role: TeamRole; name: string | null; email: string }
 type Invite = { id: string; email: string; role: TeamRole; expiresAt: string }
 
-const ROLE_STYLES: Record<TeamRole, string> = {
-  owner: "text-primary border-primary/40 bg-primary/10",
-  admin: "text-amber-400 border-amber-500/40 bg-amber-500/5",
-  developer: "text-[var(--text-primary)] border-[var(--border-color)] bg-[var(--card-bg)]",
-  viewer: "text-[var(--text-secondary)] border-[var(--border-color)] bg-[var(--card-bg)]",
+function roleBadgeVariant(role: TeamRole): "default" | "secondary" | "outline" {
+  switch (role) {
+    case "owner":
+      return "default"
+    case "admin":
+      return "outline"
+    default:
+      return "secondary"
+  }
 }
 
 type TeamInfo = { teamId: string; name: string; role: TeamRole }
@@ -39,6 +94,8 @@ export function TeamClient({
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
   const [switching, setSwitching] = useState(false)
+  const [pendingRevokeInvite, setPendingRevokeInvite] = useState<Invite | null>(null)
+  const [pendingRemoveMember, setPendingRemoveMember] = useState<Member | null>(null)
 
   const canManage = myRole === "owner" || myRole === "admin"
   const assignableRoles: TeamRole[] =
@@ -92,14 +149,14 @@ export function TeamClient({
     startTransition(refresh)
   }
 
-  async function revokeInvite(id: string) {
-    if (!confirm("Revoke this invite?")) return
-    const res = await fetch(`/api/team/invites/${id}`, { method: "DELETE" })
+  async function confirmRevokeInvite() {
+    if (!pendingRevokeInvite) return
+    const res = await fetch(`/api/team/invites/${pendingRevokeInvite.id}`, { method: "DELETE" })
     if (!res.ok) {
       const j = await res.json().catch(() => ({}))
       setError(j.error || "Failed to revoke")
-      return
     }
+    setPendingRevokeInvite(null)
     startTransition(refresh)
   }
 
@@ -117,248 +174,304 @@ export function TeamClient({
     startTransition(refresh)
   }
 
-  async function removeMember(userId: string, label: string) {
-    if (!confirm(`Remove ${label} from the team?`)) return
-    const res = await fetch(`/api/team/members/${userId}`, { method: "DELETE" })
+  async function confirmRemoveMember() {
+    if (!pendingRemoveMember) return
+    const res = await fetch(`/api/team/members/${pendingRemoveMember.userId}`, { method: "DELETE" })
     if (!res.ok) {
       const j = await res.json().catch(() => ({}))
       setError(j.error || "Failed to remove")
-      return
     }
+    setPendingRemoveMember(null)
     startTransition(refresh)
   }
 
   return (
-    <div className="space-y-8 max-w-5xl">
+    <PageContainer>
       {allTeams.length > 1 && (
-        <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-4 flex items-center gap-4 flex-wrap">
-          <label className="text-[10px] text-[var(--text-secondary)]">
-            Active Team
-          </label>
-          <select
-            value={activeTeamId ?? team.id}
-            onChange={(e) => handleSwitchTeam(e.target.value)}
-            disabled={switching}
-            className="bg-[var(--bg-color)] border border-[var(--border-color)] px-3 py-2 text-sm text-[var(--text-primary)] font-mono min-w-[200px]"
-          >
-            {allTeams.map((t) => (
-              <option key={t.teamId} value={t.teamId}>
-                {t.name} ({t.role})
-              </option>
-            ))}
-          </select>
-          {switching && (
-            <span className="text-xs text-[var(--text-secondary)] font-mono animate-pulse">
-              Switching...
-            </span>
-          )}
-        </div>
+        <Card>
+          <CardContent className="flex flex-wrap items-center gap-4">
+            <span className="text-xs text-muted-foreground">Active Team</span>
+            <Select
+              value={activeTeamId ?? team.id}
+              onValueChange={(v) => v && handleSwitchTeam(v)}
+              disabled={switching}
+            >
+              <SelectTrigger className="min-w-[200px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {allTeams.map((t) => (
+                    <SelectItem key={t.teamId} value={t.teamId}>
+                      {t.name} ({t.role})
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            {switching && (
+              <span className="animate-pulse font-mono text-xs text-muted-foreground">
+                Switching...
+              </span>
+            )}
+          </CardContent>
+        </Card>
       )}
 
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--text-primary)]">
-            Team
-          </h1>
-          <p className="text-[var(--text-secondary)] mt-1 text-sm">
-            {team.name} · invite teammates and control their access.
-          </p>
-        </div>
-        {canManage && (
-          <button
-            className="btn-gradient !py-2.5 !px-5 !text-sm"
-            disabled={seatsUsed >= team.seatLimit}
-            onClick={() => setShowInvite((v) => !v)}
-          >
-            {showInvite ? "Cancel" : "+ Invite Member"}
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="Team"
+        description={`${team.name} · invite teammates and control their access.`}
+        actions={
+          canManage && (
+            <Dialog open={showInvite} onOpenChange={setShowInvite}>
+              <DialogTrigger
+                render={
+                  <Button variant="gradient" size="pill" disabled={seatsUsed >= team.seatLimit}>
+                    <Plus data-icon="inline-start" />
+                    Invite Member
+                  </Button>
+                }
+              />
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Invite a teammate</DialogTitle>
+                  <DialogDescription>
+                    They&apos;ll receive an email with a link to join {team.name}.
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={submitInvite} className="space-y-4">
+                  <FieldGroup>
+                    <Field>
+                      <FieldLabel htmlFor="invite-email">Email</FieldLabel>
+                      <Input
+                        id="invite-email"
+                        type="email"
+                        required
+                        value={inviteEmail}
+                        onChange={(e) => setInviteEmail(e.target.value)}
+                        className="font-mono"
+                        placeholder="teammate@company.com"
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="invite-role">Role</FieldLabel>
+                      <Select
+                        value={inviteRole}
+                        onValueChange={(v) => v && setInviteRole(v as TeamRole)}
+                      >
+                        <SelectTrigger id="invite-role">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {assignableRoles.map((r) => (
+                              <SelectItem key={r} value={r}>
+                                {r}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </FieldGroup>
+                  <DialogFooter>
+                    <DialogClose render={<Button type="button" variant="outline">Cancel</Button>} />
+                    <Button type="submit" disabled={busy}>
+                      Send invite
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          )
+        }
+      />
 
       {error && (
-        <p className="text-xs font-mono text-red-400 border border-red-500/40 bg-red-500/5 p-3">
-          {error}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
       {info && (
-        <p className="text-xs font-mono text-[var(--text-secondary)] border border-[var(--border-color)] bg-[var(--card-bg)] p-3 break-all">
-          {info}
-        </p>
+        <Alert>
+          <AlertTitle>Invite created</AlertTitle>
+          <AlertDescription className="break-all">{info}</AlertDescription>
+        </Alert>
       )}
 
-      {showInvite && canManage && (
-        <form
-          onSubmit={submitInvite}
-          className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-5 space-y-4"
-        >
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="md:col-span-2">
-              <label className="text-[10px] text-[var(--text-secondary)] block mb-1">
-                Email
-              </label>
-              <input
-                type="email"
-                required
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                className="w-full bg-[var(--bg-color)] border border-[var(--border-color)] px-3 py-2 text-sm text-[var(--text-primary)] font-mono"
-                placeholder="teammate@company.com"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-[var(--text-secondary)] block mb-1">
-                Role
-              </label>
-              <select
-                value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value as TeamRole)}
-                className="w-full bg-[var(--bg-color)] border border-[var(--border-color)] px-3 py-2 text-sm text-[var(--text-primary)] font-mono"
-              >
-                {assignableRoles.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <button type="submit" className="btn-gradient !py-2.5 !px-5 !text-sm" disabled={busy}>
-            Send invite
-          </button>
-        </form>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-4">
-          <p className="text-[10px] text-[var(--text-secondary)]">
-            Plan
-          </p>
-          <p className="text-2xl font-bold text-[var(--text-primary)] font-mono mt-2">Pro</p>
-          <p className="text-xs text-[var(--text-secondary)] mt-1">
-            Up to {team.seatLimit} seats
-          </p>
-        </div>
-        <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-4">
-          <p className="text-[10px] text-[var(--text-secondary)]">
-            Seats Used
-          </p>
-          <p className="text-2xl font-bold text-primary font-mono mt-2">
-            {seatsUsed} / {team.seatLimit}
-          </p>
-        </div>
-        <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-4">
-          <p className="text-[10px] text-[var(--text-secondary)]">
-            Pending Invites
-          </p>
-          <p className="text-2xl font-bold text-[var(--text-primary)] font-mono mt-2">
-            {invites.length}
-          </p>
-        </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <Card size="sm">
+          <CardHeader>
+            <CardDescription className="text-xs">Plan</CardDescription>
+            <CardTitle className="font-mono text-2xl">Pro</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-muted-foreground">Up to {team.seatLimit} seats</p>
+          </CardContent>
+        </Card>
+        <Card size="sm">
+          <CardHeader>
+            <CardDescription className="text-xs">Seats Used</CardDescription>
+            <CardTitle className="font-mono text-2xl text-primary">
+              {seatsUsed} / {team.seatLimit}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card size="sm">
+          <CardHeader>
+            <CardDescription className="text-xs">Pending Invites</CardDescription>
+            <CardTitle className="font-mono text-2xl">{invites.length}</CardTitle>
+          </CardHeader>
+        </Card>
       </div>
 
-      <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)]">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-[10px] text-[var(--text-secondary)] font-mono border-b border-[var(--border-color)]">
-              <th className="text-left px-4 py-3">Member</th>
-              <th className="text-left px-4 py-3">Role</th>
-              <th className="text-left px-4 py-3">Status</th>
-              <th className="text-right px-4 py-3"></th>
-            </tr>
-          </thead>
-          <tbody>
+      <Card className="overflow-hidden p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Member</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {members.map((m) => (
-              <tr key={m.userId} className="border-b border-[var(--border-color)]/50">
-                <td className="px-4 py-3 text-[var(--text-primary)]">
+              <TableRow key={m.userId}>
+                <TableCell className="text-foreground">
                   <div>{m.name || m.email}</div>
                   {m.name && (
-                    <div className="text-xs text-[var(--text-secondary)] font-mono">{m.email}</div>
+                    <div className="font-mono text-xs text-muted-foreground">{m.email}</div>
                   )}
-                </td>
-                <td className="px-4 py-3">
+                </TableCell>
+                <TableCell>
                   {canManage && m.role !== "owner" ? (
-                    <select
+                    <Select
                       value={m.role}
-                      onChange={(e) => changeRole(m.userId, e.target.value as TeamRole)}
-                      className="bg-[var(--bg-color)] border border-[var(--border-color)] px-2 py-1 text-[10px] font-mono text-[var(--text-primary)]"
+                      onValueChange={(v) => v && changeRole(m.userId, v as TeamRole)}
                     >
-                      {assignableRoles.map((r) => (
-                        <option key={r} value={r}>
-                          {r}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger size="sm" className="w-32">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {assignableRoles.map((r) => (
+                            <SelectItem key={r} value={r}>
+                              {r}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
                   ) : (
-                    <span
-                      className={`text-[10px] font-mono px-2 py-0.5 border ${ROLE_STYLES[m.role]}`}
-                    >
+                    <Badge variant={roleBadgeVariant(m.role)} className="font-mono">
                       {m.role}
-                    </span>
+                    </Badge>
                   )}
-                </td>
-                <td className="px-4 py-3 text-xs text-[var(--text-secondary)]">active</td>
-                <td className="px-4 py-3 text-right">
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">active</TableCell>
+                <TableCell className="text-right">
                   {canManage && m.role !== "owner" && (
-                    <button
-                      onClick={() => removeMember(m.userId, m.email)}
-                      className="text-xs font-mono text-red-400 hover:underline"
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => setPendingRemoveMember(m)}
                     >
                       Remove
-                    </button>
+                    </Button>
                   )}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
             {invites.map((i) => (
-              <tr key={i.id} className="border-b border-[var(--border-color)]/50">
-                <td className="px-4 py-3 text-[var(--text-primary)] font-mono">{i.email}</td>
-                <td className="px-4 py-3">
-                  <span
-                    className={`text-[10px] font-mono px-2 py-0.5 border ${ROLE_STYLES[i.role]}`}
-                  >
+              <TableRow key={i.id}>
+                <TableCell className="font-mono text-foreground">{i.email}</TableCell>
+                <TableCell>
+                  <Badge variant={roleBadgeVariant(i.role)} className="font-mono">
                     {i.role}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-xs text-amber-400">invited</td>
-                <td className="px-4 py-3 text-right">
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-xs text-amber-500">invited</TableCell>
+                <TableCell className="text-right">
                   {canManage && (
-                    <button
-                      onClick={() => revokeInvite(i.id)}
-                      className="text-xs font-mono text-red-400 hover:underline"
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => setPendingRevokeInvite(i)}
                     >
                       Revoke
-                    </button>
+                    </Button>
                   )}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </Card>
 
-      <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-5">
-        <p className="text-[10px] text-[var(--text-secondary)] mb-3">
-          Roles
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-[var(--text-secondary)]">
+      <Card>
+        <CardHeader>
+          <CardDescription className="text-xs">Roles</CardDescription>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 gap-3 text-sm text-muted-foreground md:grid-cols-2">
           <div>
-            <span className="text-primary font-mono">owner</span> — full access incl.
-            billing
+            <span className="font-mono text-primary">owner</span> — full access incl. billing
           </div>
           <div>
-            <span className="text-amber-400 font-mono">admin</span> — manage agents, team, settings
+            <span className="font-mono text-amber-500">admin</span> — manage agents, team, settings
             (no billing)
           </div>
           <div>
-            <span className="text-[var(--text-primary)] font-mono">developer</span> — deploy,
-            restart, edit agents
+            <span className="font-mono text-foreground">developer</span> — deploy, restart, edit
+            agents
           </div>
           <div>
-            <span className="text-[var(--text-secondary)] font-mono">viewer</span> — read-only
-            dashboards and logs
+            <span className="font-mono">viewer</span> — read-only dashboards and logs
           </div>
-        </div>
-      </div>
-    </div>
+        </CardContent>
+      </Card>
+
+      <AlertDialog
+        open={pendingRevokeInvite !== null}
+        onOpenChange={(o) => !o && setPendingRevokeInvite(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revoke this invite?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingRevokeInvite
+                ? `${pendingRevokeInvite.email} will no longer be able to join the team.`
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmRevokeInvite}>Revoke</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={pendingRemoveMember !== null}
+        onOpenChange={(o) => !o && setPendingRemoveMember(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this member?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingRemoveMember
+                ? `${pendingRemoveMember.name || pendingRemoveMember.email} will lose access to ${team.name}.`
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmRemoveMember}>Remove</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </PageContainer>
   )
 }

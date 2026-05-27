@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { db, eq, and, gte, sql, ne, instances, subscriptions, users, usageEvents, instanceLogs } from "@/db"
+import { db, eq, and, gte, sql, ne, instances, subscriptions, usageEvents, instanceLogs, wallets } from "@/db"
 import { whereUserInstancesVisible } from "@/lib/instance-queries"
 import { getEffectiveUserId } from "@/lib/effective-user"
 
@@ -15,7 +15,7 @@ export async function GET() {
   const [
     userInstances,
     activeSubRows,
-    user,
+    wallet,
     usage30Rows,
     incident24Rows,
   ] = await Promise.all([
@@ -27,9 +27,9 @@ export async function GET() {
       .select({ count: sql<number>`count(*)` })
       .from(subscriptions)
       .where(and(eq(subscriptions.userId, userId), eq(subscriptions.status, "active"))),
-    db.query.users.findFirst({
-      where: eq(users.id, userId),
-      columns: { credits: true },
+    db.query.wallets.findFirst({
+      where: eq(wallets.userId, userId),
+      columns: { balance: true },
     }),
     db
       .select({ total: sql<number>`coalesce(sum(${usageEvents.amount}), 0)` })
@@ -55,7 +55,7 @@ export async function GET() {
     activeInstances,
     totalInstances: userInstances.length,
     activeSubscriptions: Number(activeSubRows[0]?.count ?? 0),
-    credits: user?.credits ?? 0,
+    credits: Math.round(wallet?.balance ?? 0),
     usage30dTotal: Number(usage30Rows[0]?.total ?? 0),
     incidents24h: Number(incident24Rows[0]?.count ?? 0),
   })

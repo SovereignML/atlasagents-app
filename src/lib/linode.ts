@@ -4,13 +4,25 @@ import {
   getLinode,
   getLinodes,
   getLinodeDisks,
+  getLinodeTypes,
+  getRegions as getLinodeRegions,
+  getAccountInfo,
   createImage,
   getImage,
   setToken,
 } from "@linode/api-v4"
 import type { Linode, CreateLinodeRequest } from "@linode/api-v4/lib/linodes"
 import type { Image } from "@linode/api-v4/lib/images"
-import type { VmProvider, CreateVmOpts, VmInfo } from "@/lib/vm-provider"
+import type {
+  VpsProvider,
+  CreateVmOpts,
+  VmInfo,
+  NormalizedPlan,
+  NormalizedCategory,
+  ProviderRegionInfo,
+  ProviderHealth,
+} from "@/lib/vm-provider"
+import { getRemainingCreditBySlug } from "@/lib/provider-billing"
 
 let tokenInitialized = false
 function ensureToken() {
@@ -59,7 +71,20 @@ export function describeLinodeError(err: unknown): string {
   return e?.message ?? String(err)
 }
 
-export class LinodeProvider implements VmProvider {
+/** Linode `type.class` → our normalized category. highmem/gpu are skipped. */
+function linodeClassToCategory(klass: string): NormalizedCategory | null {
+  switch (klass) {
+    case "nanode":
+    case "standard":
+      return "SHARED_CPU"
+    case "dedicated":
+      return "DEDICATED_CPU"
+    default:
+      return null // highmem, gpu, premium, etc. — not offered as a normalized tier
+  }
+}
+
+export class LinodeProvider implements VpsProvider {
   readonly name = "linode"
 
   async createVM(opts: CreateVmOpts): Promise<VmInfo> {
@@ -170,5 +195,46 @@ export class LinodeProvider implements VmProvider {
       if (page > 50) break
     }
     return out
+  }
+
+  async listPlans(): Promise<NormalizedPlan[]> {
+    ensureToken()
+    const resp = await getLinodeTypes()
+    const out: NormalizedPlan[] = []
+    for (const t of resp.data ?? []) {
+      const category = linodeClassToCategory(t.class)
+      if (!category) continue
+      out.push({
+        providerPlanCode: t.id,
+        category,
+        vcpu: t.vcpus,
+        ramGb: Math.round(t.memory / 1024),
+        diskGb: Math.round(t.disk / 1024),
+        monthlyCostUsd: t.price?.monthly ?? 0,
+      })
+    }
+    return out
+  }
+
+  async getRegions(): Promise<ProviderRegionInfo[]> {
+    ensureToken()
+    const resp = await getLinodeRegions()
+    return (resp.data ?? []).map((r) => ({ code: r.id, name: r.label ?? r.id }))
+  }
+
+  async healthCheck(): Promise<ProviderHealth> {
+    ensureToken()
+    const started = Date.now()
+    try {
+      await getAccountInfo()
+      const latencyMs = Date.now() - started
+      return { status: latencyMs > 4000 ? "degraded" : "up", latencyMs }
+    } catch (err) {
+      return { status: "down", latencyMs: null, detail: { error: describeLinodeError(err) } }
+    }
+  }
+
+  async getRemainingCredit(): Promise<number | null> {
+    return getRemainingCreditBySlug(this.name)
   }
 }

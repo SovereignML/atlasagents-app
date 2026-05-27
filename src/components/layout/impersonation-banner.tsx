@@ -1,9 +1,12 @@
 "use client"
 
 import { useState } from "react"
+import { UserCog } from "lucide-react"
+
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
 
 export function ImpersonationBanner({
-  userId,
   email,
   name,
 }: {
@@ -20,18 +23,18 @@ export function ImpersonationBanner({
   }
 
   return (
-    <div className="bg-amber-500 text-black px-4 py-2 flex items-center justify-between gap-4 text-sm font-medium z-50">
-      <span>
-        Viewing as <strong>{name || email}</strong>
+    <Alert className="sticky top-0 z-50 rounded-none border-x-0 border-t-0 border-b border-amber-500/30 bg-amber-500/15 text-amber-700 dark:text-amber-300">
+      <UserCog />
+      <AlertTitle>Impersonating user</AlertTitle>
+      <AlertDescription className="text-amber-700/80 dark:text-amber-300/80">
+        Viewing as <span className="font-medium">{name || email}</span>
         {name && <span className="opacity-70"> ({email})</span>}
-      </span>
-      <button
-        onClick={handleStop}
-        disabled={stopping}
-        className="px-3 py-1 bg-black text-amber-500 text-xs font-medium rounded-full hover:bg-black/80 disabled:opacity-50"
-      >
-        {stopping ? "Stopping..." : "Stop Impersonating"}
-      </button>
-    </div>
+      </AlertDescription>
+      <AlertAction>
+        <Button size="sm" variant="outline" disabled={stopping} onClick={handleStop}>
+          {stopping ? "Stopping..." : "Stop Impersonating"}
+        </Button>
+      </AlertAction>
+    </Alert>
   )
 }

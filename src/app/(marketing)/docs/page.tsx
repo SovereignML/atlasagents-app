@@ -2,6 +2,9 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { motion, AnimatePresence } from "framer-motion"
+import { easing } from "@/lib/motion"
+import { Reveal } from "@/components/marketing/motion/reveal"
 import {
   Rocket,
   Terminal,
@@ -50,10 +53,15 @@ const faqItems = [
 function FAQItem({ question, answer }: { question: string; answer: string }) {
   const [open, setOpen] = useState(false)
   return (
-    <div className="rounded-2xl border border-[var(--border-color)] transition-all duration-200 hover:border-primary">
+    <div
+      className={`rounded-2xl border transition-colors duration-200 ${
+        open ? "border-primary/40 bg-[var(--card-hover)]" : "border-[var(--border-color)] hover:border-primary"
+      }`}
+    >
       <button
         type="button"
         onClick={() => setOpen(!open)}
+        aria-expanded={open}
         className="w-full flex items-center justify-between p-5 text-left cursor-pointer"
       >
         <span className="font-bold text-[var(--text-primary)] text-sm">
@@ -63,11 +71,19 @@ function FAQItem({ question, answer }: { question: string; answer: string }) {
           className={`w-5 h-5 text-primary shrink-0 ml-4 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
         />
       </button>
-      {open && (
-        <div className="px-5 pb-5">
-          <p className="text-[var(--text-secondary)] text-sm leading-relaxed">{answer}</p>
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: easing.outExpo }}
+            className="overflow-hidden"
+          >
+            <p className="px-5 pb-5 text-[var(--text-secondary)] text-sm leading-relaxed">{answer}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
@@ -330,7 +346,7 @@ export default function DocsPage() {
   return (
     <div className="max-w-[1200px] mx-auto px-8 py-16">
       {/* Header */}
-      <div className="border-l-4 border-primary pl-8 mb-16">
+      <Reveal className="border-l-4 border-primary pl-8 mb-16">
         <div className="text-primary text-xs mb-3 opacity-80">
           Docs
         </div>
@@ -340,7 +356,7 @@ export default function DocsPage() {
         <p className="text-[var(--text-secondary)] text-lg max-w-2xl">
           Everything you need to deploy and manage AI agents on SovereignML.
         </p>
-      </div>
+      </Reveal>
 
       <div className="flex flex-col lg:flex-row gap-12">
         {/* Sidebar nav */}
@@ -369,21 +385,25 @@ export default function DocsPage() {
         {/* Content */}
         <div className="flex-1 space-y-16 min-w-0">
           {sections.map((s) => (
-            <section key={s.id} id={s.id} className="scroll-mt-[120px]">
+            <Reveal as="section" key={s.id} id={s.id} className="scroll-mt-[120px]">
               <div className="flex items-center gap-3 mb-6 pb-4 border-b border-[var(--border-color)]">
-                <s.icon className="w-5 h-5 text-primary" />
+                <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-primary/10 text-primary shrink-0">
+                  <s.icon className="w-5 h-5" />
+                </span>
                 <h2 className="text-xl font-bold text-[var(--text-primary)]">
                   {s.title}
                 </h2>
               </div>
               {s.content}
-            </section>
+            </Reveal>
           ))}
 
           {/* FAQ */}
-          <section id="faq" className="scroll-mt-[120px]">
+          <Reveal as="section" id="faq" className="scroll-mt-[120px]">
             <div className="flex items-center gap-3 mb-6 pb-4 border-b border-[var(--border-color)]">
-              <ChevronDown className="w-5 h-5 text-primary" />
+              <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-primary/10 text-primary shrink-0">
+                <ChevronDown className="w-5 h-5" />
+              </span>
               <h2 className="text-xl font-bold text-[var(--text-primary)]">
                 FAQ
               </h2>
@@ -393,10 +413,10 @@ export default function DocsPage() {
                 <FAQItem key={item.question} question={item.question} answer={item.answer} />
               ))}
             </div>
-          </section>
+          </Reveal>
 
           {/* CTA */}
-          <div className="rounded-2xl border border-primary/30 bg-primary/10 p-8 flex flex-col sm:flex-row items-center justify-between gap-6">
+          <Reveal className="rounded-2xl border border-primary/30 bg-primary/10 p-8 flex flex-col sm:flex-row items-center justify-between gap-6">
             <div>
               <p className="text-primary text-xs mb-1">
                 Ready?
@@ -411,7 +431,7 @@ export default function DocsPage() {
             >
               Get Started <ArrowRight className="w-4 h-4" />
             </Link>
-          </div>
+          </Reveal>
         </div>
       </div>
     </div>

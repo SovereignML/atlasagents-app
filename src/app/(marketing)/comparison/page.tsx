@@ -3,13 +3,14 @@
 import { motion } from "framer-motion"
 import { Check, X, ArrowRight } from "lucide-react"
 import { BRANDING } from "@/configs/branding"
+import { easing } from "@/lib/motion"
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
   visible: (i: number) => ({
     opacity: 1,
     y: 0,
-    transition: { delay: i * 0.15, duration: 0.8, ease: [0.25, 0.46, 0.45, 0.94] as const },
+    transition: { delay: i * 0.12, duration: 0.7, ease: easing.outExpo },
   }),
 }
 
@@ -83,11 +84,11 @@ export default function ComparisonPage() {
         <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-[var(--border-color)]">
+              <tr className="border-b border-[var(--border-color)] bg-[var(--card-hover)]">
                 <th className="text-left text-[var(--text-secondary)] font-bold py-4 px-5 text-xs">
                   Feature
                 </th>
-                <th className="text-center text-primary font-bold py-4 px-5 text-xs">
+                <th className="text-center text-primary font-bold py-4 px-5 text-xs bg-primary/[0.06]">
                   SovereignML
                 </th>
                 <th className="text-center text-[var(--text-secondary)] font-bold py-4 px-5 text-xs">
@@ -107,7 +108,7 @@ export default function ComparisonPage() {
                   <td className="py-4 px-5 text-[var(--text-primary)] font-semibold">
                     {row.feature}
                   </td>
-                  <td className="py-4 px-5 text-center">
+                  <td className="py-4 px-5 text-center bg-primary/[0.04]">
                     <CellIcon value={row.us} />
                   </td>
                   <td className="py-4 px-5 text-center">

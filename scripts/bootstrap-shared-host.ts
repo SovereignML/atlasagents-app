@@ -63,7 +63,7 @@ async function pollUntil<T>(
 async function main(): Promise<void> {
   requireEnv("SSH_FLEET_PRIVATE_KEY")
   const publicKey = requireEnv("SSH_FLEET_PUBLIC_KEY")
-  const provider = getVmProvider()
+  const provider = await getVmProvider()
 
   const existing = await db
     .select({

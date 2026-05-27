@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     }
 
     // Rate limit: 3 per email per hour
-    if (!rateLimit(`forgot-password:${email.toLowerCase()}`, 3, 60 * 60 * 1000)) {
+    if (!(await rateLimit(`forgot-password:${email.toLowerCase()}`, 3, 60 * 60 * 1000))) {
       return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 })
     }
 

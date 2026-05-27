@@ -21,13 +21,24 @@ export type PickedHost = {
   runningCount: number
 }
 
+// Drizzle transaction handle type (matches the pattern used in wallet.ts).
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
+
+// Single fixed key for the fleet scheduler advisory lock. Any constant works;
+// it just has to be the same everywhere so all reservations serialize against
+// each other (and nothing else).
+const SCHEDULER_LOCK_KEY = 0x50_56_53_31 // "PVS1"
+
+const PORT_MIN = 4000
+const PORT_MAX = 5999
+
 /**
- * Pick the least-loaded "ready" BotHost. Load = count of Instances that are
- * still bound to the host (status != deleted). Throws FleetEmptyError if no
- * hosts exist at all, FleetFullError if every host is at capacity.
+ * Pick the least-loaded "ready" BotHost using the given executor. Load = count
+ * of Instances still bound to the host (status != deleted). Throws
+ * FleetEmptyError if no hosts exist, FleetFullError if every host is full.
  */
-export async function pickHost(): Promise<PickedHost> {
-  const hosts = await db.query.botHosts.findMany({
+async function pickHostTx(tx: Tx): Promise<PickedHost> {
+  const hosts = await tx.query.botHosts.findMany({
     where: eq(botHosts.status, "ready"),
   })
   if (hosts.length === 0) {
@@ -36,7 +47,7 @@ export async function pickHost(): Promise<PickedHost> {
 
   const counts = await Promise.all(
     hosts.map(async (h) => {
-      const rows = await db
+      const rows = await tx
         .select({ count: sql<number>`count(*)::int` })
         .from(instances)
         .where(and(eq(instances.botHostId, h.id), ne(instances.status, "deleted")))
@@ -61,13 +72,9 @@ export async function pickHost(): Promise<PickedHost> {
   return ranked[0]
 }
 
-/**
- * Allocate a free TCP port on the picked host in [4000, 5999]. Scans the
- * existing Instance.containerPort values on that host and picks the first
- * unused one.
- */
-export async function allocatePort(botHostId: string): Promise<number> {
-  const used = await db.query.instances.findMany({
+/** First free TCP port in [PORT_MIN, PORT_MAX] on the host, scanned via `tx`. */
+async function allocatePortTx(tx: Tx, botHostId: string): Promise<number> {
+  const used = await tx.query.instances.findMany({
     where: and(
       eq(instances.botHostId, botHostId),
       isNotNull(instances.containerPort),
@@ -76,8 +83,36 @@ export async function allocatePort(botHostId: string): Promise<number> {
     columns: { containerPort: true },
   })
   const taken = new Set(used.map((r) => r.containerPort).filter((p): p is number => typeof p === "number"))
-  for (let port = 4000; port <= 5999; port++) {
+  for (let port = PORT_MIN; port <= PORT_MAX; port++) {
     if (!taken.has(port)) return port
   }
-  throw new Error(`No free port in 4000-5999 on host ${botHostId}`)
+  throw new Error(`No free port in ${PORT_MIN}-${PORT_MAX} on host ${botHostId}`)
+}
+
+/**
+ * Atomically reserve a host + container port for an instance.
+ *
+ * Pick-host, allocate-port and the persist of those onto the instance row all
+ * happen inside one transaction holding a fleet-wide advisory lock, so two
+ * concurrent deploys can never select the same `host:port` (the previous
+ * read-scan-write `pickHost()`/`allocatePort()` pair raced: both saw the same
+ * free port because neither persisted its choice before the other scanned).
+ * The lock is blocking — concurrent deploys queue for a few ms rather than one
+ * failing — and the port is written immediately so the next reservation sees it
+ * as taken. Callers MUST clear `containerPort`/`botHostId` if provisioning then
+ * fails, so a dead deploy doesn't hold a slot (see provisionSharedBot).
+ */
+export async function reserveHostSlot(
+  instanceId: string,
+): Promise<{ host: PickedHost; port: number }> {
+  return await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${SCHEDULER_LOCK_KEY})`)
+    const host = await pickHostTx(tx)
+    const port = await allocatePortTx(tx, host.id)
+    await tx
+      .update(instances)
+      .set({ botHostId: host.id, containerPort: port })
+      .where(eq(instances.id, instanceId))
+    return { host, port }
+  })
 }

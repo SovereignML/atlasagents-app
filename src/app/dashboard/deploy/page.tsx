@@ -1,18 +1,36 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { REGIONS, type RegionConfig } from "@/configs/regions"
-import { SERVER_TYPES, type ServerTypeConfig } from "@/configs/server-types"
-import { DEPLOYABLE_PLANS, PLANS, type PlanConfig } from "@/configs/plans"
-import { calcPlanPrice, formatUsd } from "@/lib/pricing"
-import type { BillingInterval } from "@/lib/pricing"
+import { Check } from "lucide-react"
+
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+} from "@/components/ui/card"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import { PageContainer, PageHeader } from "@/components/layout/page-container"
+import { Textarea } from "@/components/ui/textarea"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { AGENT_CATEGORIES } from "@/configs/agent-categories"
 import { BRANDING } from "@/configs/branding"
+import { DEPLOYABLE_PLANS, PLANS, type PlanConfig } from "@/configs/plans"
+import { REGIONS, type RegionConfig } from "@/configs/regions"
+import { SERVER_TYPES, type ServerTypeConfig } from "@/configs/server-types"
+import { calcPlanPrice, formatUsd } from "@/lib/pricing"
+import type { BillingInterval } from "@/lib/pricing"
+import { cn } from "@/lib/utils"
 
 type Interface = "web" | "telegram" | "discord" | "api"
 type DeploymentTarget = "vps" | "shared" | "serverless"
+type Runtime = "openclaw" | "hermes"
 
 type AgentConfig = {
   use_case: string
@@ -23,6 +41,7 @@ type AgentConfig = {
   deployment_target: DeploymentTarget
   knowledge_source: string
   budget_tier: string
+  runtime: Runtime
 }
 
 const INTERFACES: { value: Interface; label: string; hint: string; enabled: boolean }[] = [
@@ -32,14 +51,28 @@ const INTERFACES: { value: Interface; label: string; hint: string; enabled: bool
   { value: "api", label: "REST API", hint: "Programmatic access only", enabled: false },
 ]
 
-const DEPLOYMENT_TARGETS: { value: DeploymentTarget; label: string; hint: string; enabled: boolean }[] = [
+const DEPLOYMENT_TARGETS: {
+  value: DeploymentTarget
+  label: string
+  hint: string
+  enabled: boolean
+}[] = [
   { value: "vps", label: "Dedicated VPS", hint: "Single-tenant, single instance, isolated", enabled: true },
   { value: "shared", label: "Shared Cluster", hint: "Multi-tenant pool, cheapest, autoscaled", enabled: false },
   { value: "serverless", label: "Serverless (Managed)", hint: "We run it — pay per request only", enabled: false },
 ]
 
+const RUNTIME_OPTIONS: { value: Runtime; label: string; hint: string; enabled: boolean }[] = [
+  { value: "openclaw", label: "OpenClaw", hint: "Default agent runtime", enabled: true },
+  { value: "hermes", label: "Hermes", hint: "Nous Research Hermes (Python)", enabled: true },
+]
+
 type Step = "project" | "interface" | "plan" | "advanced" | "billing"
 const ALL_STEPS: Step[] = ["project", "interface", "plan", "advanced", "billing"]
+
+const SELECTED_GLOW =
+  "aria-pressed:border-ring aria-pressed:ring-1 aria-pressed:ring-ring aria-pressed:bg-ring/15 aria-pressed:hover:bg-ring/20 aria-pressed:text-foreground " +
+  "data-[state=on]:border-ring data-[state=on]:ring-1 data-[state=on]:ring-ring data-[state=on]:bg-ring/15 data-[state=on]:hover:bg-ring/20 data-[state=on]:text-foreground"
 
 function deploymentSlug(raw: string) {
   return raw
@@ -67,11 +100,11 @@ export default function DeployPage() {
   const [step, setStep] = useState<Step>("project")
   const [deploying, setDeploying] = useState(false)
 
-  // Project + agent intake (merged)
   const [projectName, setProjectName] = useState("")
   const [useCase, setUseCase] = useState<string>("")
   const [interfaceKind, setInterfaceKind] = useState<Interface>("web")
   const [deploymentTarget] = useState<DeploymentTarget>("vps")
+  const [runtime, setRuntime] = useState<Runtime>("openclaw")
 
   const [selectedRegion, setSelectedRegion] = useState<RegionConfig | null>(null)
   const [billingInterval, setBillingInterval] = useState<BillingInterval>("month")
@@ -80,6 +113,17 @@ export default function DeployPage() {
   const [sshKey, setSshKey] = useState("")
 
   const selectedServer = selectedPlan ? resolveServerForPlan(selectedPlan) : null
+  // Hermes always boxes Open WebUI as a sidecar, which needs ≥2GB RAM. The
+  // 1GB Nanode can't fit both, so we gate the Hermes runtime button on plan size.
+  const hermesRamOk = !!selectedServer && selectedServer.ramGb >= 2
+
+  // If the user picks Hermes on a 4GB plan, then backtracks to a 1GB plan,
+  // flip the runtime back to OpenClaw — keeps the form in a valid state.
+  useEffect(() => {
+    if (runtime === "hermes" && selectedServer && selectedServer.ramGb < 2) {
+      setRuntime("openclaw")
+    }
+  }, [runtime, selectedServer])
 
   const STEPS = ALL_STEPS
   const stepIdx = STEPS.indexOf(step)
@@ -109,9 +153,7 @@ export default function DeployPage() {
     if (stepIdx > 0) setStep(STEPS[stepIdx - 1])
   }
 
-  const planPrice = selectedPlan
-    ? calcPlanPrice(selectedPlan, billingInterval)
-    : null
+  const planPrice = selectedPlan ? calcPlanPrice(selectedPlan, billingInterval) : null
 
   async function handleDeploy() {
     if (!projectName.trim() || !selectedPlan || !selectedRegion) return
@@ -136,6 +178,7 @@ export default function DeployPage() {
             deployment_target: deploymentTarget,
             knowledge_source: "none",
             budget_tier: "mid",
+            runtime,
           } satisfies AgentConfig,
           interfaceBinding: { kind: interfaceKind, mode: "immediate" },
         }),
@@ -163,531 +206,703 @@ export default function DeployPage() {
   const enterprisePlan = PLANS.find((p) => p.tier === "enterprise")
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-[var(--text-primary)]">Deploy AI Agent</h1>
-        <p className="text-[var(--text-secondary)] mt-1">Configure and launch your AI agent infrastructure.</p>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Deploy AI Agent"
+        description="Configure and launch your AI agent infrastructure."
+      />
 
-      {/* Step indicator */}
       <div className="flex items-center gap-1 overflow-x-auto pb-2">
-        {STEPS.map((s, i) => (
-          <button
-            key={s}
-            onClick={() => i <= stepIdx && setStep(s)}
-            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm whitespace-nowrap transition-all duration-200 ${
-              s === step
-                ? "bg-[var(--accent-dim)] text-[var(--accent-color)] font-medium border border-[var(--accent-color)]/30"
-                : i < stepIdx
-                ? "text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
-                : "text-[var(--text-secondary)]/50 cursor-default"
-            }`}
-          >
-            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-              s === step
-                ? "bg-[var(--accent-color)] text-black"
-                : i < stepIdx
-                ? "bg-emerald-600 text-[var(--text-primary)]"
-                : "bg-[var(--card-bg)] text-[var(--text-secondary)]"
-            }`}>
-              {i < stepIdx ? "\u2713" : i + 1}
-            </span>
-            {STEP_LABELS[s]}
-          </button>
-        ))}
+        {STEPS.map((s, i) => {
+          const isActive = s === step
+          const isComplete = i < stepIdx
+          const isFuture = i > stepIdx
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => i <= stepIdx && setStep(s)}
+              disabled={isFuture}
+              className={
+                isActive
+                  ? "flex items-center gap-2 whitespace-nowrap rounded-lg border border-ring bg-ring/5 px-3 py-2 text-sm font-medium text-foreground ring-1 ring-ring"
+                  : isComplete
+                    ? "flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                    : "flex cursor-default items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm text-muted-foreground/50"
+              }
+            >
+              <span
+                className={
+                  isActive
+                    ? "flex size-6 items-center justify-center rounded-full bg-ring text-xs font-bold text-background"
+                    : isComplete
+                      ? "flex size-6 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white"
+                      : "flex size-6 items-center justify-center rounded-full bg-muted text-xs font-bold text-muted-foreground"
+                }
+              >
+                {isComplete ? <Check className="size-3.5" /> : i + 1}
+              </span>
+              {STEP_LABELS[s]}
+            </button>
+          )
+        })}
       </div>
 
-      {/* Step content */}
-      <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] p-6 md:p-8">
-        {/* STEP: Project (name + use case + target user + tone + templates) */}
-        {step === "project" && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-lg font-semibold text-[var(--text-primary)] mb-1">Project</h2>
-              <p className="text-sm text-[var(--text-secondary)]">Name your agent and pick a use case.</p>
-            </div>
-
-            <div>
-              <label className="block text-xs uppercase tracking-wide text-[var(--text-secondary)] mb-2">Project Name</label>
-              <input
-                type="text"
-                value={projectName}
-                onChange={(e) => setProjectName(e.target.value)}
-                placeholder="my-ai-agent"
-                className="w-full bg-[var(--card-bg)] border border-[var(--border-color)] rounded-xl px-4 py-3 text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]/50 focus:outline-none focus:border-blue-500/50 transition-colors"
-              />
-              {projectName.trim().length > 0 && (
-                <p className="text-[11px] font-mono text-[var(--text-secondary)] mt-2">
-                  slug: {slugPreview || "—"}
-                </p>
-              )}
-              {projectName.trim().length > 0 && projectName.trim().length < 2 && (
-                <p className="text-xs text-amber-400/90 mt-1">
-                  Enter at least 2 characters to continue.
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-xs uppercase tracking-wide text-[var(--text-secondary)] mb-2">Use Case</label>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                {AGENT_CATEGORIES.map((cat) => (
-                  <button
-                    key={cat.slug}
-                    onClick={() => setUseCase(cat.slug)}
-                    className={`p-3 rounded-xl border text-left transition-all ${
-                      useCase === cat.slug
-                        ? "border-[var(--accent-color)] bg-[var(--accent-dim)]"
-                        : "border-[var(--border-color)] bg-[var(--card-bg)] hover:border-[var(--accent-color)]"
-                    }`}
-                  >
-                    <p className="text-[var(--text-primary)] font-medium text-sm">{cat.name}</p>
-                    <p className="text-[var(--text-secondary)] text-xs mt-1 line-clamp-2">{cat.description}</p>
-                  </button>
-                ))}
+      <Card>
+        <CardContent className="space-y-6 py-6">
+          {step === "project" && (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">Project</h2>
+                <p className="text-sm text-muted-foreground">Name your agent and pick a use case.</p>
               </div>
-            </div>
-          </div>
-        )}
 
-        {/* STEP: Interface (interface + deployment target + location) */}
-        {step === "interface" && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-lg font-semibold text-[var(--text-primary)] mb-1">Interface & Deployment</h2>
-              <p className="text-sm text-[var(--text-secondary)]">
-                Choose where users reach the bot, how it runs, and where it lives.
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-xs uppercase tracking-wide text-[var(--text-secondary)] mb-2">Interface · where users reach the bot</label>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {INTERFACES.map((i) => (
-                  <button
-                    key={i.value}
-                    disabled={!i.enabled}
-                    onClick={() => i.enabled && setInterfaceKind(i.value)}
-                    className={`w-full p-3 rounded-xl border text-left transition-all ${
-                      !i.enabled
-                        ? "border-[var(--border-color)]/50 bg-[var(--card-bg)]/50 opacity-50 cursor-not-allowed"
-                        : interfaceKind === i.value
-                        ? "border-[var(--accent-color)] bg-[var(--accent-dim)]"
-                        : "border-[var(--border-color)] bg-[var(--card-bg)] hover:border-[var(--accent-color)]"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <p className="text-[var(--text-primary)] text-sm font-medium">{i.label}</p>
-                      {!i.enabled && (
-                        <span className="text-[10px] text-[var(--text-secondary)]/60 border border-zinc-700 rounded-full px-1.5 py-0.5">Coming soon</span>
-                      )}
-                    </div>
-                    <p className="text-[var(--text-secondary)] text-xs">{i.hint}</p>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs uppercase tracking-wide text-[var(--text-secondary)] mb-2">Deployment Target · how the bot runs</label>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                {DEPLOYMENT_TARGETS.map((d) => (
-                  <button
-                    key={d.value}
-                    disabled={!d.enabled}
-                    onClick={() => {}}
-                    className={`w-full p-3 rounded-xl border text-left transition-all ${
-                      !d.enabled
-                        ? "border-[var(--border-color)]/50 bg-[var(--card-bg)]/50 opacity-50 cursor-not-allowed"
-                        : deploymentTarget === d.value
-                        ? "border-[var(--accent-color)] bg-[var(--accent-dim)]"
-                        : "border-[var(--border-color)] bg-[var(--card-bg)] hover:border-[var(--accent-color)]"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <p className="text-[var(--text-primary)] text-sm font-medium">{d.label}</p>
-                      {!d.enabled && (
-                        <span className="text-[10px] text-[var(--text-secondary)]/60 border border-zinc-700 rounded-full px-1.5 py-0.5">Coming soon</span>
-                      )}
-                    </div>
-                    <p className="text-[var(--text-secondary)] text-xs">{d.hint}</p>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs uppercase tracking-wide text-[var(--text-secondary)] mb-2">Location · server region</label>
-              <div className="flex items-center justify-between border border-[var(--border-color)] bg-[var(--card-bg)] px-4 py-2.5 rounded-xl mb-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-[var(--accent-color)] animate-pulse" />
-                  <p className="text-xs font-mono text-[var(--text-primary)]">All regions operational</p>
-                </div>
-                <p className="text-[10px] font-mono text-[var(--text-secondary)]/70">live</p>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {REGIONS.map((r) => (
-                  <button
-                    key={r.slug}
-                    disabled={!r.available}
-                    onClick={() => setSelectedRegion(r)}
-                    className={`flex items-center gap-4 p-4 rounded-xl border transition-all text-left ${
-                      selectedRegion?.slug === r.slug
-                        ? "border-[var(--accent-color)] bg-[var(--accent-dim)]"
-                        : r.available
-                        ? "border-[var(--border-color)] bg-[var(--card-bg)] hover:border-[var(--accent-color)] hover:bg-[var(--card-hover)]"
-                        : "border-[var(--border-color)]/50 bg-[var(--card-bg)]/50 opacity-50 cursor-not-allowed"
-                    }`}
-                  >
-                    <span className="text-2xl">{r.flag}</span>
-                    <div>
-                      <p className="text-[var(--text-primary)] font-medium text-sm">{r.name}</p>
-                      <p className="text-[var(--text-secondary)] text-xs">{r.country}</p>
-                    </div>
-                    {!r.available && (
-                      <span className="ml-auto text-xs text-[var(--text-secondary)]/50 border border-zinc-800 rounded-full px-2 py-0.5">Soon</span>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="project-name">Project Name</FieldLabel>
+                  <Input
+                    id="project-name"
+                    value={projectName}
+                    onChange={(e) => setProjectName(e.target.value)}
+                    placeholder="my-ai-agent"
+                    className={cn(
+                      projectName.trim().length >= 2 && "border-ring ring-1 ring-ring"
                     )}
-                  </button>
-                ))}
+                  />
+                  {projectName.trim().length > 0 && (
+                    <FieldDescription className="font-mono">slug: {slugPreview || "—"}</FieldDescription>
+                  )}
+                  {projectName.trim().length > 0 && projectName.trim().length < 2 && (
+                    <FieldDescription className="text-amber-500">
+                      Enter at least 2 characters to continue.
+                    </FieldDescription>
+                  )}
+                </Field>
+              </FieldGroup>
+
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Use Case</p>
+                <ToggleGroup
+                  value={useCase ? [useCase] : []}
+                  onValueChange={(v) => v[0] && setUseCase(v[0])}
+                  className="grid w-full grid-cols-2 gap-2 md:grid-cols-4"
+                  spacing={1}
+                >
+                  {AGENT_CATEGORIES.map((cat) => (
+                    <ToggleGroupItem
+                      key={cat.slug}
+                      value={cat.slug}
+                      variant="outline"
+                      className={cn(
+                        "h-auto flex-col items-start whitespace-normal p-3 text-left",
+                        SELECTED_GLOW
+                      )}
+                    >
+                      <p className="text-sm font-medium text-foreground">{cat.name}</p>
+                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                        {cat.description}
+                      </p>
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* STEP: Plan */}
-        {step === "plan" && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-lg font-semibold text-[var(--text-primary)] mb-1">Choose Your Plan</h2>
-              <p className="text-sm text-[var(--text-secondary)]">
-                Each plan includes dedicated infrastructure, credits, and support.
-              </p>
-            </div>
+          {step === "interface" && (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">Interface &amp; Deployment</h2>
+                <p className="text-sm text-muted-foreground">
+                  Choose where users reach the bot, how it runs, and where it lives.
+                </p>
+              </div>
 
-            <div className="space-y-3">
-              {DEPLOYABLE_PLANS.map((plan) => {
-                const server = resolveServerForPlan(plan)
-                const isSelected = selectedPlan?.slug === plan.slug
-                const price = plan.displayPriceMonthly
-                return (
-                  <button
-                    key={plan.slug}
-                    onClick={() => setSelectedPlan(plan)}
-                    className={`w-full p-5 rounded-xl border text-left transition-all ${
-                      isSelected
-                        ? "border-[var(--accent-color)] bg-[var(--accent-dim)]"
-                        : "border-[var(--border-color)] bg-[var(--card-bg)] hover:border-[var(--accent-color)]"
-                    } ${plan.highlight ? "ring-1 ring-[var(--accent-color)]/20" : ""}`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="text-[var(--text-primary)] font-semibold text-lg">{plan.name}</p>
-                          {plan.highlight && (
-                            <span className="text-[10px] bg-[var(--accent-color)] text-black px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                              Popular
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[var(--text-secondary)] text-sm mt-1">{plan.description}</p>
-                      </div>
-                      <div className="text-right">
-                        {price === 0 ? (
-                          <p className="text-[var(--text-primary)] font-bold text-2xl">Free</p>
-                        ) : (
-                          <p className="text-[var(--text-primary)] font-bold text-2xl">
-                            ${price}<span className="text-[var(--text-secondary)] text-sm font-normal">/mo</span>
-                          </p>
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Interface · where users reach the bot
+                </p>
+                <ToggleGroup
+                  value={[interfaceKind]}
+                  onValueChange={(v) => v[0] && setInterfaceKind(v[0] as Interface)}
+                  className="grid w-full grid-cols-1 gap-2 md:grid-cols-2"
+                  spacing={1}
+                >
+                  {INTERFACES.map((i) => (
+                    <ToggleGroupItem
+                      key={i.value}
+                      value={i.value}
+                      disabled={!i.enabled}
+                      variant="outline"
+                      className={cn(
+                        "h-auto flex-col items-start whitespace-normal p-3 text-left",
+                        SELECTED_GLOW
+                      )}
+                    >
+                      <div className="flex w-full items-center justify-between">
+                        <p className="text-sm font-medium text-foreground">{i.label}</p>
+                        {!i.enabled && (
+                          <Badge variant="outline" className="text-[10px]">
+                            Coming soon
+                          </Badge>
                         )}
                       </div>
-                    </div>
-                    {server && (
-                      <div className="mt-3 flex flex-wrap gap-3 text-xs text-[var(--text-secondary)]">
-                        <span>{server.vcpu} vCPU</span>
-                        <span>{server.ramGb} GB RAM</span>
-                        <span>{server.storageGb} GB Storage</span>
-                        <span>{plan.creditsPerPeriod.toLocaleString()} credits/mo</span>
-                      </div>
-                    )}
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {plan.features.slice(0, 3).map((f) => (
-                        <span key={f} className="text-[10px] border border-[var(--border-color)] rounded-full px-2 py-0.5 text-[var(--text-secondary)]">
-                          {f}
-                        </span>
-                      ))}
-                    </div>
-                  </button>
-                )
-              })}
+                      <p className="text-xs text-muted-foreground">{i.hint}</p>
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+              </div>
 
-              {enterprisePlan && (
-                <div className="w-full p-5 rounded-xl border border-[var(--border-color)] bg-[var(--card-bg)] opacity-80">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-[var(--text-primary)] font-semibold text-lg">{enterprisePlan.name}</p>
-                      <p className="text-[var(--text-secondary)] text-sm mt-1">{enterprisePlan.description}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[var(--text-primary)] font-bold text-lg">{enterprisePlan.enterprisePriceLabel}</p>
-                    </div>
-                  </div>
-                  {(() => {
-                    const server = resolveServerForPlan(enterprisePlan)
-                    return server ? (
-                      <div className="mt-3 flex flex-wrap gap-3 text-xs text-[var(--text-secondary)]">
-                        <span>{server.vcpu} vCPU</span>
-                        <span>{server.ramGb} GB RAM</span>
-                        <span>{server.storageGb} GB Storage</span>
-                      </div>
-                    ) : null
-                  })()}
-                  <div className="mt-4">
-                    <a
-                      href={BRANDING.demoUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 text-sm font-medium text-[var(--accent-color)] hover:underline"
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Deployment Target · how the bot runs
+                </p>
+                <ToggleGroup
+                  value={[deploymentTarget]}
+                  className="grid w-full grid-cols-1 gap-2 md:grid-cols-3"
+                  spacing={1}
+                >
+                  {DEPLOYMENT_TARGETS.map((d) => (
+                    <ToggleGroupItem
+                      key={d.value}
+                      value={d.value}
+                      disabled={!d.enabled}
+                      variant="outline"
+                      className={cn(
+                        "h-auto flex-col items-start whitespace-normal p-3 text-left",
+                        SELECTED_GLOW
+                      )}
                     >
-                      Contact Sales &rarr;
-                    </a>
-                  </div>
+                      <div className="flex w-full items-center justify-between">
+                        <p className="text-sm font-medium text-foreground">{d.label}</p>
+                        {!d.enabled && (
+                          <Badge variant="outline" className="text-[10px]">
+                            Coming soon
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">{d.hint}</p>
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+              </div>
+
+              {deploymentTarget === "vps" && (
+                <div className="space-y-2">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Runtime Engine · which agent runtime powers the bot
+                  </p>
+                  <ToggleGroup
+                    value={[runtime]}
+                    onValueChange={(v) => {
+                      if (!v[0]) return
+                      setRuntime(v[0] as Runtime)
+                    }}
+                    className="grid w-full grid-cols-1 gap-2 md:grid-cols-2"
+                    spacing={1}
+                  >
+                    {RUNTIME_OPTIONS.map((r) => {
+                      // Hermes always ships with the Open WebUI sidecar — that needs
+                      // ≥2GB RAM, so the runtime button itself is gated on plan size.
+                      const ramBlocked = r.value === "hermes" && !hermesRamOk
+                      const disabled = !r.enabled || ramBlocked
+                      return (
+                        <ToggleGroupItem
+                          key={r.value}
+                          value={r.value}
+                          disabled={disabled}
+                          variant="outline"
+                          className={cn(
+                            "h-auto flex-col items-start whitespace-normal p-3 text-left",
+                            SELECTED_GLOW
+                          )}
+                        >
+                          <div className="flex w-full items-center justify-between">
+                            <p className="text-sm font-medium text-foreground">{r.label}</p>
+                            {!r.enabled ? (
+                              <Badge variant="outline" className="text-[10px]">
+                                Coming soon
+                              </Badge>
+                            ) : ramBlocked ? (
+                              <Badge variant="outline" className="text-[10px]">
+                                Needs ≥2GB plan
+                              </Badge>
+                            ) : null}
+                          </div>
+                          <p className="text-xs text-muted-foreground">{r.hint}</p>
+                        </ToggleGroupItem>
+                      )
+                    })}
+                  </ToggleGroup>
+                  {runtime === "hermes" && (
+                    <p className="text-xs text-muted-foreground">
+                      Hermes ships with the Open WebUI chat interface bundled — you&apos;ll get a web
+                      chat UI at <span className="font-mono">/</span> and the OpenAI-compatible API at{" "}
+                      <span className="font-mono">/v1</span> on the same public URL.
+                    </p>
+                  )}
                 </div>
               )}
-            </div>
 
-            {selectedPlan && selectedServer && (
-              <div className="border border-[var(--border-color)] bg-[var(--bg-secondary)] rounded-xl p-4">
-                <p className="text-[10px] uppercase tracking-[0.1em] font-mono text-[var(--accent-color)] mb-2">
-                  Your plan includes
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Location · server region
                 </p>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                  <div>
-                    <p className="text-[var(--text-secondary)] text-xs">CPU</p>
-                    <p className="text-[var(--text-primary)] font-medium">{selectedServer.vcpu} vCPU</p>
-                  </div>
-                  <div>
-                    <p className="text-[var(--text-secondary)] text-xs">Memory</p>
-                    <p className="text-[var(--text-primary)] font-medium">{selectedServer.ramGb} GB RAM</p>
-                  </div>
-                  <div>
-                    <p className="text-[var(--text-secondary)] text-xs">Storage</p>
-                    <p className="text-[var(--text-primary)] font-medium">{selectedServer.storageGb} GB</p>
-                  </div>
-                  <div>
-                    <p className="text-[var(--text-secondary)] text-xs">Credits</p>
-                    <p className="text-[var(--text-primary)] font-medium">{selectedPlan.creditsPerPeriod.toLocaleString()}/mo</p>
-                  </div>
-                </div>
+                <Alert>
+                  <span className="size-2 animate-pulse rounded-full bg-primary" />
+                  <AlertDescription className="font-mono">
+                    All regions operational <span className="opacity-70">live</span>
+                  </AlertDescription>
+                </Alert>
+                <ToggleGroup
+                  value={selectedRegion ? [selectedRegion.slug] : []}
+                  onValueChange={(v) => {
+                    const slug = v[0]
+                    if (!slug) return
+                    const r = REGIONS.find((x) => x.slug === slug)
+                    if (r && r.available) setSelectedRegion(r)
+                  }}
+                  className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2"
+                  spacing={1}
+                >
+                  {REGIONS.map((r) => (
+                    <ToggleGroupItem
+                      key={r.slug}
+                      value={r.slug}
+                      disabled={!r.available}
+                      variant="outline"
+                      className={cn(
+                        "h-auto items-center gap-4 whitespace-normal p-4 text-left",
+                        SELECTED_GLOW
+                      )}
+                    >
+                      <span className="text-2xl">{r.flag}</span>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-foreground">{r.name}</p>
+                        <p className="text-xs text-muted-foreground">{r.country}</p>
+                      </div>
+                      {!r.available && (
+                        <Badge variant="outline" className="ml-auto text-[10px]">
+                          Soon
+                        </Badge>
+                      )}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
               </div>
-            )}
-          </div>
-        )}
-
-        {/* STEP: Advanced (root password + SSH key only) */}
-        {step === "advanced" && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-lg font-semibold text-[var(--text-primary)] mb-1">Advanced Options</h2>
-              <p className="text-sm text-[var(--text-secondary)]">
-                Optional configuration. All fields are independent — fill only what you need.
-              </p>
             </div>
+          )}
 
-            <div className="space-y-4">
+          {step === "plan" && (
+            <div className="space-y-6">
               <div>
-                <label className="block text-sm text-[var(--text-primary)] mb-2">Root Password</label>
-                <input
-                  type="password"
-                  value={rootPassword}
-                  onChange={(e) => setRootPassword(e.target.value)}
-                  placeholder="Leave blank for auto-generated"
-                  className="w-full bg-[var(--card-bg)] border border-[var(--border-color)] rounded-xl px-4 py-3 text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]/50 focus:outline-none focus:border-blue-500/50 transition-colors"
-                />
+                <h2 className="text-lg font-semibold text-foreground">Choose Your Plan</h2>
+                <p className="text-sm text-muted-foreground">
+                  Each plan includes dedicated infrastructure, credits, and support.
+                </p>
               </div>
 
+              <ToggleGroup
+                orientation="vertical"
+                value={selectedPlan ? [selectedPlan.slug] : []}
+                onValueChange={(v) => {
+                  const slug = v[0]
+                  if (!slug) return
+                  const p = DEPLOYABLE_PLANS.find((x) => x.slug === slug)
+                  if (p) setSelectedPlan(p)
+                }}
+                className="flex w-full flex-col gap-3"
+                spacing={1}
+              >
+                {DEPLOYABLE_PLANS.map((plan) => {
+                  const server = resolveServerForPlan(plan)
+                  const price = plan.displayPriceMonthly
+                  return (
+                    <ToggleGroupItem
+                      key={plan.slug}
+                      value={plan.slug}
+                      variant="outline"
+                      className={cn(
+                        "h-auto w-full flex-col items-stretch whitespace-normal p-5 text-left",
+                        plan.highlight && "ring-1 ring-primary/20",
+                        SELECTED_GLOW
+                      )}
+                    >
+                      <div className="flex w-full items-start justify-between">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="text-lg font-semibold text-foreground">{plan.name}</p>
+                            {plan.highlight && (
+                              <Badge className="font-mono text-[10px]">Popular</Badge>
+                            )}
+                          </div>
+                          <p className="mt-1 text-sm text-muted-foreground">{plan.description}</p>
+                        </div>
+                        <div className="text-right">
+                          {price === 0 ? (
+                            <p className="text-2xl font-bold text-foreground">Free</p>
+                          ) : (
+                            <p className="text-2xl font-bold text-foreground">
+                              ${price}
+                              <span className="text-sm font-normal text-muted-foreground">/mo</span>
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      {server && (
+                        <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                          <span>{server.vcpu} vCPU</span>
+                          <span>{server.ramGb} GB RAM</span>
+                          <span>{server.storageGb} GB Storage</span>
+                          <span>{plan.creditsPerPeriod.toLocaleString()} credits/mo</span>
+                        </div>
+                      )}
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {plan.features.slice(0, 3).map((f) => (
+                          <Badge key={f} variant="outline" className="text-[10px]">
+                            {f}
+                          </Badge>
+                        ))}
+                      </div>
+                    </ToggleGroupItem>
+                  )
+                })}
+              </ToggleGroup>
+
+              {enterprisePlan && (
+                <Card>
+                  <CardContent>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-lg font-semibold text-foreground">
+                          {enterprisePlan.name}
+                        </p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {enterprisePlan.description}
+                        </p>
+                      </div>
+                      <p className="text-lg font-bold text-foreground">
+                        {enterprisePlan.enterprisePriceLabel}
+                      </p>
+                    </div>
+                    {(() => {
+                      const server = resolveServerForPlan(enterprisePlan)
+                      return server ? (
+                        <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                          <span>{server.vcpu} vCPU</span>
+                          <span>{server.ramGb} GB RAM</span>
+                          <span>{server.storageGb} GB Storage</span>
+                        </div>
+                      ) : null
+                    })()}
+                    <div className="mt-4">
+                      <a
+                        href={BRANDING.demoUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
+                      >
+                        Contact Sales &rarr;
+                      </a>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {selectedPlan && selectedServer && (
+                <Card className="bg-muted/40">
+                  <CardHeader>
+                    <CardDescription className="font-mono text-[10px] tracking-[0.1em] uppercase text-primary">
+                      Your plan includes
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+                    <div>
+                      <p className="text-xs text-muted-foreground">CPU</p>
+                      <p className="font-medium text-foreground">{selectedServer.vcpu} vCPU</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Memory</p>
+                      <p className="font-medium text-foreground">{selectedServer.ramGb} GB RAM</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Storage</p>
+                      <p className="font-medium text-foreground">{selectedServer.storageGb} GB</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Credits</p>
+                      <p className="font-medium text-foreground">
+                        {selectedPlan.creditsPerPeriod.toLocaleString()}/mo
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+
+          {step === "advanced" && (
+            <div className="space-y-6">
               <div>
-                <label className="block text-sm text-[var(--text-primary)] mb-2">SSH Public Key</label>
-                <textarea
-                  value={sshKey}
-                  onChange={(e) => setSshKey(e.target.value)}
-                  placeholder="ssh-ed25519 AAAA..."
-                  rows={3}
-                  className="w-full bg-[var(--card-bg)] border border-[var(--border-color)] rounded-xl px-4 py-3 text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]/50 focus:outline-none focus:border-blue-500/50 transition-colors font-mono text-sm resize-none"
-                />
+                <h2 className="text-lg font-semibold text-foreground">Advanced Options</h2>
+                <p className="text-sm text-muted-foreground">
+                  Optional configuration. All fields are independent — fill only what you need.
+                </p>
               </div>
 
-              <p className="text-[11px] font-mono text-[var(--text-secondary)]">
-                Custom domains can be configured after deployment from the instance Controls tab.
-              </p>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="root-password">Root Password</FieldLabel>
+                  <Input
+                    id="root-password"
+                    type="password"
+                    value={rootPassword}
+                    onChange={(e) => setRootPassword(e.target.value)}
+                    placeholder="Leave blank for auto-generated"
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="ssh-key">SSH Public Key</FieldLabel>
+                  <Textarea
+                    id="ssh-key"
+                    rows={3}
+                    value={sshKey}
+                    onChange={(e) => setSshKey(e.target.value)}
+                    placeholder="ssh-ed25519 AAAA..."
+                    className="font-mono text-sm"
+                  />
+                </Field>
+                <FieldDescription className="font-mono">
+                  Custom domains can be configured after deployment from the instance Controls tab.
+                </FieldDescription>
+              </FieldGroup>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* STEP: Billing (includes Review summary + Deploy) */}
-        {step === "billing" && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-lg font-semibold text-[var(--text-primary)] mb-1">Billing & Review</h2>
-              <p className="text-sm text-[var(--text-secondary)]">
-                Choose a billing cycle, confirm your configuration, and deploy.
-              </p>
-            </div>
+          {step === "billing" && (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">Billing &amp; Review</h2>
+                <p className="text-sm text-muted-foreground">
+                  Choose a billing cycle, confirm your configuration, and deploy.
+                </p>
+              </div>
 
-            {selectedPlan && selectedPlan.tier !== "free" && (
-              <div className="grid grid-cols-2 gap-4">
-                {(["month", "year"] as BillingInterval[]).map((interval) => (
-                  <button
-                    key={interval}
-                    onClick={() => setBillingInterval(interval)}
-                    className={`p-6 rounded-xl border text-center transition-all ${
-                      billingInterval === interval
-                        ? "border-[var(--accent-color)] bg-[var(--accent-dim)]"
-                        : "border-[var(--border-color)] bg-[var(--card-bg)] hover:border-[var(--accent-color)]"
-                    }`}
-                  >
-                    <p className="text-[var(--text-primary)] font-semibold text-lg">
-                      {interval === "month" ? "Monthly" : "Yearly"}
-                    </p>
-                    <p className="text-[var(--text-secondary)] text-sm mt-1">
-                      {interval === "month" ? "Pay month-to-month" : "Save ~17% (2 months free)"}
-                    </p>
-                    {interval === "year" && (
-                      <span className="inline-block mt-2 text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full">
-                        Best Value
+              {selectedPlan && selectedPlan.tier !== "free" && (
+                <ToggleGroup
+                  value={[billingInterval]}
+                  onValueChange={(v) => v[0] && setBillingInterval(v[0] as BillingInterval)}
+                  className="grid w-full grid-cols-2 gap-4"
+                  spacing={1}
+                >
+                  {(["month", "year"] as BillingInterval[]).map((interval) => (
+                    <ToggleGroupItem
+                      key={interval}
+                      value={interval}
+                      variant="outline"
+                      className={cn(
+                        "h-auto flex-col gap-1 whitespace-normal p-6 text-center",
+                        SELECTED_GLOW
+                      )}
+                    >
+                      <p className="text-lg font-semibold text-foreground">
+                        {interval === "month" ? "Monthly" : "Yearly"}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {interval === "month" ? "Pay month-to-month" : "Save ~17% (2 months free)"}
+                      </p>
+                      {interval === "year" && (
+                        <Badge className="mt-2 bg-emerald-500/20 text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-300">
+                          Best Value
+                        </Badge>
+                      )}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+              )}
+
+              <Card className="border-ring ring-1 ring-ring bg-ring/5">
+                <CardHeader>
+                  <CardDescription className="font-mono text-xs uppercase tracking-wide text-primary">
+                    Agent
+                  </CardDescription>
+                  <p className="font-medium text-foreground">
+                    {selectedCategoryObj?.name ?? "—"}
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-xs text-muted-foreground">
+                    Interface: <span className="capitalize text-foreground">{interfaceKind}</span> ·
+                    <span className="ml-1">
+                      Deploy:{" "}
+                      <span className="capitalize text-foreground">{deploymentTarget}</span>
+                    </span>
+                    {deploymentTarget === "vps" && (
+                      <span className="ml-1">
+                        · Runtime:{" "}
+                        <span className="text-foreground">
+                          {RUNTIME_OPTIONS.find((r) => r.value === runtime)?.label ?? runtime}
+                        </span>
                       </span>
                     )}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div className="space-y-4">
-              <div className="bg-[var(--card-bg)] rounded-xl p-4 border border-[var(--accent-color)]/30">
-                <p className="text-[var(--accent-color)] text-xs uppercase tracking-wide mb-2 font-mono">Agent</p>
-                <p className="text-[var(--text-primary)] font-medium">{selectedCategoryObj?.name ?? "—"}</p>
-                <p className="text-[var(--text-secondary)] text-xs mt-1">
-                  Interface: <span className="text-[var(--text-primary)] capitalize">{interfaceKind}</span> ·
-                  <span className="ml-1">Deploy: <span className="text-[var(--text-primary)] capitalize">{deploymentTarget}</span></span>
-                </p>
-                {coreActions.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {coreActions.map((a) => (
-                      <span key={a} className="text-[10px] border border-[var(--border-color)] rounded-full px-2 py-0.5 text-[var(--text-secondary)]">{a}</span>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div className="bg-[var(--card-bg)] rounded-xl p-4">
-                  <p className="text-[var(--text-secondary)] text-xs uppercase tracking-wide mb-1">Project</p>
-                  <p className="text-[var(--text-primary)] font-medium">{projectName}</p>
-                  <p className="text-[var(--text-secondary)] text-xs mt-2 font-mono">
-                    slug: {slugPreview || "—"}
                   </p>
-                </div>
-                <div className="bg-[var(--card-bg)] rounded-xl p-4">
-                  <p className="text-[var(--text-secondary)] text-xs uppercase tracking-wide mb-1">Plan</p>
-                  <p className="text-[var(--text-primary)] font-medium">{selectedPlan?.name ?? "—"}</p>
-                </div>
+                  {coreActions.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {coreActions.map((a) => (
+                        <Badge key={a} variant="outline" className="text-[10px]">
+                          {a}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <Card size="sm">
+                  <CardHeader>
+                    <CardDescription className="text-xs uppercase tracking-wide">
+                      Project
+                    </CardDescription>
+                    <p className="font-medium text-foreground">{projectName}</p>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="font-mono text-xs text-muted-foreground">
+                      slug: {slugPreview || "—"}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card size="sm">
+                  <CardHeader>
+                    <CardDescription className="text-xs uppercase tracking-wide">
+                      Plan
+                    </CardDescription>
+                    <p className="font-medium text-foreground">{selectedPlan?.name ?? "—"}</p>
+                  </CardHeader>
+                </Card>
                 {selectedRegion && (
-                  <div className="bg-[var(--card-bg)] rounded-xl p-4">
-                    <p className="text-[var(--text-secondary)] text-xs uppercase tracking-wide mb-1">Region</p>
-                    <p className="text-[var(--text-primary)] font-medium">{selectedRegion.flag} {selectedRegion.name}</p>
-                  </div>
+                  <Card size="sm">
+                    <CardHeader>
+                      <CardDescription className="text-xs uppercase tracking-wide">
+                        Region
+                      </CardDescription>
+                      <p className="font-medium text-foreground">
+                        {selectedRegion.flag} {selectedRegion.name}
+                      </p>
+                    </CardHeader>
+                  </Card>
                 )}
                 {selectedServer && (
-                  <div className="bg-[var(--card-bg)] rounded-xl p-4">
-                    <p className="text-[var(--text-secondary)] text-xs uppercase tracking-wide mb-1">Infrastructure</p>
-                    <p className="text-[var(--text-primary)] font-medium">{selectedServer.vcpu} vCPU, {selectedServer.ramGb} GB RAM</p>
-                  </div>
+                  <Card size="sm">
+                    <CardHeader>
+                      <CardDescription className="text-xs uppercase tracking-wide">
+                        Infrastructure
+                      </CardDescription>
+                      <p className="font-medium text-foreground">
+                        {selectedServer.vcpu} vCPU, {selectedServer.ramGb} GB RAM
+                      </p>
+                    </CardHeader>
+                  </Card>
                 )}
                 {selectedPlan && selectedPlan.tier !== "free" && (
-                  <div className="bg-[var(--card-bg)] rounded-xl p-4">
-                    <p className="text-[var(--text-secondary)] text-xs uppercase tracking-wide mb-1">Billing</p>
-                    <p className="text-[var(--text-primary)] font-medium">{billingInterval === "year" ? "Yearly" : "Monthly"}</p>
-                  </div>
+                  <Card size="sm">
+                    <CardHeader>
+                      <CardDescription className="text-xs uppercase tracking-wide">
+                        Billing
+                      </CardDescription>
+                      <p className="font-medium text-foreground">
+                        {billingInterval === "year" ? "Yearly" : "Monthly"}
+                      </p>
+                    </CardHeader>
+                  </Card>
                 )}
                 {sshKey && (
-                  <div className="bg-[var(--card-bg)] rounded-xl p-4">
-                    <p className="text-[var(--text-secondary)] text-xs uppercase tracking-wide mb-1">SSH Key</p>
-                    <p className="text-[var(--text-primary)] font-medium font-mono text-xs truncate">{sshKey.slice(0, 40)}...</p>
-                  </div>
+                  <Card size="sm">
+                    <CardHeader>
+                      <CardDescription className="text-xs uppercase tracking-wide">
+                        SSH Key
+                      </CardDescription>
+                      <p className="truncate font-mono text-xs font-medium text-foreground">
+                        {sshKey.slice(0, 40)}...
+                      </p>
+                    </CardHeader>
+                  </Card>
                 )}
               </div>
 
               {selectedPlan && (
-                <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-6 space-y-3">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-[var(--text-secondary)]">{selectedPlan.name} Plan</span>
-                    <span className="text-[var(--text-primary)]">
-                      {selectedPlan.tier === "free"
-                        ? "Free"
-                        : planPrice
-                        ? formatUsd(planPrice.price)
-                        : "—"}
-                    </span>
-                  </div>
-                  <div className="border-t border-[var(--border-color)] pt-3 flex justify-between">
-                    <span className="text-[var(--text-primary)] font-semibold">Total</span>
-                    <span className="text-[var(--text-primary)] font-bold text-xl">
-                      {selectedPlan.tier === "free" ? (
-                        "$0.00"
-                      ) : planPrice ? (
-                        <>
-                          {formatUsd(planPrice.price)}
-                          <span className="text-[var(--text-secondary)] text-sm font-normal">
-                            /{billingInterval === "year" ? "year" : "month"}
-                          </span>
-                        </>
-                      ) : (
-                        "—"
-                      )}
-                    </span>
-                  </div>
-                  {planPrice?.yearlyDiscountApplied && selectedPlan.tier !== "free" && (
-                    <p className="text-emerald-400 text-xs">~17% savings with yearly billing</p>
-                  )}
-                  {selectedPlan.tier !== "free" && (
-                    <p className="text-[var(--text-secondary)] text-xs">
-                      Have a promo code? You can apply it at checkout.
-                    </p>
-                  )}
-                </div>
+                <Card className="border-ring bg-ring/5">
+                  <CardContent className="space-y-3">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">{selectedPlan.name} Plan</span>
+                      <span className="text-foreground">
+                        {selectedPlan.tier === "free"
+                          ? "Free"
+                          : planPrice
+                            ? formatUsd(planPrice.price)
+                            : "—"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between border-t pt-3">
+                      <span className="font-semibold text-foreground">Total</span>
+                      <span className="text-xl font-bold text-foreground">
+                        {selectedPlan.tier === "free" ? (
+                          "$0.00"
+                        ) : planPrice ? (
+                          <>
+                            {formatUsd(planPrice.price)}
+                            <span className="text-sm font-normal text-muted-foreground">
+                              /{billingInterval === "year" ? "year" : "month"}
+                            </span>
+                          </>
+                        ) : (
+                          "—"
+                        )}
+                      </span>
+                    </div>
+                    {planPrice?.yearlyDiscountApplied && selectedPlan.tier !== "free" && (
+                      <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                        ~17% savings with yearly billing
+                      </p>
+                    )}
+                    {selectedPlan.tier !== "free" && (
+                      <p className="text-xs text-muted-foreground">
+                        Have a promo code? You can apply it at checkout.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
               )}
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </CardContent>
+      </Card>
 
-      {/* Navigation buttons */}
       <div className="flex items-center justify-between">
-        <button
-          onClick={prev}
-          disabled={stepIdx === 0}
-          className="px-6 py-3 rounded-xl border border-[var(--border-color)] text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--text-secondary)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-        >
+        <Button variant="outline" onClick={prev} disabled={stepIdx === 0}>
           Back
-        </button>
+        </Button>
         <div className="flex items-center gap-3">
           {step === STEPS[STEPS.length - 1] ? (
-            <button
+            <Button
+              variant="gradient"
+              size="pill"
               onClick={handleDeploy}
               disabled={deploying || !canNext}
-              className="btn-primary font-semibold px-8 py-3 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {deploying ? "Deploying..." : selectedPlan?.tier === "free" ? "Deploy Free Agent" : "Deploy Agent"}
-            </button>
+              {deploying
+                ? "Deploying..."
+                : selectedPlan?.tier === "free"
+                  ? "Deploy Free Agent"
+                  : "Deploy Agent"}
+            </Button>
           ) : (
-            <button
-              onClick={next}
-              disabled={!canNext}
-              className="btn-primary font-semibold px-8 py-3 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
+            <Button variant="gradient" size="pill" onClick={next} disabled={!canNext}>
               Continue
-            </button>
+            </Button>
           )}
         </div>
       </div>
-    </div>
+    </PageContainer>
   )
 }

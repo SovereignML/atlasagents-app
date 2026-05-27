@@ -1,3 +1,5 @@
+import { Reveal, RevealGroup, RevealItem } from "@/components/marketing/motion/reveal"
+
 type Entry = {
   date: string
   version: string
@@ -68,10 +70,17 @@ const TAG_STYLES: Record<Entry["tag"], string> = {
   docs: "border-[var(--border-color)] text-[var(--text-secondary)] bg-[var(--card-bg)]",
 }
 
+const DOT_STYLES: Record<Entry["tag"], string> = {
+  feature: "bg-primary",
+  fix: "bg-amber-400",
+  breaking: "bg-red-400",
+  docs: "bg-[var(--text-secondary)]",
+}
+
 export default function ChangelogPage() {
   return (
-    <div className="max-w-3xl mx-auto px-6 py-16 space-y-10">
-      <div>
+    <div className="max-w-3xl mx-auto px-6 py-16 space-y-12">
+      <Reveal>
         <p className="text-xs font-mono text-primary mb-2">
           / changelog
         </p>
@@ -82,27 +91,38 @@ export default function ChangelogPage() {
           Everything we ship, in chronological order. Subscribe to the RSS feed at{" "}
           <code className="font-mono text-primary">/changelog.rss</code> (coming soon).
         </p>
-      </div>
+      </Reveal>
 
-      <div className="space-y-8">
+      {/* Timeline: a continuous rail down the left, one card per release. */}
+      <RevealGroup className="relative space-y-5">
+        <div
+          aria-hidden
+          className="absolute left-[7px] top-2 bottom-2 w-px bg-gradient-to-b from-primary/40 via-[var(--border-color)] to-transparent"
+        />
         {ENTRIES.map((e) => (
-          <article key={e.version} className="border-l-2 border-primary pl-6">
-            <div className="flex items-center gap-3 flex-wrap">
-              <span className="text-xs font-mono text-[var(--text-secondary)]">{e.date}</span>
-              <span className="text-xs font-mono text-[var(--text-primary)]">{e.version}</span>
-              <span className={`text-[10px] font-mono px-2 py-0.5 border ${TAG_STYLES[e.tag]}`}>
-                {e.tag}
-              </span>
-            </div>
-            <h2 className="text-xl font-semibold mt-2 text-[var(--text-primary)]">{e.title}</h2>
-            <ul className="mt-3 space-y-1.5 text-sm text-[var(--text-secondary)] list-disc list-inside">
-              {e.body.map((b, i) => (
-                <li key={i}>{b}</li>
-              ))}
-            </ul>
-          </article>
+          <RevealItem key={e.version} className="relative pl-10">
+            <span
+              aria-hidden
+              className={`absolute left-0 top-[6px] w-[15px] h-[15px] rounded-full ring-4 ring-[var(--background)] ${DOT_STYLES[e.tag]}`}
+            />
+            <article className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-6 transition-all duration-300 hover:shadow-[var(--shadow-hover)] hover:border-primary/30">
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-xs font-mono text-[var(--text-secondary)]">{e.date}</span>
+                <span className="text-xs font-mono text-[var(--text-primary)]">{e.version}</span>
+                <span className={`text-[10px] font-mono uppercase tracking-wide px-2 py-0.5 rounded-full border ${TAG_STYLES[e.tag]}`}>
+                  {e.tag}
+                </span>
+              </div>
+              <h2 className="text-xl font-semibold mt-2 text-[var(--text-primary)]">{e.title}</h2>
+              <ul className="mt-3 space-y-1.5 text-sm text-[var(--text-secondary)] list-disc list-inside marker:text-primary/50">
+                {e.body.map((b, i) => (
+                  <li key={i}>{b}</li>
+                ))}
+              </ul>
+            </article>
+          </RevealItem>
         ))}
-      </div>
+      </RevealGroup>
     </div>
   )
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { stopImpersonation } from "@/lib/impersonation"
+import { logAuditEvent } from "@/lib/audit"
 
 export async function POST() {
   const session = await auth()
@@ -12,5 +13,11 @@ export async function POST() {
   }
 
   await stopImpersonation()
+
+  await logAuditEvent({
+    userId: session.user.id,
+    action: "admin.stop_impersonation",
+  })
+
   return NextResponse.json({ ok: true })
 }

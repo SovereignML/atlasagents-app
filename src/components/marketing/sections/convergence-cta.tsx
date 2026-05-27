@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useRef } from "react";
 import { motion, useScroll, useTransform } from "framer-motion";
-import { easing } from "@/lib/motion";
 import { MagneticButton } from "@/components/marketing/motion/magnetic-button";
 import { FloatingDots } from "@/components/marketing/motion/floating-dots";
 import { BRANDING } from "@/configs/branding";
@@ -25,23 +24,20 @@ export function ConvergenceCTA() {
     <section ref={sectionRef} className="relative py-40 overflow-hidden">
       <FloatingDots count={40} converge />
 
-      {/* Bottom glow */}
-      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[600px] h-[200px] bg-[var(--color-primary)] opacity-[0.04] blur-[100px] rounded-full pointer-events-none" />
-
-      {/* Center glow */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] rounded-full bg-[var(--color-primary)] opacity-[0.03] blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[600px] h-[200px] bg-accent-blue-rest opacity-[0.04] blur-[100px] rounded-full pointer-events-none" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] rounded-full bg-accent-blue-rest opacity-[0.03] blur-[120px] pointer-events-none" />
 
       <div className="relative z-10 max-w-[700px] mx-auto px-8 text-center">
         <motion.h2
           style={{ opacity: headlineOpacity, y: headlineY }}
-          className="text-[clamp(2rem,4.5vw,48px)] font-bold text-[var(--text-primary)] tracking-[-1.5px] mb-5 leading-tight"
+          className="text-[clamp(2rem,4.5vw,48px)] font-bold text-text-loud tracking-[-1.5px] mb-5 leading-tight"
         >
           Stop managing tasks.<br />Start deploying agents.
         </motion.h2>
 
         <motion.p
           style={{ opacity: subOpacity }}
-          className="text-lg text-[var(--text-secondary)] mb-10 max-w-md mx-auto"
+          className="text-lg text-text-secondary mb-10 max-w-md mx-auto"
         >
           Your AI workforce is one click away.
         </motion.p>
@@ -51,7 +47,7 @@ export function ConvergenceCTA() {
           className="inline-flex glass rounded-full p-1.5 gap-2"
         >
           <MagneticButton>
-            <Link href="/login?deploy=true" className="btn-gradient text-sm px-8 py-3.5">
+            <Link href="/login?deploy=true" className="btn-green text-sm px-8 py-3.5">
               Deploy Now
             </Link>
           </MagneticButton>
@@ -60,7 +56,7 @@ export function ConvergenceCTA() {
               href={BRANDING.demoUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center px-8 py-3.5 text-sm font-semibold text-[var(--text-primary)] rounded-full hover:bg-[var(--glass-bg)] transition-colors"
+              className="inline-flex items-center px-8 py-3.5 text-sm font-semibold text-text-loud rounded-full hover:bg-background-faint transition-colors"
             >
               Book a Demo
             </a>

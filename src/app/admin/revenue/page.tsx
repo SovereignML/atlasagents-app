@@ -1,4 +1,28 @@
-import { db, eq, subscriptions, instances } from "@/db"
+import { db, eq, instances, subscriptions } from "@/db"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty"
+import { PageContainer, PageHeader, PageSection } from "@/components/layout/page-container"
+import { Badge } from "@/components/ui/badge"
+import { runtimeLabel } from "@/lib/runtimes/labels"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 
 export default async function AdminRevenuePage() {
   const [activeSubs, runningInstances] = await Promise.all([
@@ -20,66 +44,98 @@ export default async function AdminRevenuePage() {
   }, 0)
 
   return (
-    <div className="space-y-8 max-w-6xl">
-      <div>
-        <h1 className="text-2xl font-bold text-white">Revenue</h1>
-        <p className="text-zinc-400 mt-1">Estimated recurring revenue from active instances.</p>
+    <PageContainer>
+      <PageHeader
+        title="Revenue"
+        description="Estimated recurring revenue from active instances."
+      />
+
+      <div className="grid gap-5 sm:grid-cols-3">
+        <Card size="sm">
+          <CardHeader>
+            <CardDescription>Est. MRR</CardDescription>
+            <CardTitle className="text-3xl font-bold text-primary">
+              ${monthlyRecurring.toFixed(2)}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card size="sm">
+          <CardHeader>
+            <CardDescription>Active Subscriptions</CardDescription>
+            <CardTitle className="text-3xl font-bold text-foreground">
+              {activeSubs.length}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card size="sm">
+          <CardHeader>
+            <CardDescription>Running Instances</CardDescription>
+            <CardTitle className="text-3xl font-bold text-foreground">
+              {runningInstances.length}
+            </CardTitle>
+          </CardHeader>
+        </Card>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-          <p className="text-sm text-zinc-400">Est. MRR</p>
-          <p className="text-3xl font-bold mt-1 text-emerald-400">${monthlyRecurring.toFixed(2)}</p>
-        </div>
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-          <p className="text-sm text-zinc-400">Active Subscriptions</p>
-          <p className="text-3xl font-bold mt-1 text-blue-400">{activeSubs.length}</p>
-        </div>
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-          <p className="text-sm text-zinc-400">Running Instances</p>
-          <p className="text-3xl font-bold mt-1 text-violet-400">{runningInstances.length}</p>
-        </div>
-      </div>
-
-      <div>
-        <h2 className="text-lg font-semibold text-white mb-4">Active Instance Revenue</h2>
+      <PageSection title="Active Instance Revenue">
         {runningInstances.length === 0 ? (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-8 text-center">
-            <p className="text-zinc-400">No running instances.</p>
-          </div>
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>No running instances</EmptyTitle>
+              <EmptyDescription>
+                Revenue will be tracked here once instances are provisioned.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
-          <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-white/10">
-                  <th className="text-left text-zinc-400 font-medium py-3 px-4">Instance</th>
-                  <th className="text-left text-zinc-400 font-medium py-3 px-4">Server</th>
-                  <th className="text-center text-zinc-400 font-medium py-3 px-4">Billing</th>
-                  <th className="text-right text-zinc-400 font-medium py-3 px-4">Monthly Equiv.</th>
-                </tr>
-              </thead>
-              <tbody>
-                {runningInstances.map((inst) => {
-                  const monthly = inst.billingInterval === "year"
-                    ? inst.serverConfig.priceYearly / 12
-                    : inst.serverConfig.priceMonthly
-                  return (
-                    <tr key={inst.id} className="border-b border-white/5">
-                      <td className="py-3 px-4">
-                        <p className="text-white font-medium">{inst.name}</p>
-                        <p className="text-xs text-zinc-500 font-mono">{inst.slug}</p>
-                      </td>
-                      <td className="py-3 px-4 text-zinc-300">{inst.serverConfig.label}</td>
-                      <td className="py-3 px-4 text-center text-zinc-300 capitalize">{inst.billingInterval === "year" ? "Yearly" : "Monthly"}</td>
-                      <td className="py-3 px-4 text-right text-white font-medium">${monthly.toFixed(2)}/mo</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+          <Card className="overflow-hidden p-0">
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Instance</TableHead>
+                    <TableHead>Server</TableHead>
+                    <TableHead className="text-center">Billing</TableHead>
+                    <TableHead className="text-right">Monthly Equiv.</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {runningInstances.map((inst) => {
+                    const monthly =
+                      inst.billingInterval === "year"
+                        ? inst.serverConfig.priceYearly / 12
+                        : inst.serverConfig.priceMonthly
+                    return (
+                      <TableRow key={inst.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-foreground">{inst.name}</p>
+                            {inst.deploymentTarget === "vps" && (
+                              <Badge variant="outline" className="font-mono">
+                                {runtimeLabel(inst.runtime)}
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="font-mono text-xs text-muted-foreground">{inst.slug}</p>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {inst.serverConfig.label}
+                        </TableCell>
+                        <TableCell className="text-center capitalize text-muted-foreground">
+                          {inst.billingInterval === "year" ? "Yearly" : "Monthly"}
+                        </TableCell>
+                        <TableCell className="text-right font-medium text-foreground">
+                          ${monthly.toFixed(2)}/mo
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         )}
-      </div>
-    </div>
+      </PageSection>
+    </PageContainer>
   )
 }

@@ -1,6 +1,16 @@
-import { auth } from "@/auth"
-import { db, eq, and, isNull, teamInvites, teams, users } from "@/db"
 import { redirect } from "next/navigation"
+
+import { auth } from "@/auth"
+import { and, db, eq, isNull, teamInvites, teams, users } from "@/db"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+
 import { AcceptInviteClient } from "./accept-client"
 
 export const dynamic = "force-dynamic"
@@ -53,39 +63,48 @@ export default async function AcceptInvitePage({
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6 bg-[var(--bg-color)]">
-      <div className="w-full max-w-md border border-[var(--border-color)] bg-[var(--card-bg)] p-8 space-y-6">
-        <h1
-          className="text-xl font-bold uppercase tracking-[0.05em] text-[var(--text-primary)]"
-          style={{ fontFamily: "var(--font-display)" }}
-        >
-          Team Invite
-        </h1>
+    <div className="flex min-h-screen items-center justify-center bg-background p-6">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle className="text-xl font-bold uppercase tracking-[0.05em]">
+            Team Invite
+          </CardTitle>
+          <CardDescription>You&apos;ve been invited to join a team.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!invite && (
+            <Alert variant="destructive">
+              <AlertDescription>
+                This invite is invalid or has already been used.
+              </AlertDescription>
+            </Alert>
+          )}
 
-        {!invite && (
-          <p className="text-sm text-red-400">This invite is invalid or has already been used.</p>
-        )}
+          {invite && expired && (
+            <Alert variant="destructive">
+              <AlertDescription>This invite has expired. Ask for a new one.</AlertDescription>
+            </Alert>
+          )}
 
-        {invite && expired && (
-          <p className="text-sm text-red-400">This invite has expired. Ask for a new one.</p>
-        )}
+          {invite && !expired && wrongAccount && (
+            <Alert>
+              <AlertDescription>
+                This invite is for <span className="font-mono">{wrongAccount}</span>. Sign out
+                and sign in with that email to accept.
+              </AlertDescription>
+            </Alert>
+          )}
 
-        {invite && !expired && wrongAccount && (
-          <p className="text-sm text-amber-400">
-            This invite is for <span className="font-mono">{wrongAccount}</span>. Sign out and sign
-            in with that email to accept.
-          </p>
-        )}
-
-        {invite && !expired && !wrongAccount && (
-          <AcceptInviteClient
-            token={token}
-            teamName={teamName ?? "the team"}
-            inviterName={inviterName ?? "Someone"}
-            role={invite.role}
-          />
-        )}
-      </div>
+          {invite && !expired && !wrongAccount && (
+            <AcceptInviteClient
+              token={token}
+              teamName={teamName ?? "the team"}
+              inviterName={inviterName ?? "Someone"}
+              role={invite.role}
+            />
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

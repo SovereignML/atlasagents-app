@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { BRANDING } from "@/configs/branding"
+import { Reveal } from "@/components/marketing/motion/reveal"
 
 const LAST_UPDATED = "January 1, 2025"
 
@@ -11,7 +12,7 @@ export const metadata = {
 export default function SLAPage() {
   return (
     <div className="max-w-[900px] mx-auto px-8 py-16">
-      <div className="border-l-4 border-primary pl-8 mb-12">
+      <Reveal className="border-l-4 border-primary pl-8 mb-12">
         <div className="text-primary text-xs mb-3 opacity-80">
           Legal
         </div>
@@ -21,10 +22,10 @@ export default function SLAPage() {
         <p className="text-[var(--text-secondary)] text-sm">
           Last updated: {LAST_UPDATED}
         </p>
-      </div>
+      </Reveal>
 
       {/* Uptime targets */}
-      <section id="uptime" className="mb-12">
+      <Reveal as="section" id="uptime" className="mb-12">
         <h2 className="text-xl font-bold text-[var(--text-primary)] mb-4 pb-3 border-b border-[var(--border-color)]">
           <span className="text-primary mr-2 font-mono">01.</span>
           Uptime Commitment
@@ -49,10 +50,10 @@ export default function SLAPage() {
         <p className="text-[var(--text-secondary)] text-sm leading-relaxed">
           Uptime is measured monthly as the percentage of minutes the SovereignML platform API and dashboard are available and responding to requests. Scheduled maintenance windows (announced 48 hours in advance) are excluded from uptime calculations.
         </p>
-      </section>
+      </Reveal>
 
       {/* Support */}
-      <section id="support" className="mb-12">
+      <Reveal as="section" id="support" className="mb-12">
         <h2 className="text-xl font-bold text-[var(--text-primary)] mb-4 pb-3 border-b border-[var(--border-color)]">
           <span className="text-primary mr-2 font-mono">02.</span>
           Support Response Times
@@ -60,7 +61,7 @@ export default function SLAPage() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="border-b border-[var(--border-color)]">
+              <tr className="border-b border-[var(--border-color)] bg-[var(--card-hover)]">
                 {["Plan", "Channel", "Response Time", "Hours"].map((h) => (
                   <th
                     key={h}
@@ -90,10 +91,10 @@ export default function SLAPage() {
             </tbody>
           </table>
         </div>
-      </section>
+      </Reveal>
 
       {/* Health checks */}
-      <section id="monitoring" className="mb-12">
+      <Reveal as="section" id="monitoring" className="mb-12">
         <h2 className="text-xl font-bold text-[var(--text-primary)] mb-4 pb-3 border-b border-[var(--border-color)]">
           <span className="text-primary mr-2 font-mono">03.</span>
           Health Checks & Monitoring
@@ -119,10 +120,10 @@ export default function SLAPage() {
             </div>
           ))}
         </div>
-      </section>
+      </Reveal>
 
       {/* Credits */}
-      <section id="credits" className="mb-12">
+      <Reveal as="section" id="credits" className="mb-12">
         <h2 className="text-xl font-bold text-[var(--text-primary)] mb-4 pb-3 border-b border-[var(--border-color)]">
           <span className="text-primary mr-2 font-mono">04.</span>
           Service Credits
@@ -133,7 +134,7 @@ export default function SLAPage() {
         <div className="overflow-x-auto mb-4">
           <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="border-b border-[var(--border-color)]">
+              <tr className="border-b border-[var(--border-color)] bg-[var(--card-hover)]">
                 {["Monthly Uptime", "Credit"].map((h) => (
                   <th
                     key={h}
@@ -161,10 +162,10 @@ export default function SLAPage() {
         <p className="text-[var(--text-secondary)] text-sm leading-relaxed">
           Credits are applied to future invoices and are not redeemable for cash. To request a credit, contact billing@sovereignml.com within 30 days of the incident with the date range and description of the outage.
         </p>
-      </section>
+      </Reveal>
 
       {/* Exclusions */}
-      <section id="exclusions" className="mb-12">
+      <Reveal as="section" id="exclusions" className="mb-12">
         <h2 className="text-xl font-bold text-[var(--text-primary)] mb-4 pb-3 border-b border-[var(--border-color)]">
           <span className="text-primary mr-2 font-mono">05.</span>
           Exclusions
@@ -187,7 +188,7 @@ export default function SLAPage() {
             </li>
           ))}
         </ul>
-      </section>
+      </Reveal>
 
       {/* Footer */}
       <div className="mt-16 pt-8 border-t border-[var(--border-color)] flex flex-col sm:flex-row gap-4 justify-between items-start">

@@ -66,7 +66,9 @@ rm /tmp/sovereign_fleet /tmp/sovereign_fleet.pub
 
 ---
 
-## 4. Create `.env.production`
+## 4. Create your env file
+
+> **Env-file convention.** [`.env.example`](../.env.example) is the canonical list of every variable. This Docker guide copies it to `.env.production`; the bare-metal guide ([`deploy/README.md`](../deploy/README.md)) uses a single `.env`. Use whichever file your process manager / compose actually loads — the variable names are the same. When in doubt, `.env.example` is the source of truth.
 
 ```bash
 cp .env.example .env.production
@@ -94,6 +96,14 @@ NEXT_PUBLIC_GATEWAY_BASE_URL=https://sovereignml.example.com
 INSTANCE_ENCRYPTION_KEY=<paste generated encryption key>
 
 # --- Agent deploys: OpenRouter + Linode + SSH fleet ---
+# OPENROUTER_PROVISIONING_KEY is the parent account key with provisioning
+# scope. Each OpenClaw VPS deploy mints its own runtime key under it, so
+# the parent key never leaves the control plane. Create one at
+# https://openrouter.ai/settings/provisioning-keys
+OPENROUTER_PROVISIONING_KEY=sk-or-prov-...
+# OPENROUTER_API_KEY is the legacy shared key — still required for the
+# shared-cluster bot-runtime path and as the fallback baked into in-place
+# OpenClaw instances that pre-date per-instance key minting.
 OPENROUTER_API_KEY=sk-or-v1-...
 LINODE_API_TOKEN=...
 SSH_FLEET_PRIVATE_KEY="<paste the base64 private key>"
@@ -105,7 +115,7 @@ STRIPE_WEBHOOK_SECRET=
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 
-# --- First-boot seed: regions, server configs, starter plan ---
+# --- First-boot seed: regions, server configs, plans ---
 SEED_ON_BOOT=true
 ```
 
@@ -158,8 +168,8 @@ docker compose logs -f app
 ```
 
 You want to see:
-- `prisma migrate deploy` run cleanly
-- (if `SEED_ON_BOOT=true`) `Seeded N regions / M server configs / starter plan`
+- Schema applied via **Drizzle** (e.g. `drizzle-kit push` or your image entrypoint equivalent) — **not** `prisma migrate deploy` (this app uses [TECH-STACK.md](TECH-STACK.md) Drizzle + `src/db/schema.ts`)
+- (if `SEED_ON_BOOT=true`) `Seeded N regions / M server configs / plans`
 - `Ready on http://0.0.0.0:3000`
 
 ---
@@ -210,8 +220,8 @@ docker compose up -d
 
 | Symptom                                                           | Fix                                                                                                                           |
 | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `PrismaClientConstructorValidationError: ... requires "adapter"`  | `@prisma/adapter-pg` missing. `docker compose exec app npm i @prisma/adapter-pg && docker compose restart app`.              |
-| `docker compose up` hangs on Prisma migrate                       | Check `DATABASE_URL` — it should be unset in `.env.production` so compose's override wins.                                   |
+| `DATABASE_URL is not set` / Drizzle Kit errors                     | Ensure `DATABASE_URL` is set for the app container and that the startup script runs `npm run db:push` (or equivalent) before `next start`. |
+| Schema out of date vs `src/db/schema.ts`                          | From the app container: `npm run db:push` (review diffs in staging first). Remove stale expectations around **Prisma** — see [TECH-STACK.md](TECH-STACK.md). |
 | Agent stuck in `provisioning`                                     | `docker compose logs app \| grep provisionBot` — usually `LINODE_API_TOKEN` scope is wrong or `SSH_FLEET_*` keys malformed.   |
 | Agent running but `dnsStatus=pending` forever                     | The user's A record for *their* agent domain isn't pointing at the agent VPS IP (shown on the instance page). Check DNS.     |
 | Agent domain shows TLS warning                                    | Caddy on the agent VPS needs ~30 s after DNS resolves to fetch a cert. Wait and reload. If still broken: check port 80 open. |
@@ -236,6 +246,69 @@ docker compose exec -T postgres pg_dump -U sovereignml sovereignml \
 ```
 
 ---
+
+## Feature configuration (optional)
+
+The minimal `.env` in step 4 gets a single-Linode deploy working. The newer subsystems each have their own env vars — all listed in [`.env.example`](../.env.example) — and their own deep-dive docs.
+
+### Multi-provider routing → [PROVIDERS.md](PROVIDERS.md)
+
+```dotenv
+VM_PROVIDER=linode            # default provider; the router scores + fails over across all configured ones
+LINODE_API_TOKEN=...
+DIGITALOCEAN_API_TOKEN=...    # optional second provider
+# OVHcloud uses a multi-key credential set (not a single token):
+OVH_APP_KEY=...
+OVH_APP_SECRET=...
+OVH_CONSUMER_KEY=...
+OVH_CLOUD_PROJECT_ID=...
+# OVH_ENDPOINT=ovh-eu         # ovh-eu | ovh-ca | ovh-us
+```
+Only providers with credentials are routed to. Budgets/priorities seed from `src/configs/providers.ts` and are then editable in the admin panel.
+
+### Credit billing & margin → [BILLING.md](BILLING.md)
+
+```dotenv
+OPENROUTER_PROVISIONING_KEY=sk-or-prov-...   # mints per-instance keys (already in step 4)
+OPENROUTER_MARGIN=0.9                         # gross-margin fraction; 0.9 = 10% margin
+ANOMALY_USD_PER_INTERVAL=50                   # per-poll spend spike that triggers enforcement
+```
+
+### Integrations → [INTEGRATIONS.md](INTEGRATIONS.md)
+
+```dotenv
+# Google Drive backups (reuses the Google OAuth app; needs its own redirect URI)
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_DRIVE_REDIRECT_URI=https://sovereignml.example.com/api/integrations/drive/callback
+
+# Platform Cloudflare (managed subdomains). Users connect their OWN token in-app — never here.
+CLOUDFLARE_API_TOKEN=...     # Zone:DNS:Edit + Zone:SSL:Edit on the base domain's zone
+CLOUDFLARE_ZONE_ID=...
+CLOUDFLARE_BASE_DOMAIN=...
+```
+
+### Runtimes → [RUNTIMES.md](RUNTIMES.md)
+
+```dotenv
+# OPENCLAW_VERSION=          # version pins (default to code-baked versions)
+# HERMES_VERSION=
+# OPEN_WEBUI_VERSION=
+# HERMES_MODEL=              # override the default ≥64k Hermes model
+NVIDIA_API_KEY=...           # optional DeepSeek fallback provider (mid tier)
+```
+
+## Scheduled jobs
+
+Several subsystems are driven by cron hitting authenticated endpoints with a `Authorization: Bearer <token>` header (generate tokens with `openssl rand -hex 32`):
+
+| Endpoint | Token env | Suggested cadence | Purpose |
+|----------|-----------|-------------------|---------|
+| `POST /api/billing/usage-sync` | `USAGE_SYNC_CRON_TOKEN` | ~every 10 min | Poll OpenRouter spend, charge wallets, enforce caps ([BILLING.md](BILLING.md)). |
+| `POST /api/billing/daily` | `BILLING_CRON_TOKEN` | daily | Daily compute billing (accrues provider usage). |
+| `POST /api/admin/reconcile` | `RECONCILE_CRON_TOKEN` | daily | Orphan/state reconciliation; **also** runs provider health probes + budget/burn-rate sync so the router scores on fresh data ([PROVIDERS.md](PROVIDERS.md)). Allow ≥60s timeout. |
+
+Each can also be triggered manually by an admin session from the admin panel. Wire them with any scheduler (system cron, a GitHub Actions schedule, or an external uptime/cron service).
 
 ## What this does NOT cover
 

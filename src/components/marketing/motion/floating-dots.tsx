@@ -1,7 +1,7 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { useEffect, useMemo, useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
+import { useEffect, useState } from "react";
 
 interface FloatingDotsProps {
   count?: number;
@@ -10,28 +10,42 @@ interface FloatingDotsProps {
   color?: string;
 }
 
+type Dot = {
+  id: number;
+  startX: number;
+  startY: number;
+  size: number;
+  delay: number;
+  duration: number;
+};
+
 export function FloatingDots({
   count = 40,
   className,
   converge = false,
-  color = "var(--color-primary)",
+  color = "var(--color-accent-blue-rest)",
 }: FloatingDotsProps) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  // Generate the random dots in an effect (client-only) rather than during
+  // render — Math.random() is impure and would both trip react-hooks/purity
+  // and cause SSR hydration mismatches.
+  const [dots, setDots] = useState<Dot[]>([]);
+  const reduceMotion = useReducedMotion();
+  useEffect(() => {
+    // Client-only random init after mount (avoids SSR hydration mismatch).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDots(
+      Array.from({ length: count }, (_, i) => ({
+        id: i,
+        startX: Math.random() * 100,
+        startY: Math.random() * 100,
+        size: Math.random() * 3 + 1,
+        delay: Math.random() * 5,
+        duration: Math.random() * 8 + 12,
+      })),
+    );
+  }, [count]);
 
-  const dots = useMemo(() => {
-    if (!mounted) return [];
-    return Array.from({ length: count }, (_, i) => ({
-      id: i,
-      startX: Math.random() * 100,
-      startY: Math.random() * 100,
-      size: Math.random() * 3 + 1,
-      delay: Math.random() * 5,
-      duration: Math.random() * 8 + 12,
-    }));
-  }, [count, mounted]);
-
-  if (!mounted) return null;
+  if (dots.length === 0) return null;
 
   return (
     <div className={`absolute inset-0 overflow-hidden pointer-events-none ${className ?? ""}`}>
@@ -48,24 +62,30 @@ export function FloatingDots({
             top: `${dot.startY}%`,
           }}
           animate={
-            converge
-              ? {
-                  left: "50%",
-                  top: "50%",
-                  opacity: [0.15, 0.4, 0],
-                }
+            reduceMotion
+              ? { opacity: 0.2 }
+              : converge
+                ? {
+                    left: "50%",
+                    top: "50%",
+                    opacity: [0.15, 0.4, 0],
+                  }
+                : {
+                    y: [0, -20, 0],
+                    x: [0, 10, 0],
+                    opacity: [0.15, 0.3, 0.15],
+                  }
+          }
+          transition={
+            reduceMotion
+              ? { duration: 0 }
               : {
-                  y: [0, -20, 0],
-                  x: [0, 10, 0],
-                  opacity: [0.15, 0.3, 0.15],
+                  duration: dot.duration,
+                  delay: dot.delay,
+                  repeat: Infinity,
+                  ease: "easeInOut",
                 }
           }
-          transition={{
-            duration: dot.duration,
-            delay: dot.delay,
-            repeat: Infinity,
-            ease: "easeInOut",
-          }}
         />
       ))}
     </div>
