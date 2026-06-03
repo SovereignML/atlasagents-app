@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { db, eq, and, instances, instanceLogs, sshKeys, users, subscriptions } from "@/db"
-import { stripe, isStripeConfigured } from "@/lib/stripe"
+import {
+  stripe,
+  isStripeConfigured,
+  isDevBypassAllowed,
+  STRIPE_NOT_CONFIGURED,
+} from "@/lib/stripe"
 import { encryptRootPassword, computeSshFingerprint, isValidPublicKey } from "@/lib/instance"
 import { planUnitAmountCents } from "@/lib/pricing"
 import { findPlanBySlug } from "@/configs/plans"
@@ -10,9 +15,22 @@ import { parseAgentConfig } from "@/lib/agent-config"
 import { provisionBot } from "@/lib/provisioner"
 import { describeVmError } from "@/lib/vm-provider"
 import { depositToWallet } from "@/lib/wallet"
+import { getUserTeam } from "@/lib/team"
 import { createInstanceFromAgentFields } from "@/lib/agent-create"
 
 export async function POST(req: NextRequest) {
+  try {
+    return await handleDeploy(req)
+  } catch (err) {
+    console.error("[deploy] unhandled error:", err)
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Deployment failed" },
+      { status: 500 },
+    )
+  }
+}
+
+async function handleDeploy(req: NextRequest) {
   const session = await auth()
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -62,7 +80,7 @@ export async function POST(req: NextRequest) {
       ),
       with: { plan: true },
     })
-    if (existingFree && existingFree.plan.tier === "free") {
+    if (existingFree && existingFree.plan?.tier === "free") {
       return NextResponse.json(
         { error: "You already have a free instance. Upgrade to deploy more agents." },
         { status: 409 },
@@ -79,6 +97,12 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Resolve the active team — agents and SSH keys are team-scoped.
+  const team = await getUserTeam(session.user.id)
+  if (!team) {
+    return NextResponse.json({ error: "No active team" }, { status: 403 })
+  }
+
   // ── SSH key ───────────────────────────────────────────────────────
   let sshKeyId: string | undefined
   if (sshPublicKey) {
@@ -86,8 +110,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid SSH public key" }, { status: 400 })
     }
     const fp = computeSshFingerprint(sshPublicKey)
+    // SSH keys are shared per team; dedupe the fingerprint within the team.
     const existing = await db.query.sshKeys.findFirst({
-      where: eq(sshKeys.fingerprint, fp),
+      where: and(eq(sshKeys.fingerprint, fp), eq(sshKeys.teamId, team.teamId)),
     })
     if (existing) {
       sshKeyId = existing.id
@@ -95,6 +120,7 @@ export async function POST(req: NextRequest) {
       const [created] = await db
         .insert(sshKeys)
         .values({
+          teamId: team.teamId,
           userId: session.user.id,
           name: `key-${fp.slice(7, 19)}`,
           publicKey: sshPublicKey.trim(),
@@ -108,6 +134,7 @@ export async function POST(req: NextRequest) {
   // ── Resolve infra + create the pending instance (shared with restore) ─
   const created = await createInstanceFromAgentFields({
     userId: session.user.id,
+    teamId: team.teamId,
     name,
     agentConfig: parsedAgentConfig?.ok ? parsedAgentConfig.data : null,
     planSlug,
@@ -232,6 +259,11 @@ export async function POST(req: NextRequest) {
       instanceId: instance.id,
       checkoutUrl: checkoutSession.url,
     })
+  }
+
+  // Paid tier requires Stripe in production — never provision a paid VM for free.
+  if (!isDevBypassAllowed()) {
+    return NextResponse.json(STRIPE_NOT_CONFIGURED, { status: 503 })
   }
 
   // ── Dev mode: skip Stripe, auto-activate ──────────────────────────

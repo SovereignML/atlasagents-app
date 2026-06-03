@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server"
 import crypto from "node:crypto"
 import { auth } from "@/auth"
 import { db, eq, and, asc, instances, instanceLogs, regions, serverConfigs, users, plans, subscriptions } from "@/db"
-import { stripe, isStripeConfigured } from "@/lib/stripe"
+import {
+  stripe,
+  isStripeConfigured,
+  isDevBypassAllowed,
+  STRIPE_NOT_CONFIGURED,
+} from "@/lib/stripe"
 import { logAuditEvent } from "@/lib/audit"
 import { createSlug } from "@/lib/instance"
 import { encryptSecret } from "@/lib/crypto-secret"
@@ -16,6 +21,7 @@ import { routeModel } from "@/lib/model-router"
 import { provisionBot } from "@/lib/provisioner"
 import { describeVmError } from "@/lib/vm-provider"
 import { assertPublicHost, BlockedHostError } from "@/lib/net-guard"
+import { getUserTeam } from "@/lib/team"
 
 const BYOS_SERVER_CONFIG_SLUG = "byos-managed"
 const BYOS_REGION_SLUG = "self-hosted"
@@ -29,6 +35,18 @@ const BYOS_REGION_SLUG = "self-hosted"
  * the customer's own key ("own_key", stored encrypted).
  */
 export async function POST(req: NextRequest) {
+  try {
+    return await handleByosDeploy(req)
+  } catch (err) {
+    console.error("[byos/deploy] unhandled error:", err)
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Deployment failed" },
+      { status: 500 },
+    )
+  }
+}
+
+async function handleByosDeploy(req: NextRequest) {
   const session = await auth()
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -140,11 +158,18 @@ export async function POST(req: NextRequest) {
   routeModel(cfg.budget_tier)
   const botToken = "sk_bot_" + crypto.randomBytes(24).toString("hex")
 
+  // Agents are team-scoped — resolve the active team.
+  const team = await getUserTeam(session.user.id)
+  if (!team) {
+    return NextResponse.json({ error: "No active team" }, { status: 403 })
+  }
+
   // ── Insert instance ───────────────────────────────────────────────
   const [instance] = await db
     .insert(instances)
     .values({
       userId: session.user.id,
+      teamId: team.teamId,
       name: name.trim(),
       slug: createSlug(name),
       regionId: region.id,
@@ -247,6 +272,11 @@ export async function POST(req: NextRequest) {
       instanceId: instance.id,
       checkoutUrl: checkoutSession.url,
     })
+  }
+
+  // BYOS requires Stripe in production — never SSH-provision a server for free.
+  if (!isDevBypassAllowed()) {
+    return NextResponse.json(STRIPE_NOT_CONFIGURED, { status: 503 })
   }
 
   // ── Dev mode: skip Stripe, auto-provision ─────────────────────────

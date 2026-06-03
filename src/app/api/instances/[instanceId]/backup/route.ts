@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { db, instances, instanceLogs, backupRecords, eq } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
+import { canOperateInstance } from "@/lib/instance-access"
 import { logAuditEvent } from "@/lib/audit"
 import { driveErrorResponse } from "@/lib/drive-errors"
 import {
-  getDriveAccessTokenForUser,
+  getDriveAccessTokenForTeam,
   uploadBackup,
   BACKUP_TAG,
 } from "@/lib/google-drive"
@@ -40,19 +41,17 @@ export async function POST(
   if (!instance) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 })
   }
-  if (!isAdmin && instance.userId !== session.user.id) {
+  // Creating a backup is an operation — requires Operator+ on this agent.
+  if (!isAdmin && !(await canOperateInstance(session.user.id, instance.id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
   if (!instance.agentConfig) {
     return NextResponse.json({ error: "Nothing to back up yet." }, { status: 400 })
   }
 
-  // Backups are stored in the connected user's own Drive (the owner's), not the
-  // admin's. Resolve the token for the instance owner.
-  const ownerId = instance.userId
-
   try {
-    const accessToken = await getDriveAccessTokenForUser(ownerId)
+    // Backups go to the team's shared Drive connection.
+    const accessToken = await getDriveAccessTokenForTeam(instance.teamId)
     const envelope = serializeAgentBackup(instance)
     const fileName = backupFileName(instance.name)
 
@@ -70,7 +69,8 @@ export async function POST(
     const [record] = await db
       .insert(backupRecords)
       .values({
-        userId: ownerId,
+        teamId: instance.teamId,
+        userId: session.user.id,
         instanceId: instance.id,
         driveFileId: fileId,
         fileName,
@@ -87,6 +87,7 @@ export async function POST(
     })
     await logAuditEvent({
       userId: session.user.id,
+      teamId: instance.teamId,
       action: "instance.backup.create",
       targetType: "instance",
       targetId: instance.id,

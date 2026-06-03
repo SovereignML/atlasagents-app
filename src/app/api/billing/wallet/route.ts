@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server"
 import { db, eq, desc, walletTransactions, users } from "@/db"
 import { getEffectiveUserId } from "@/lib/effective-user"
 import { getOrCreateWallet } from "@/lib/wallet"
-import { stripe, isStripeConfigured } from "@/lib/stripe"
+import {
+  stripe,
+  isStripeConfigured,
+  isDevBypassAllowed,
+  STRIPE_NOT_CONFIGURED,
+} from "@/lib/stripe"
 import {
   CREDITS_PER_USD,
   MIN_TOPUP_CREDITS,
@@ -76,6 +81,10 @@ export async function POST(req: NextRequest) {
   const amountUsd = creditsToUsd(credits)
 
   if (!isStripeConfigured()) {
+    if (!isDevBypassAllowed()) {
+      // Production with missing/invalid Stripe keys: never grant free credits.
+      return NextResponse.json(STRIPE_NOT_CONFIGURED, { status: 503 })
+    }
     // Dev mode: deposit directly without Stripe. fundWallet also raises and
     // re-enables the user's OpenRouter key caps.
     const { fundWallet } = await import("@/lib/openrouter-billing")

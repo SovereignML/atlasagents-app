@@ -10,8 +10,7 @@ import type {
   SidecarSpec,
 } from "./types"
 import { buildGatewayAllowedOrigins } from "@/lib/instance-gateway-access"
-import { routeModel } from "@/lib/model-router"
-import type { BudgetTier } from "@/lib/agent-config"
+import { resolveLlmProvider, nvidiaKeyForSlot } from "@/lib/model-router"
 
 /**
  * Real Hermes runtime — Python package `hermes-agent` installed into a venv,
@@ -442,15 +441,20 @@ export const hermesRuntime: RuntimeEngine = {
    * reverse proxy. `adminEmail` / `adminPassword` are ignored.
    */
   buildEnv(args: BuildEnvArgs): Record<string, string> {
-    const tier = (args.instance.modelTier ?? "mid") as BudgetTier
-    const route = routeModel(tier)
+    const provider = resolveLlmProvider(args.instance)
+
+    // On the NVIDIA-primary switch, feed the gateway the NVIDIA key via the same
+    // key var; the provider/base-url are pinned by renderInitScript. Best-effort
+    // for Hermes — verify on a real VPS (see renderInitScript note).
+    const primaryKey =
+      provider === "nvidia" ? nvidiaKeyForSlot("primary") : args.openRouterApiKey
 
     const env: Record<string, string> = {
       API_SERVER_ENABLED: "true",
       API_SERVER_KEY: args.gatewayToken,
       API_SERVER_HOST: "127.0.0.1",
       API_SERVER_PORT: String(HERMES_GATEWAY_PORT),
-      OPENROUTER_API_KEY: args.openRouterApiKey,
+      OPENROUTER_API_KEY: primaryKey,
       INSTANCE_ID: args.instance.id,
       DOMAIN: args.instance.domain ?? "",
     }
@@ -468,9 +472,9 @@ export const hermesRuntime: RuntimeEngine = {
       env.API_SERVER_CORS_ORIGINS = corsOrigins.join(",")
     }
 
-    if (route.fallbackProvider) {
-      env.NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || ""
-    }
+    // Always expose the NVIDIA key for the best-effort cross-provider fallback.
+    const nvidiaKey = nvidiaKeyForSlot("primary")
+    if (nvidiaKey) env.NVIDIA_API_KEY = nvidiaKey
 
     return env
   },
@@ -612,6 +616,15 @@ WantedBy=multi-user.target
   renderInitScript(args: RenderInitScriptArgs): string {
     const run = (sub: string) =>
       `sudo -u ${bashSingleQuote(args.systemUser)} env HOME=${bashSingleQuote(args.installDir)} ${bashSingleQuote(args.cliBinary)} ${sub}`
+    // For a non-OpenRouter (NVIDIA) provider, also point Hermes at the custom
+    // OpenAI-compatible base URL. The exact config key for a custom provider is
+    // undocumented, so this is best-effort (non-fatal); the provider/model sets
+    // below stay fatal so a truly unusable config fails the provision loudly.
+    // Verify Hermes+NVIDIA on a real VPS before relying on it.
+    const baseUrlStep =
+      args.provider !== "openrouter"
+        ? `${run(`config set model.base_url ${bashSingleQuote(args.baseUrl)}`)} || echo "warn: could not set model.base_url (provider=${args.provider})" >&2\n`
+        : ""
     return `#!/bin/bash
 set -uo pipefail
 
@@ -624,7 +637,7 @@ fi
 echo "=== provision: hermes_config ==="
 ${run(`config set model.provider ${bashSingleQuote(args.provider)}`)} || exit 1
 ${run(`config set model.default ${bashSingleQuote(args.model)}`)} || exit 1
-${run("config set terminal.backend local")} || exit 1
+${baseUrlStep}${run("config set terminal.backend local")} || exit 1
 
 echo "=== provision: hermes_config_check ==="
 if ! ${run("config check")}; then

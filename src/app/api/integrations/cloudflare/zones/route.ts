@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
-import { getCloudflareTokenForUser, listZones } from "@/lib/cloudflare"
+import { getUserTeam } from "@/lib/team"
+import { getCloudflareTokenForTeam, listZones } from "@/lib/cloudflare"
 import { cloudflareErrorResponse } from "@/lib/cloudflare-errors"
 
 /**
@@ -15,8 +16,13 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
+  const team = await getUserTeam(session.user.id)
+  if (!team) {
+    return NextResponse.json({ error: "No active team" }, { status: 403 })
+  }
+
   try {
-    const token = await getCloudflareTokenForUser(session.user.id)
+    const token = await getCloudflareTokenForTeam(team.teamId)
     const zones = await listZones(token)
     return NextResponse.json({
       zones: zones.map((z) => ({ id: z.id, name: z.name, status: z.status })),

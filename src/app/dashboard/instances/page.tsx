@@ -45,7 +45,6 @@ export default async function InstancesPage() {
       ipAddress: i.ipAddress,
       runtime: i.runtime,
       deploymentTarget: i.deploymentTarget,
-      regionLabel: `${i.region.flag} ${i.region.name}`,
       serverLabel: i.serverConfig.label,
       vcpu: i.serverConfig.vcpu,
       ramGb: i.serverConfig.ramGb,

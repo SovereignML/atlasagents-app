@@ -162,9 +162,11 @@ export const subscriptions = pgTable(
     userId: text()
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    planId: text()
-      .notNull()
-      .references(() => plans.id),
+    // Nullable: platform subscriptions reference a platform Plan, but reseller
+    // (connected-account) subscriptions are priced on the TENANT's own Stripe
+    // and don't map to a platform plan — those rows leave planId null and carry
+    // connectAccountId + teamId instead.
+    planId: text().references(() => plans.id),
     instanceId: text().references(() => instances.id),
     stripeSubscriptionId: text(),
     stripePriceId: text(),
@@ -172,6 +174,14 @@ export const subscriptions = pgTable(
     status: text().default("incomplete").notNull(),
     currentPeriodEnd: timestamp({ mode: "date", withTimezone: false }),
     cancelAtPeriodEnd: boolean().default(false).notNull(),
+    // Reseller billing (Phase 6). NULL = a platform subscription (today's
+    // behavior, billed on the platform's own Stripe). Non-null = a child
+    // end-customer subscription billed on the TENANT's connected Stripe account;
+    // `teamId` is the child end-customer team it entitles. These rows must NOT
+    // fund the platform wallet (the money is the tenant's). See
+    // src/lib/stripe-connect-events.ts.
+    connectAccountId: text(),
+    teamId: text().references(() => teams.id),
     createdAt: now(),
     updatedAt: timestamp({ mode: "date", withTimezone: false })
       .defaultNow()
@@ -183,6 +193,7 @@ export const subscriptions = pgTable(
     uniqueIndex("Subscription_stripeSubscriptionId_key").on(t.stripeSubscriptionId),
     index("Subscription_userId_idx").on(t.userId),
     index("Subscription_status_idx").on(t.status),
+    index("Subscription_teamId_idx").on(t.teamId),
   ],
 )
 
@@ -228,6 +239,11 @@ export const sshKeys = pgTable(
   "SshKey",
   {
     id: cuid().primaryKey(),
+    // Team that owns this key (shared across members). Set at add time =
+    // the adder's active team. `userId` is retained as "added by" attribution.
+    teamId: text()
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
     userId: text()
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -236,7 +252,10 @@ export const sshKeys = pgTable(
     fingerprint: text().notNull(),
     createdAt: now(),
   },
-  (t) => [index("SshKey_userId_idx").on(t.userId)],
+  (t) => [
+    index("SshKey_teamId_idx").on(t.teamId),
+    index("SshKey_userId_idx").on(t.userId),
+  ],
 )
 
 // ──────────────────────────────────────────────────────────────────────
@@ -250,6 +269,12 @@ export const instances = pgTable(
     userId: text()
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    // Team this agent belongs to. Set at deploy time = the creator's active
+    // team. Drives the owner god-view and team-shared provider resolution
+    // (backups/domains use this team's Drive/Cloudflare connection).
+    teamId: text()
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
     name: text().notNull(),
     slug: text().notNull(),
     regionId: text()
@@ -294,6 +319,9 @@ export const instances = pgTable(
     // Agent runtime engine for the VPS path: "openclaw" (default) | "hermes".
     // NULL on pre-existing rows; getRuntime() coerces NULL -> "openclaw".
     runtime: text().default("openclaw"),
+    // LLM provider override: "openrouter" | "nvidia". NULL → platform default
+    // (LLM_DEFAULT_PROVIDER, else "openrouter"). See resolveLlmProvider().
+    llmProvider: text(),
     // Hermes-only: provision Open WebUI as a Docker sidecar fronting the gateway
     // so the user gets a web chat UI. For Hermes+webui the dormant
     // openclawAdmin* columns below hold the Open WebUI admin login.
@@ -416,8 +444,35 @@ export const instances = pgTable(
     uniqueIndex("Instance_botToken_key").on(t.botToken),
     uniqueIndex("Instance_telegramWebhookId_key").on(t.telegramWebhookId),
     index("Instance_userId_idx").on(t.userId),
+    index("Instance_teamId_idx").on(t.teamId),
     index("Instance_status_idx").on(t.status),
     index("Instance_botHostId_idx").on(t.botHostId),
+  ],
+)
+
+// Per-agent access grants (the ACL). A row means `userId` may access
+// `instanceId` at `level`. Visibility = creator OR team owner OR a grant
+// here (see src/lib/instance-queries.ts). Levels: viewer < operator < manager.
+export const instanceAccess = pgTable(
+  "InstanceAccess",
+  {
+    id: cuid().primaryKey(),
+    instanceId: text()
+      .notNull()
+      .references(() => instances.id, { onDelete: "cascade" }),
+    userId: text()
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    level: text().notNull(), // "viewer" | "operator" | "manager"
+    grantedById: text()
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: now(),
+  },
+  (t) => [
+    uniqueIndex("InstanceAccess_instanceId_userId_key").on(t.instanceId, t.userId),
+    index("InstanceAccess_instanceId_idx").on(t.instanceId),
+    index("InstanceAccess_userId_idx").on(t.userId),
   ],
 )
 
@@ -719,6 +774,28 @@ export const adminNotifications = pgTable(
   ],
 )
 
+// Account deletion requests — users submit, admins review & decide.
+// Approval is notify-only: an admin then deletes the user via the Users page.
+export const deletionRequests = pgTable(
+  "DeletionRequest",
+  {
+    id: cuid().primaryKey(),
+    userId: text()
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reason: text(),
+    status: text().default("pending").notNull(), // pending | approved | denied
+    decidedBy: text(), // admin user id
+    decidedAt: timestamp({ mode: "date", withTimezone: false }),
+    decisionNote: text(), // admin note / denial reason shown to user
+    createdAt: now(),
+  },
+  (t) => [
+    index("DeletionRequest_status_idx").on(t.status),
+    index("DeletionRequest_userId_idx").on(t.userId),
+  ],
+)
+
 // ──────────────────────────────────────────────────────────────────────
 // Usage / credits / logs / admin
 // ──────────────────────────────────────────────────────────────────────
@@ -832,13 +909,83 @@ export const teams = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     seatLimit: integer().default(5).notNull(),
+    // Reseller hierarchy. NULL = a top-level team (today's behavior, incl. every
+    // existing team after backfill). Non-null = a child end-customer account
+    // that signed up under a white-label tenant; points at the PARENT tenant's
+    // team. `onDelete: set null` so deleting a tenant orphans (not deletes) its
+    // customers. See src/lib/tenant.ts for the hierarchy helpers.
+    parentTeamId: text().references((): AnyPgColumn => teams.id, {
+      onDelete: "set null",
+    }),
+    // Set by a tenant admin to suspend one of their end-customers — blocks new
+    // agent deploys for that child team (enforced in src/lib/tenant.ts
+    // requireActiveTeam). NULL = active.
+    suspendedAt: timestamp({ mode: "date", withTimezone: false }),
+    // Per-customer cap on live agents (tenant-controlled). NULL = inherit the
+    // tenant default / no cap. `seatLimit` already caps members.
+    agentLimit: integer(),
+    // Platform-admin white-label switch. SOLE source of truth for white-label
+    // entitlement (custom branding, custom domains, reseller panel) — see
+    // teamHasWhiteLabel in src/lib/white-label.ts. Default false; a platform
+    // admin flips it from /admin/teams. Subscription tier does NOT auto-grant.
+    whiteLabelEnabled: boolean().default(false).notNull(),
     createdAt: now(),
     updatedAt: timestamp({ mode: "date", withTimezone: false })
       .defaultNow()
       .notNull()
       .$onUpdate(() => new Date()),
   },
-  (t) => [index("Team_ownerId_idx").on(t.ownerId)],
+  (t) => [
+    index("Team_ownerId_idx").on(t.ownerId),
+    index("Team_parentTeamId_idx").on(t.parentTeamId),
+  ],
+)
+
+// Reseller/tenant-level config. Sparse — one row per PARENT tenant team that
+// has turned on reseller features. Holds settings that don't belong on every
+// team row: bring-your-own Chatwoot (Phase 4), Stripe Connect (Phase 6), the
+// tenant's own OpenRouter provisioning key (Phase 6), and default limits
+// applied to newly self-created child accounts. Secrets are encrypted at rest
+// (see src/lib/crypto-secret.ts), same pattern as cloudflareConnections.
+export const tenantConfig = pgTable(
+  "TenantConfig",
+  {
+    id: cuid().primaryKey(),
+    teamId: text()
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    // Defaults stamped onto child teams created via self-serve signup.
+    defaultChildAgentLimit: integer(),
+    defaultChildSeatLimit: integer(),
+    // Bring-your-own Chatwoot (Phase 4). The tenant's end-customers' support
+    // tickets route to THIS Chatwoot instead of the platform's. Secrets are
+    // encrypted (crypto-secret.ts); baseUrl/account/inbox + the public website
+    // token (drives the widget) are stored plainly. All-null = fall back to the
+    // platform Chatwoot env config. See src/lib/chatwoot.ts.
+    chatwootBaseUrl: text(),
+    chatwootApiTokenEnc: text(),
+    chatwootAccountId: text(),
+    chatwootInboxId: text(),
+    chatwootWebsiteToken: text(),
+    chatwootHmacTokenEnc: text(),
+    // Stripe Connect (Phase 6). The tenant's end-customers pay the tenant's OWN
+    // connected account (Standard, no platform application fee); we only charge
+    // the tenant the enterprise fee on the platform Stripe. charges/payouts
+    // flags mirror the connected account so checkout can be blocked until ready.
+    stripeConnectAccountId: text(),
+    stripeConnectChargesEnabled: boolean().default(false).notNull(),
+    stripeConnectPayoutsEnabled: boolean().default(false).notNull(),
+    // The tenant's OWN OpenRouter provisioning key (encrypted). Child-org agent
+    // runtime keys are minted against THIS, not the platform key, so the tenant
+    // bears their customers' LLM cost. See getOrMintInstanceOpenRouterKey.
+    openRouterProvisioningKeyEnc: text(),
+    createdAt: now(),
+    updatedAt: timestamp({ mode: "date", withTimezone: false })
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [uniqueIndex("TenantConfig_teamId_key").on(t.teamId)],
 )
 
 // Roles: owner | admin | developer | viewer
@@ -890,8 +1037,9 @@ export const teamInvites = pgTable(
 // subscription is enforced at read/write time (see src/lib/white-label.ts), so
 // a downgrade reverts the look without deleting this config. Colors are raw CSS
 // color strings, validated on write AND before being emitted into a <style>
-// tag (CSS-injection guard). The custom dashboard domain is served via Caddy
-// on-demand TLS — only a row whose `domainVerifiedAt` is set ever resolves.
+// tag (CSS-injection guard). The custom dashboard domain is served via
+// Cloudflare for SaaS Custom Hostnames (see src/lib/cloudflare-saas.ts) — only
+// a row whose `domainVerifiedAt` is set ever resolves.
 export const teamBranding = pgTable(
   "TeamBranding",
   {
@@ -915,6 +1063,9 @@ export const teamBranding = pgTable(
     domainVerifiedAt: timestamp({ mode: "date", withTimezone: false }),
     dnsStatus: text(), // null | "pending" | "ready"  (mirrors Instance)
     tlsStatus: text(), // null | "pending" | "issued"
+    // Cloudflare for SaaS custom-hostname id, for status polling + teardown.
+    // Set when the domain is attached; cleared on detach. See cloudflare-saas.ts.
+    cfCustomHostnameId: text(),
     // Team-level on/off, independent of the entitlement gate.
     brandingEnabled: boolean().default(true).notNull(),
     createdAt: now(),
@@ -1012,9 +1163,14 @@ export const supportTickets = pgTable(
     message: text().notNull(),
     category: text().default("general").notNull(), // general | billing | technical | account
     priority: text().default("normal").notNull(), // low | normal | high | urgent
-    status: text().default("open").notNull(), // open | pending | resolved
+    status: text().default("open").notNull(), // open | in_progress | pending | resolved
     chatwootConversationId: integer(),
     chatwootContactId: integer(),
+    // Which Chatwoot the conversation lives in: the tenant team whose BYO
+    // Chatwoot was used, or NULL for the platform Chatwoot. Lets reply/status
+    // routes resolve the SAME config that created the conversation, even if the
+    // user later switches active team. See src/lib/chatwoot.ts.
+    chatwootTenantTeamId: text(),
     createdAt: now(),
     updatedAt: timestamp({ mode: "date", withTimezone: false })
       .defaultNow()
@@ -1093,6 +1249,10 @@ export const driveConnections = pgTable(
   "DriveConnection",
   {
     id: cuid().primaryKey(),
+    // One Drive connection per team (shared). `userId` records who connected it.
+    teamId: text()
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
     userId: text()
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -1105,7 +1265,7 @@ export const driveConnections = pgTable(
       .notNull()
       .$onUpdate(() => new Date()),
   },
-  (t) => [uniqueIndex("DriveConnection_userId_key").on(t.userId)],
+  (t) => [uniqueIndex("DriveConnection_teamId_key").on(t.teamId)],
 )
 
 // Bring-Your-Own-Cloudflare. One per user. We store ONLY a scoped Cloudflare
@@ -1117,6 +1277,10 @@ export const cloudflareConnections = pgTable(
   "CloudflareConnection",
   {
     id: cuid().primaryKey(),
+    // One Cloudflare connection per team (shared). `userId` records who connected it.
+    teamId: text()
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
     userId: text()
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -1129,7 +1293,7 @@ export const cloudflareConnections = pgTable(
       .notNull()
       .$onUpdate(() => new Date()),
   },
-  (t) => [uniqueIndex("CloudflareConnection_userId_key").on(t.userId)],
+  (t) => [uniqueIndex("CloudflareConnection_teamId_key").on(t.teamId)],
 )
 
 // Local index of agent backups that live in the user's Drive. The backup
@@ -1139,6 +1303,11 @@ export const backupRecords = pgTable(
   "BackupRecord",
   {
     id: cuid().primaryKey(),
+    // Team that owns the backup (= source instance's team). `userId` records
+    // who triggered it.
+    teamId: text()
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
     userId: text()
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -1153,9 +1322,59 @@ export const backupRecords = pgTable(
     createdAt: now(),
   },
   (t) => [
+    index("BackupRecord_teamId_idx").on(t.teamId),
     index("BackupRecord_userId_idx").on(t.userId),
     index("BackupRecord_instanceId_idx").on(t.instanceId),
     uniqueIndex("BackupRecord_driveFileId_key").on(t.driveFileId),
+  ],
+)
+
+// ──────────────────────────────────────────────────────────────────────
+// Admin: platform database backups → Cloudflare R2
+// ──────────────────────────────────────────────────────────────────────
+
+// Singleton platform config holding the Cloudflare R2 credentials used for
+// admin database backups. Exactly one row is expected; the app always reads
+// and updates the first row. Secrets are encryptSecret() output (AES-256-GCM).
+export const r2BackupConfig = pgTable("R2BackupConfig", {
+  id: cuid().primaryKey(),
+  accountId: text().notNull(), // Cloudflare account id (plaintext)
+  bucket: text().notNull(), // R2 bucket name (plaintext)
+  // Optional custom S3 endpoint. Defaults to
+  // https://<accountId>.r2.cloudflarestorage.com when null.
+  endpoint: text(),
+  accessKeyIdEnc: text().notNull(), // encryptSecret() output
+  secretAccessKeyEnc: text().notNull(), // encryptSecret() output
+  // How many of the newest backups to keep; older ones are pruned after a
+  // successful backup.
+  retentionCount: integer().default(14).notNull(),
+  updatedByUserId: text(), // who last saved the config
+  updatedAt: timestamp({ mode: "date", withTimezone: false })
+    .defaultNow()
+    .notNull()
+    .$onUpdate(() => new Date()),
+})
+
+// One row per database backup run. The backup CONTENT is the pg_dump object in
+// R2 (`objectKey`); this row powers the admin list, status/error surfacing, and
+// retention without round-tripping R2 on every load.
+export const databaseBackups = pgTable(
+  "DatabaseBackup",
+  {
+    id: cuid().primaryKey(),
+    objectKey: text().notNull(), // R2 object key
+    fileName: text().notNull(), // human-readable name
+    sizeBytes: bigint({ mode: "number" }), // dump size; null until upload finishes
+    status: text().notNull(), // "pending" | "success" | "failed"
+    error: text(), // failure detail (pg_dump/upload stderr), null on success
+    trigger: text().notNull(), // "manual" | "scheduled"
+    createdByUserId: text(), // who triggered it; null for cron
+    startedAt: now(),
+    completedAt: timestamp({ mode: "date", withTimezone: false }),
+  },
+  (t) => [
+    index("DatabaseBackup_startedAt_idx").on(t.startedAt),
+    uniqueIndex("DatabaseBackup_objectKey_key").on(t.objectKey),
   ],
 )
 
@@ -1187,14 +1406,18 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   wallet: one(wallets),
   notifications: many(notifications),
   notificationPreference: one(notificationPreferences),
-  driveConnection: one(driveConnections),
-  cloudflareConnection: one(cloudflareConnections),
+  driveConnections: many(driveConnections),
+  cloudflareConnections: many(cloudflareConnections),
   backups: many(backupRecords),
 }))
 
 export const cloudflareConnectionsRelations = relations(
   cloudflareConnections,
   ({ one }) => ({
+    team: one(teams, {
+      fields: [cloudflareConnections.teamId],
+      references: [teams.id],
+    }),
     user: one(users, {
       fields: [cloudflareConnections.userId],
       references: [users.id],
@@ -1225,6 +1448,23 @@ export const teamsRelations = relations(teams, ({ one, many }) => ({
   memberships: many(memberships),
   invites: many(teamInvites),
   branding: one(teamBranding),
+  instances: many(instances),
+  sshKeys: many(sshKeys),
+  driveConnection: one(driveConnections),
+  cloudflareConnection: one(cloudflareConnections),
+  backups: many(backupRecords),
+  // Reseller hierarchy (self-relation; relationName disambiguates the two ends).
+  parent: one(teams, {
+    fields: [teams.parentTeamId],
+    references: [teams.id],
+    relationName: "teamHierarchy",
+  }),
+  children: many(teams, { relationName: "teamHierarchy" }),
+  tenantConfig: one(tenantConfig),
+}))
+
+export const tenantConfigRelations = relations(tenantConfig, ({ one }) => ({
+  team: one(teams, { fields: [tenantConfig.teamId], references: [teams.id] }),
 }))
 
 export const teamBrandingRelations = relations(teamBranding, ({ one }) => ({
@@ -1275,12 +1515,15 @@ export const serverConfigsRelations = relations(serverConfigs, ({ many }) => ({
 }))
 
 export const sshKeysRelations = relations(sshKeys, ({ one, many }) => ({
+  team: one(teams, { fields: [sshKeys.teamId], references: [teams.id] }),
   user: one(users, { fields: [sshKeys.userId], references: [users.id] }),
   instances: many(instances),
 }))
 
 export const instancesRelations = relations(instances, ({ one, many }) => ({
   user: one(users, { fields: [instances.userId], references: [users.id] }),
+  team: one(teams, { fields: [instances.teamId], references: [teams.id] }),
+  accessGrants: many(instanceAccess),
   region: one(regions, { fields: [instances.regionId], references: [regions.id] }),
   serverConfig: one(serverConfigs, {
     fields: [instances.serverConfigId],
@@ -1418,15 +1661,41 @@ export const adminNotificationsRelations = relations(adminNotifications, ({ one 
   }),
 }))
 
+export const deletionRequestsRelations = relations(deletionRequests, ({ one }) => ({
+  user: one(users, {
+    fields: [deletionRequests.userId],
+    references: [users.id],
+  }),
+}))
+
 export const driveConnectionsRelations = relations(driveConnections, ({ one }) => ({
+  team: one(teams, { fields: [driveConnections.teamId], references: [teams.id] }),
   user: one(users, { fields: [driveConnections.userId], references: [users.id] }),
 }))
 
 export const backupRecordsRelations = relations(backupRecords, ({ one }) => ({
+  team: one(teams, { fields: [backupRecords.teamId], references: [teams.id] }),
   user: one(users, { fields: [backupRecords.userId], references: [users.id] }),
   instance: one(instances, {
     fields: [backupRecords.instanceId],
     references: [instances.id],
+  }),
+}))
+
+export const instanceAccessRelations = relations(instanceAccess, ({ one }) => ({
+  instance: one(instances, {
+    fields: [instanceAccess.instanceId],
+    references: [instances.id],
+  }),
+  user: one(users, {
+    fields: [instanceAccess.userId],
+    references: [users.id],
+    relationName: "accessGrantee",
+  }),
+  grantedBy: one(users, {
+    fields: [instanceAccess.grantedById],
+    references: [users.id],
+    relationName: "accessGrantor",
   }),
 }))
 

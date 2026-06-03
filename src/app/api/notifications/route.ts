@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
-import { db, notifications, eq, and, desc, lt, isNull, sql } from "@/db"
+import { db, notifications, eq, and, desc, lt, isNull, isNotNull, sql } from "@/db"
 
 /**
  * GET /api/notifications
@@ -78,4 +78,20 @@ export async function PATCH(req: NextRequest) {
   }
 
   return NextResponse.json({ error: "id or all is required" }, { status: 400 })
+}
+
+/**
+ * DELETE /api/notifications
+ *
+ * Permanently delete the current user's read notifications. Unread are kept.
+ */
+export async function DELETE() {
+  const session = await auth()
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+  await db
+    .delete(notifications)
+    .where(and(eq(notifications.userId, session.user.id), isNotNull(notifications.readAt)))
+  return NextResponse.json({ ok: true })
 }

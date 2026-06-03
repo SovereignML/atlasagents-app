@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { db, instances, eq } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
+import { canOperateInstance } from "@/lib/instance-access"
 import {
   sshInstallCaddyfile,
   sshRun,
@@ -14,7 +15,7 @@ import { routeModel } from "@/lib/model-router"
 import type { BudgetTier } from "@/lib/agent-config"
 import { logAuditEvent } from "@/lib/audit"
 import {
-  getCloudflareTokenForUser,
+  getCloudflareTokenForTeam,
   listZones,
   findRecordByName,
   upsertDnsRecord,
@@ -53,7 +54,8 @@ async function loadInstance(
   if (!instance) {
     return { error: NextResponse.json({ error: "Instance not found" }, { status: 404 }) }
   }
-  if (!isAdmin && instance.userId !== session.user.id) {
+  // Binding/removing a domain is an operation — requires Operator+ on the agent.
+  if (!isAdmin && !(await canOperateInstance(session.user.id, instance.id))) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) }
   }
   return { instance, userId: session.user.id }
@@ -160,7 +162,7 @@ export async function POST(
   }
 
   try {
-    const token = await getCloudflareTokenForUser(userId)
+    const token = await getCloudflareTokenForTeam(instance.teamId)
     const zones = await listZones(token)
     const zone = zones.find((z) => z.id === zoneIdParam)
     if (!zone) {
@@ -310,7 +312,7 @@ export async function DELETE(
   // Delete the user-zone record if we still have a token for it.
   if (instance.cfUserRecordId && instance.cfZoneId) {
     try {
-      const token = await getCloudflareTokenForUser(userId)
+      const token = await getCloudflareTokenForTeam(instance.teamId)
       await deleteDnsRecord(instance.cfUserRecordId, { token, zoneId: instance.cfZoneId })
     } catch {
       // Cloudflare disconnected or record already gone — proceed; the binding

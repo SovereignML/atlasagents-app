@@ -34,3 +34,17 @@ export function isStripeConfigured(): boolean {
     process.env.STRIPE_SECRET_KEY.startsWith("sk_")
   )
 }
+
+/**
+ * True only when it is safe to run the no-payment dev bypass: Stripe is NOT
+ * configured AND we are not in production. In production this is ALWAYS false,
+ * so the free-grant / free-deploy paths become unreachable. Payment endpoints
+ * should return STRIPE_NOT_CONFIGURED (503) when this is false and Stripe is
+ * unconfigured, rather than silently provisioning or granting credits for free.
+ */
+export function isDevBypassAllowed(): boolean {
+  return !isStripeConfigured() && process.env.NODE_ENV !== "production"
+}
+
+/** Standard 503 body for "Stripe required but not configured in production". */
+export const STRIPE_NOT_CONFIGURED = { error: "Payments are not configured" } as const

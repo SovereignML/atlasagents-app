@@ -42,7 +42,7 @@ The `runtime` column on `instances` is `"openclaw" | "hermes"`. A runtime regist
 
 Model routing is split because the two engines have different constraints:
 
-- **`routeModel(tier)`** ([`src/lib/model-router.ts`](../src/lib/model-router.ts)) feeds OpenClaw (and shared paths): a primary OpenRouter model (`google/gemma-4-31b-it:free`) with a `:free` fallback. The `mid` tier adds NVIDIA DeepSeek as a secondary fallback provider (`NVIDIA_API_KEY`).
+- **`routeModel(tier)`** ([`src/lib/model-router.ts`](../src/lib/model-router.ts)) feeds OpenClaw (and shared paths): a primary OpenRouter model (`minimax/minimax-m2.5`) with a `:free` fallback (`moonshotai/kimi-k2.6:free`), plus a best-effort NVIDIA cross-provider fallback (`mistralai/mistral-medium-3.5-128b`) on every tier (`NVIDIA_API_KEY`).
 - **`hermesModel(tier)`** is kept **separate** because **Hermes rejects any model with <64k context at startup** — the small `:free` slugs are unusable. Slugs must be live OpenRouter `<author>/<slug>` with ≥64k context; `HERMES_MODEL` env overrides per deploy. The current per-tier defaults are a conservative ≥64k placeholder (`anthropic/claude-3.5-sonnet`) flagged for replacement with chosen slugs. A malformed/missing slug fails the provision *before* `systemctl start` (`isValidOpenRouterSlug`) rather than crash-looping the gateway.
 
 Budget tiers are `low | mid | high`.

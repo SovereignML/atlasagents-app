@@ -1,5 +1,6 @@
 import type { InferSelectModel } from "drizzle-orm"
 import type { instances } from "@/db"
+import type { LlmProvider } from "@/lib/model-router"
 
 type Instance = InferSelectModel<typeof instances>
 
@@ -33,10 +34,12 @@ export type RenderInitScriptArgs = {
   cliBinary: string
   /** Absolute path of the `.env` already written in Phase A (the CLI reads it). */
   envPath: string
-  /** Provider to register (currently always OpenRouter). */
-  provider: "openrouter"
+  /** Provider to register (OpenRouter by default; "nvidia" for the NVIDIA fallback). */
+  provider: LlmProvider
   /** Validated model slug (<author>/<slug>, ≥64k context) to pin as the default. */
   model: string
+  /** OpenAI-compatible base URL for the provider (e.g. NVIDIA's endpoint). */
+  baseUrl: string
 }
 
 /** Inputs to the `.env` builder. */

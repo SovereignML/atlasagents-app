@@ -4,10 +4,10 @@ import { db, eq, teamBranding } from "@/db"
 import { requireBrandingManager } from "@/lib/branding-access"
 import { getCnameTarget } from "@/lib/tenant-branding"
 import { getOrCreateVerification } from "@/lib/domain-verify"
+import { getCustomHostname, mapCustomHostnameStatus } from "@/lib/cloudflare-saas"
 
-// Whether the domain resolves to anything (CNAME flattening / ALIAS records
-// mean we can't insist on an exact CNAME match — actual serving is gated by the
-// TLS-authorize endpoint, not this probe).
+// Legacy probes — used only when no Cloudflare custom hostname is registered
+// (e.g. local dev without CF for SaaS configured).
 async function dnsResolves(domain: string): Promise<boolean> {
   try {
     await dns.promises.lookup(domain)
@@ -17,8 +17,6 @@ async function dnsResolves(domain: string): Promise<boolean> {
   }
 }
 
-// Whether HTTPS terminates (cert issued) — any HTTP response means the TLS
-// handshake succeeded; only connection/TLS errors throw.
 async function httpsWorks(domain: string): Promise<boolean> {
   try {
     await fetch(`https://${domain}/`, {
@@ -49,19 +47,39 @@ export async function GET() {
   }
   const domain = row.customDomain
 
-  const dnsReady = await dnsResolves(domain)
-  const dnsStatus = dnsReady ? "ready" : "pending"
-
-  // Only probe TLS once DNS resolves and ownership is verified.
+  let dnsStatus = row.dnsStatus
   let tlsStatus = row.tlsStatus
-  if (dnsReady && row.domainVerifiedAt) {
-    tlsStatus = (await httpsWorks(domain)) ? "issued" : "pending"
+  let domainVerifiedAt = row.domainVerifiedAt
+
+  if (row.cfCustomHostnameId) {
+    // Cloudflare for SaaS is the source of truth: cert active = ownership proven
+    // (the customer pointed their CNAME at us and DV completed) and serving live.
+    try {
+      const ch = await getCustomHostname(row.cfCustomHostnameId)
+      const mapped = mapCustomHostnameStatus(ch)
+      dnsStatus = mapped.dnsStatus
+      tlsStatus = mapped.tlsStatus
+      if (mapped.active && !domainVerifiedAt) domainVerifiedAt = new Date()
+    } catch (err) {
+      console.error("[branding/domain/status] getCustomHostname failed:", err)
+    }
+  } else {
+    // Legacy fallback: probe DNS, then TLS once DNS resolves + ownership verified.
+    const dnsReady = await dnsResolves(domain)
+    dnsStatus = dnsReady ? "ready" : "pending"
+    if (dnsReady && row.domainVerifiedAt) {
+      tlsStatus = (await httpsWorks(domain)) ? "issued" : "pending"
+    }
   }
 
-  if (dnsStatus !== row.dnsStatus || tlsStatus !== row.tlsStatus) {
+  if (
+    dnsStatus !== row.dnsStatus ||
+    tlsStatus !== row.tlsStatus ||
+    domainVerifiedAt !== row.domainVerifiedAt
+  ) {
     await db
       .update(teamBranding)
-      .set({ dnsStatus, tlsStatus, updatedAt: new Date() })
+      .set({ dnsStatus, tlsStatus, domainVerifiedAt, updatedAt: new Date() })
       .where(eq(teamBranding.teamId, teamId))
   }
 
@@ -70,7 +88,7 @@ export async function GET() {
   return NextResponse.json({
     connected: true,
     domain,
-    verified: row.domainVerifiedAt != null,
+    verified: domainVerifiedAt != null,
     dnsStatus,
     tlsStatus,
     cnameTarget: getCnameTarget(),

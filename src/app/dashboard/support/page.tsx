@@ -17,7 +17,8 @@ import { SupportTicketForm } from "@/components/support/support-ticket-form"
 
 const STATUS_LABELS: Record<string, string> = {
   open: "Open",
-  pending: "Pending",
+  in_progress: "In progress",
+  pending: "Awaiting your reply",
   resolved: "Resolved",
 }
 

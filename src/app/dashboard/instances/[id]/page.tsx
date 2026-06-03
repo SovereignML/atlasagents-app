@@ -18,6 +18,7 @@ import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/
 import { PageContainer } from "@/components/layout/page-container"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
+import { getInstanceAccessLevel, levelAtLeast } from "@/lib/instance-access"
 import { getRuntime } from "@/lib/runtimes"
 import { InstanceTabs } from "./instance-tabs"
 
@@ -66,16 +67,26 @@ export default async function InstanceDetailPage({
 
   if (!instance) notFound()
 
+  // Provider connections are team-shared (keyed by the agent's team).
   const driveConn = await db.query.driveConnections.findFirst({
-    where: eq(driveConnections.userId, session.user.id),
+    where: eq(driveConnections.teamId, instance.teamId),
   })
   const cloudflareConn = await db.query.cloudflareConnections.findFirst({
-    where: eq(cloudflareConnections.userId, session.user.id),
+    where: eq(cloudflareConnections.teamId, instance.teamId),
   })
   const backupRows = await db.query.backupRecords.findMany({
     where: eq(backupRecords.instanceId, instance.id),
     orderBy: desc(backupRecords.createdAt),
   })
+
+  // The viewer's effective access level drives which controls/tabs render.
+  const myAccess = await getInstanceAccessLevel(session.user.id, instance.id)
+  const accessControl = {
+    level: myAccess.level,
+    canOperate: levelAtLeast(myAccess.level, "operator"),
+    canManageAccess: levelAtLeast(myAccess.level, "manager"),
+    isOwnerLike: myAccess.isOwnerLike,
+  }
 
   const access = buildPublicGatewayUrl({
     ipAddress: instance.ipAddress,
@@ -111,7 +122,8 @@ export default async function InstanceDetailPage({
         </div>
       </div>
 
-      <Card>
+      {(instance.status === "running" || instance.status === "stopped") && (
+        <Card>
         <CardHeader>
           <CardDescription className="font-mono text-[10px] tracking-[0.1em] uppercase">
             Access
@@ -157,16 +169,17 @@ export default async function InstanceDetailPage({
             </p>
           )}
         </CardContent>
-      </Card>
+        </Card>
+      )}
 
       <InstanceTabs
         active={tab || "overview"}
+        access={accessControl}
         instance={{
           id: instance.id,
           name: instance.name,
           status: instance.status,
           ipAddress: instance.ipAddress,
-          regionLabel: `${instance.region.flag} ${instance.region.name}`,
           serverLabel: instance.serverConfig.label,
           vcpu: instance.serverConfig.vcpu,
           ramGb: instance.serverConfig.ramGb,

@@ -88,7 +88,7 @@ export default async function ByosPage() {
           {items.map((i) => (
             <Link key={i.id} href={`/dashboard/instances/${i.id}`}>
               <Card className="transition-colors hover:border-foreground/30">
-                <CardContent className="space-y-3 p-5">
+                <CardContent className="space-y-3 p-6">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 font-medium">
                       <Server className="size-4 text-muted-foreground" />

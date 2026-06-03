@@ -167,9 +167,6 @@ export default async function AdminInstancesPage({
                   )}
                 </div>
                 <div className="shrink-0 text-right text-sm">
-                  <p className="text-foreground">
-                    {instance.region.flag} {instance.region.name}
-                  </p>
                   <p className="text-muted-foreground">
                     {instance.serverConfig.label} · {instance.serverConfig.vcpu} vCPU ·{" "}
                     {instance.serverConfig.ramGb} GB

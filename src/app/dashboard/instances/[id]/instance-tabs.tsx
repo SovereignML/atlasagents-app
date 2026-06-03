@@ -60,13 +60,15 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
+import Plan from "@/components/ui/agent-plan"
+import { buildDeploymentTasks } from "@/lib/deployment-stages"
+import { AccessTab } from "./instance-access-tab"
 
 type InstanceLite = {
   id: string
   name: string
   status: string
   ipAddress: string | null
-  regionLabel: string
   serverLabel: string
   vcpu: number
   ramGb: number
@@ -145,6 +147,13 @@ type KumaInfo = {
 }
 
 type CfZone = { id: string; name: string; status: string }
+
+type AccessControl = {
+  level: "viewer" | "operator" | "manager" | null
+  canOperate: boolean
+  canManageAccess: boolean
+  isOwnerLike: boolean
+}
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -241,6 +250,7 @@ function useInstancePolling(initialInstance: InstanceLite, initialLogs: LogLite[
 
 export function InstanceTabs({
   active,
+  access,
   instance: initialInstance,
   logs: initialLogs,
   drive,
@@ -249,6 +259,7 @@ export function InstanceTabs({
   backups,
 }: {
   active: string
+  access: AccessControl
   instance: InstanceLite
   logs: LogLite[]
   drive: DriveInfo
@@ -264,10 +275,39 @@ export function InstanceTabs({
     router.push(`${pathname}?tab=${id}`)
   }
 
+  // Gate tabs by the viewer's effective level. Viewers get read-only tabs
+  // (Overview/Logs); Operator+ unlocks the operational tabs; only the
+  // creator/team-owner sees Danger (delete); managers see Access.
+  const baseTabs = TABS.filter((t) => {
+    if (t.id === "overview" || t.id === "logs") return true
+    if (t.id === "danger") return access.isOwnerLike
+    return access.canOperate
+  })
+  const tabs = access.canManageAccess
+    ? [...baseTabs, { id: "access", label: "Access" } as const]
+    : baseTabs
+
+  // If the requested tab isn't permitted (e.g. a deep link), fall back to
+  // Overview so the corresponding panel doesn't render.
+  const effectiveActive = tabs.some((t) => t.id === active) ? active : "overview"
+
+  // Gate the dashboard behind the deployment cycle: while the agent is still
+  // provisioning (or failed / deleting), show only the live deployment stages.
+  // useInstancePolling() calls router.refresh() when the instance leaves a
+  // transient state, so the full dashboard reveals automatically once running.
+  const inDeploymentCycle =
+    instance.status === "pending" ||
+    instance.status === "provisioning" ||
+    instance.status === "failed_provisioning" ||
+    instance.status === "deleting"
+  if (inDeploymentCycle) {
+    return <DeploymentProgress instance={instance} logs={logs} access={access} />
+  }
+
   return (
-    <Tabs value={active} onValueChange={goTab} className="space-y-6">
+    <Tabs value={effectiveActive} onValueChange={goTab} className="space-y-6">
       <TabsList className="w-fit">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <TabsTrigger key={t.id} value={t.id}>
             {t.label}
           </TabsTrigger>
@@ -292,6 +332,11 @@ export function InstanceTabs({
       <TabsContent value="danger" className="mt-0">
         <DangerTab instance={instance} />
       </TabsContent>
+      {access.canManageAccess && (
+        <TabsContent value="access" className="mt-0">
+          <AccessTab instanceId={instance.id} isOwnerLike={access.isOwnerLike} />
+        </TabsContent>
+      )}
     </Tabs>
   )
 }
@@ -675,7 +720,16 @@ function ServerAccessCard({ instanceId }: { instanceId: string; ipAddress: strin
 }
 
 /* ───────────── GATEWAY TOKEN CARD ───────────── */
-function GatewayTokenCard({ instanceId, runtimeLabel }: { instanceId: string; runtimeLabel: string }) {
+function GatewayTokenCard({
+  instanceId,
+  runtimeLabel,
+  isHermes,
+}: {
+  instanceId: string
+  runtimeLabel: string
+  /** Hermes surfaces the key as an advanced "Gateway API Key"; OpenWebUI is the primary path. */
+  isHermes?: boolean
+}) {
   const [token, setToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -706,8 +760,12 @@ function GatewayTokenCard({ instanceId, runtimeLabel }: { instanceId: string; ru
 
   return (
     <SectionCard
-      title="Gateway Token"
-      description={`Use this token to authenticate with the ${runtimeLabel} Control UI and API.`}
+      title={isHermes ? "Gateway API Key" : "Gateway Token"}
+      description={
+        isHermes
+          ? "Advanced — for programmatic access to the OpenAI-compatible API at /v1. Most users can just use Open WebUI above."
+          : `Use this token to authenticate with the ${runtimeLabel} Control UI and API.`
+      }
     >
       <p className="break-all rounded-lg border bg-muted/40 p-3 font-mono text-sm text-foreground">
         {token ?? "gw_•••••••••••••••••••••"}
@@ -749,7 +807,7 @@ const PROVISION_STEPS = [
 ] as const
 
 const PROVISION_STAGE_HINTS: Record<string, string> = {
-  create_vm: "Creating your VM in the cloud region you selected.",
+  create_vm: "Creating your VM in the cloud.",
   wait_boot: "Waiting for the server to finish booting.",
   waiting_ssh: "Connecting to the server over SSH.",
   bootstrap: "Setting up the server environment.",
@@ -760,6 +818,138 @@ const PROVISION_STAGE_HINTS: Record<string, string> = {
   commit: "Finalizing deployment.",
 }
 
+/* ───────────── DEPLOYMENT PROGRESS (gates the dashboard) ───────────── */
+function DeploymentProgress({
+  instance,
+  logs,
+  access,
+}: {
+  instance: InstanceLite
+  logs: LogLite[]
+  access: AccessControl
+}) {
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+
+  const isFailed = instance.status === "failed_provisioning"
+  const isDeleting = instance.status === "deleting"
+
+  const tasks = buildDeploymentTasks({
+    status: instance.status,
+    provisionStage: instance.provisionStage,
+    deploymentTarget: instance.deploymentTarget,
+    logMessages: logs.map((l) => l.message),
+  })
+
+  const lastError = logs.find((l) => l.level === "error")
+
+  const stageHint = isFailed
+    ? "Deployment failed. Retry to recreate from scratch, or delete the agent."
+    : isDeleting
+      ? "Deleting this agent…"
+      : instance.provisionStage
+        ? PROVISION_STAGE_HINTS[instance.provisionStage] ??
+          "Still working — safe to leave this page open."
+        : "Preparing your deployment…"
+
+  function handleRetry() {
+    setError(null)
+    startTransition(async () => {
+      try {
+        const res = await fetch(`/api/instances/${instance.id}/retry`, { method: "POST" })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          throw new Error(data.error || `Retry failed (${res.status})`)
+        }
+        router.refresh()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Retry failed")
+      }
+    })
+  }
+
+  function handleDelete() {
+    setError(null)
+    startTransition(async () => {
+      try {
+        const res = await fetch(`/api/instances/${instance.id}`, { method: "DELETE" })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          throw new Error(data.error || `Delete failed (${res.status})`)
+        }
+        router.push("/dashboard/instances")
+        router.refresh()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Delete failed")
+      }
+    })
+  }
+
+  return (
+    <SectionCard
+      title={isFailed ? "Deployment failed" : isDeleting ? "Deleting" : "Deploying your agent"}
+      description={stageHint}
+    >
+      <div className="space-y-5">
+        <Plan tasks={tasks} />
+
+        {isFailed && lastError && (
+          <Alert variant="destructive">
+            <AlertTitle>Provisioning error</AlertTitle>
+            <AlertDescription className="font-mono">{lastError.message}</AlertDescription>
+          </Alert>
+        )}
+
+        {error && <p className="text-sm text-destructive">{error}</p>}
+
+        {!isDeleting && (
+          <div className="flex flex-wrap items-center gap-3">
+            {isFailed && access.canOperate && (
+              <Button variant="gradient" onClick={handleRetry} disabled={isPending}>
+                <RefreshCw data-icon="inline-start" />
+                {isPending ? "Retrying…" : "Retry deployment"}
+              </Button>
+            )}
+            {access.isOwnerLike && (
+              <AlertDialog>
+                <AlertDialogTrigger
+                  render={
+                    <Button variant="outline" disabled={isPending}>
+                      <Trash2 data-icon="inline-start" />
+                      {isFailed ? "Delete agent" : "Cancel & delete"}
+                    </Button>
+                  }
+                />
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete {instance.name}?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This permanently deletes the agent and tears down any resources
+                      created so far. This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel render={<Button variant="outline">Cancel</Button>} />
+                    <AlertDialogAction
+                      render={
+                        <Button variant="destructive" onClick={handleDelete} disabled={isPending}>
+                          {isPending ? "Deleting…" : "Delete"}
+                        </Button>
+                      }
+                    />
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+          </div>
+        )}
+      </div>
+    </SectionCard>
+  )
+}
+
+/* ───────────── PROVISIONING CARD ───────────── */
 function ProvisioningCard({ instance, logs }: { instance: InstanceLite; logs: LogLite[] }) {
   const logMessages = logs.map((l) => l.message)
   const isFailed = instance.status === "failed_provisioning"
@@ -918,21 +1108,43 @@ function OverviewTab({
       {instance.managedSubdomain && !instance.domain && instance.status === "running" && (
         <ManagedHostnameCard instance={instance} />
       )}
-      {instance.hasGatewayToken &&
-        (instance.deploymentTarget === "vps" || instance.deploymentTarget === "byos") && (
-          <GatewayTokenCard instanceId={instance.id} runtimeLabel={instance.runtimeLabel} />
-        )}
-      {instance.hasOpenclawPassword && instance.status === "running" && (
-        <CredentialsCard
-          instanceId={instance.id}
-          domain={instance.domain}
-          managedSubdomain={instance.managedSubdomain}
-          tlsStatus={instance.tlsStatus}
-          ipAddress={instance.ipAddress}
-          runtimeLabel={instance.runtimeLabel}
-          webui={instance.runtime === "hermes" && instance.webuiEnabled}
-        />
-      )}
+      {(() => {
+        const isHermes = instance.runtime === "hermes"
+        const gatewayCard =
+          instance.hasGatewayToken &&
+          (instance.deploymentTarget === "vps" || instance.deploymentTarget === "byos") ? (
+            <GatewayTokenCard
+              instanceId={instance.id}
+              runtimeLabel={instance.runtimeLabel}
+              isHermes={isHermes}
+            />
+          ) : null
+        const credentialsCard =
+          instance.hasOpenclawPassword && instance.status === "running" ? (
+            <CredentialsCard
+              instanceId={instance.id}
+              domain={instance.domain}
+              managedSubdomain={instance.managedSubdomain}
+              tlsStatus={instance.tlsStatus}
+              ipAddress={instance.ipAddress}
+              runtimeLabel={instance.runtimeLabel}
+              webui={isHermes && instance.webuiEnabled}
+            />
+          ) : null
+        // Hermes leads with the Open WebUI login (primary path) and pushes the
+        // gateway API key below it; OpenClaw keeps the token-first ordering.
+        return isHermes ? (
+          <>
+            {credentialsCard}
+            {gatewayCard}
+          </>
+        ) : (
+          <>
+            {gatewayCard}
+            {credentialsCard}
+          </>
+        )
+      })()}
 
       <SectionCard title="Deployment">
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -985,8 +1197,7 @@ function OverviewTab({
         </SectionCard>
       ) : (
         <SectionCard title="Infrastructure">
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <Stat label="Region" value={instance.regionLabel} />
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
             <Stat label="Server" value={instance.serverLabel} />
             <Stat label="Specs" value={`${instance.vcpu} vCPU · ${instance.ramGb} GB`} />
             <Stat label="Created" value={new Date(instance.createdAt).toLocaleDateString()} />

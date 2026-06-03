@@ -78,13 +78,16 @@ export function TeamClient({
   invites,
   allTeams = [],
   activeTeamId,
+  embedded = false,
 }: {
-  team: { id: string; name: string; seatLimit: number }
+  team: { id: string; name: string; seatLimit: number; planLabel: string }
   myRole: TeamRole
   members: Member[]
   invites: Invite[]
   allTeams?: TeamInfo[]
   activeTeamId?: string
+  /** When true, render inside the Team page tabs (no outer container/switcher). */
+  embedded?: boolean
 }) {
   const router = useRouter()
   const [showInvite, setShowInvite] = useState(false)
@@ -185,9 +188,9 @@ export function TeamClient({
     startTransition(refresh)
   }
 
-  return (
-    <PageContainer>
-      {allTeams.length > 1 && (
+  const content = (
+    <>
+      {!embedded && allTeams.length > 1 && (
         <Card>
           <CardContent className="flex flex-wrap items-center gap-4">
             <span className="text-xs text-muted-foreground">Active Team</span>
@@ -219,7 +222,7 @@ export function TeamClient({
       )}
 
       <PageHeader
-        title="Team"
+        title={embedded ? "Members" : "Team"}
         description={`${team.name} · invite teammates and control their access.`}
         actions={
           canManage && (
@@ -299,11 +302,11 @@ export function TeamClient({
         </Alert>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
         <Card size="sm">
           <CardHeader>
             <CardDescription className="text-xs">Plan</CardDescription>
-            <CardTitle className="font-mono text-2xl">Pro</CardTitle>
+            <CardTitle className="font-mono text-2xl">{team.planLabel}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">Up to {team.seatLimit} seats</p>
@@ -329,16 +332,16 @@ export function TeamClient({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Member</TableHead>
+              <TableHead className="pl-5">Member</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              <TableHead className="pr-5 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {members.map((m) => (
               <TableRow key={m.userId}>
-                <TableCell className="text-foreground">
+                <TableCell className="pl-5 text-foreground">
                   <div>{m.name || m.email}</div>
                   {m.name && (
                     <div className="font-mono text-xs text-muted-foreground">{m.email}</div>
@@ -370,7 +373,7 @@ export function TeamClient({
                   )}
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">active</TableCell>
-                <TableCell className="text-right">
+                <TableCell className="pr-5 text-right">
                   {canManage && m.role !== "owner" && (
                     <Button
                       size="sm"
@@ -386,14 +389,14 @@ export function TeamClient({
             ))}
             {invites.map((i) => (
               <TableRow key={i.id}>
-                <TableCell className="font-mono text-foreground">{i.email}</TableCell>
+                <TableCell className="pl-5 font-mono text-foreground">{i.email}</TableCell>
                 <TableCell>
                   <Badge variant={roleBadgeVariant(i.role)} className="font-mono">
                     {i.role}
                   </Badge>
                 </TableCell>
                 <TableCell className="text-xs text-amber-500">invited</TableCell>
-                <TableCell className="text-right">
+                <TableCell className="pr-5 text-right">
                   {canManage && (
                     <Button
                       size="sm"
@@ -472,6 +475,12 @@ export function TeamClient({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </PageContainer>
+    </>
+  )
+
+  return embedded ? (
+    <div className="space-y-10">{content}</div>
+  ) : (
+    <PageContainer>{content}</PageContainer>
   )
 }

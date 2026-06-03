@@ -66,10 +66,27 @@ export async function runOpenRouterUsageSync(): Promise<UsageSyncReport> {
     ),
   })
 
+  // Reseller agents under a white-label tenant mint their runtime key against
+  // the TENANT's OpenRouter account, which the platform provisioning key can't
+  // read. Skip them here (and the tenant carries their LLM cost). See
+  // getOrMintInstanceOpenRouterKey in src/lib/provisioner.ts.
+  const tenantKeyedTeams = new Set<string>()
+  {
+    const res = await db.execute(sql`
+      SELECT child.id AS id
+      FROM "Team" child
+      JOIN "TenantConfig" tc ON tc."teamId" = child."parentTeamId"
+      WHERE tc."openRouterProvisioningKeyEnc" IS NOT NULL
+    `)
+    for (const r of res.rows as { id: string }[]) tenantKeyedTeams.add(r.id)
+  }
+
   for (const row of rows) {
     // Skip BYOS own-key instances — they spend on the customer's own key and
     // never draw on our wallet.
     if (row.byosLlmMode === "own_key" || !row.openRouterKeyId) continue
+    // Skip reseller agents on a tenant's own OpenRouter account.
+    if (tenantKeyedTeams.has(row.teamId)) continue
     report.scanned++
 
     let state: Awaited<ReturnType<typeof getRuntimeKey>>

@@ -6,7 +6,7 @@
 //
 // Resolution always returns a fully-populated shape: stored white-label values
 // merged over the default BRANDING constant. The entitlement gate is checked
-// live here, so a team that downgrades below scale/enterprise silently reverts
+// live here, so a team that downgrades below enterprise silently reverts
 // to the default look without its stored config being deleted.
 //
 // NEVER import this module from src/proxy.ts or any edge runtime — the pg pool

@@ -8,9 +8,9 @@ export async function POST() {
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
-  if ((session.user as { role?: string }).role !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
+  // Any authenticated user may stop impersonating — it only clears their own
+  // impersonation cookie, returning them to themselves. Covers both platform
+  // admins and white-label tenant admins.
 
   await stopImpersonation()
 

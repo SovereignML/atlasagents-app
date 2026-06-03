@@ -12,6 +12,10 @@ import {
   Network,
   ArrowLeft,
   Wallet,
+  UserX,
+  Building2,
+  DatabaseBackup,
+  Cpu,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -49,8 +53,12 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/admin/instances", label: "Instances", icon: Server },
       { href: "/admin/providers", label: "Providers", icon: Network },
+      { href: "/admin/models", label: "Models", icon: Cpu },
       { href: "/admin/subscriptions", label: "Subscriptions", icon: CreditCard },
       { href: "/admin/users", label: "Users", icon: Users },
+      { href: "/admin/teams", label: "Teams", icon: Building2 },
+      { href: "/admin/deletion-requests", label: "Deletion Requests", icon: UserX },
+      { href: "/admin/backups", label: "Backups", icon: DatabaseBackup },
     ],
   },
   {

@@ -3,6 +3,7 @@ import crypto from "node:crypto"
 import { auth } from "@/auth"
 import { db, instances, instanceLogs, eq } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
+import { canOperateInstance } from "@/lib/instance-access"
 import { encryptSecret } from "@/lib/crypto-secret"
 import { reprovisionBotEnv } from "@/lib/provisioner"
 
@@ -45,7 +46,8 @@ export async function POST(
     where: isAdmin ? eq(instances.id, instanceId) : whereUserInstanceVisible(session.user.id, instanceId),
   })
   if (!instance) return NextResponse.json({ error: "Not found" }, { status: 404 })
-  if (!isAdmin && instance.userId !== session.user.id) {
+  // Connecting an interface is an operation — Operator+ on the agent.
+  if (!isAdmin && !(await canOperateInstance(session.user.id, instance.id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
   if (instance.status === "deleted") {

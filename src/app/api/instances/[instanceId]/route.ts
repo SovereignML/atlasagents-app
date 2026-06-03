@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { db, instances, subscriptions, eq } from "@/db"
 import { deleteBot } from "@/lib/provisioner"
+import { getInstanceAccessLevel } from "@/lib/instance-access"
 import { IllegalTransitionError } from "@/lib/instance-state"
 import { stripe, isStripeConfigured } from "@/lib/stripe"
 import { logAuditEvent } from "@/lib/audit"
@@ -28,7 +29,8 @@ export async function DELETE(
   if (!instance) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 })
   }
-  if (!isAdmin && instance.userId !== session.user.id) {
+  // Deleting an agent is restricted to its creator and the team owner.
+  if (!isAdmin && !(await getInstanceAccessLevel(session.user.id, instance.id)).isOwnerLike) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 

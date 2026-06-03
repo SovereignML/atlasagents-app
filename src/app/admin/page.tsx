@@ -138,7 +138,6 @@ export default async function AdminDashboard() {
                       </Badge>
                     )}
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {instance.region.flag} {instance.region.name} &middot;{" "}
                       {instance.serverConfig.label}
                     </p>
                   </div>

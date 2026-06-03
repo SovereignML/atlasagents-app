@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { db, cloudflareConnections, eq } from "@/db"
+import { requireTeamManage } from "@/lib/team"
 import { logAuditEvent } from "@/lib/audit"
 import { encryptSecret } from "@/lib/crypto-secret"
 import { verifyToken, listZones } from "@/lib/cloudflare"
@@ -19,6 +20,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
   const userId = session.user.id
+
+  // The Cloudflare connection is shared across the team — only owners/admins connect it.
+  const team = await requireTeamManage(userId)
+  if (!team) {
+    return NextResponse.json(
+      { error: "Only team owners and admins can connect an integration" },
+      { status: 403 },
+    )
+  }
 
   const body = (await req.json().catch(() => ({}))) as { token?: string }
   const apiToken = body.token?.trim()
@@ -49,15 +59,16 @@ export async function POST(req: NextRequest) {
   }
 
   const existing = await db.query.cloudflareConnections.findFirst({
-    where: eq(cloudflareConnections.userId, userId),
+    where: eq(cloudflareConnections.teamId, team.teamId),
   })
   if (existing) {
     await db
       .update(cloudflareConnections)
-      .set({ apiTokenEnc: encryptSecret(apiToken) })
-      .where(eq(cloudflareConnections.userId, userId))
+      .set({ apiTokenEnc: encryptSecret(apiToken), userId })
+      .where(eq(cloudflareConnections.teamId, team.teamId))
   } else {
     await db.insert(cloudflareConnections).values({
+      teamId: team.teamId,
       userId,
       apiTokenEnc: encryptSecret(apiToken),
     })
@@ -65,6 +76,7 @@ export async function POST(req: NextRequest) {
 
   await logAuditEvent({
     userId,
+    teamId: team.teamId,
     action: "cloudflare.connect",
     targetType: "cloudflare_connection",
   })

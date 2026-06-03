@@ -166,8 +166,7 @@ export default function AdminSubscriptionsPage() {
                   <p className="mt-1 text-sm text-muted-foreground">{sub.user.email}</p>
                   {sub.instance && (
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {sub.instance.name} &middot; {sub.instance.region.name} &middot;{" "}
-                      {sub.instance.serverConfig.label}
+                      {sub.instance.name} &middot; {sub.instance.serverConfig.label}
                     </p>
                   )}
                 </div>

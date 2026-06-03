@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Check } from "lucide-react"
+import { Check, Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -75,6 +75,14 @@ export default function NotificationsPage() {
     }).catch(() => {})
   }
 
+  async function clearRead() {
+    await fetch("/api/notifications", { method: "DELETE" }).catch(() => {})
+    const data = await fetchPage()
+    setItems(data.notifications)
+    setUnread(data.unreadCount)
+    setHasMore(data.notifications.length === PAGE_SIZE)
+  }
+
   async function handleClick(n: NotificationItem) {
     if (!n.readAt) {
       setUnread((u) => Math.max(0, u - 1))
@@ -96,12 +104,20 @@ export default function NotificationsPage() {
         title="Notifications"
         description="Your alerts across all channels"
         actions={
-          unread > 0 ? (
-            <Button variant="outline" size="sm" onClick={markAllRead}>
-              <Check data-icon="inline-start" />
-              Mark all read
-            </Button>
-          ) : undefined
+          <>
+            {unread > 0 && (
+              <Button variant="outline" size="sm" onClick={markAllRead}>
+                <Check data-icon="inline-start" />
+                Mark all read
+              </Button>
+            )}
+            {items.some((n) => n.readAt) && (
+              <Button variant="outline" size="sm" onClick={clearRead}>
+                <Trash2 data-icon="inline-start" />
+                Clear read
+              </Button>
+            )}
+          </>
         }
       />
 

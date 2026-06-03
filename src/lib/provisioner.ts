@@ -30,6 +30,7 @@ import {
 import { decryptSecret, encryptSecret } from "@/lib/crypto-secret"
 import { mintRuntimeKey, revokeRuntimeKey } from "@/lib/openrouter-provisioning"
 import { computeKeyLimitUsd } from "@/lib/openrouter-billing"
+import { getTenantOpenRouterKey } from "@/lib/tenant"
 import {
   generateAdminPassword,
   generateGatewayToken,
@@ -46,12 +47,19 @@ import {
 import { routeDeployment, logRoutingDecision, type Candidate } from "@/lib/vps-router"
 import { MAX_FAILOVER_ATTEMPTS } from "@/configs/routing"
 import { createAgentSubdomain, deleteAgentSubdomain } from "@/lib/agent-dns"
-import { deleteDnsRecord, getCloudflareTokenForUser } from "@/lib/cloudflare"
+import { deleteDnsRecord, getCloudflareTokenForTeam } from "@/lib/cloudflare"
 import { generateMockIp } from "@/lib/instance"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
 import { notify } from "@/lib/notifications/dispatch"
 import { syncUptimeMonitor, removeUptimeMonitor } from "@/lib/uptime-monitoring"
-import { routeModel, hermesModel, isValidOpenRouterSlug } from "@/lib/model-router"
+import {
+  routeModel,
+  hermesModel,
+  isValidOpenRouterSlug,
+  resolveLlmProvider,
+  nvidiaKeyForSlot,
+  type LlmProvider,
+} from "@/lib/model-router"
 import type { BudgetTier } from "@/lib/agent-config"
 import { generateAgentsMd, generateIdentityMd } from "@/lib/agent-identity"
 
@@ -97,12 +105,19 @@ export async function getOrMintInstanceOpenRouterKey(
   if (instance.openRouterKeyEnc) {
     return decryptSecret(instance.openRouterKeyEnc)
   }
-  // Cap the key at the owner's funded credits × margin (USD). This is the
-  // hard floor on our cost — OpenRouter enforces it server-side, so the key
-  // can never spend past what the customer paid (minus our margin), even if
-  // the usage poller stalls. See src/lib/openrouter-billing.ts.
-  const limitUsd = await computeKeyLimitUsd(instance.userId)
-  const { keyId, key } = await mintFn({ label: `sovereign-${instance.id}`, limitUsd })
+  // White-label reseller agents mint under the TENANT's own OpenRouter account,
+  // so the tenant bears their customers' LLM cost. Those keys are NOT capped by
+  // the platform wallet (the tenant's OpenRouter account governs spend) and are
+  // excluded from the platform usage-sync poller (see src/lib/openrouter-usage.ts).
+  const tenantKey = await getTenantOpenRouterKey(instance.teamId)
+  // Otherwise cap the key at the owner's funded credits × margin (USD) — the
+  // hard floor on our cost, enforced server-side by OpenRouter even if the
+  // usage poller stalls. See src/lib/openrouter-billing.ts.
+  const limitUsd = tenantKey ? undefined : await computeKeyLimitUsd(instance.userId)
+  const { keyId, key } = await mintFn(
+    { label: `sovereign-${instance.id}`, limitUsd },
+    tenantKey ?? undefined,
+  )
   await db
     .update(instances)
     .set({
@@ -112,6 +127,20 @@ export async function getOrMintInstanceOpenRouterKey(
     })
     .where(eq(instances.id, instance.id))
   return key
+}
+
+/**
+ * Resolve the runtime's OpenRouter key, honoring the instance's LLM provider.
+ * NVIDIA-primary bots don't touch OpenRouter at all, so we skip minting (and the
+ * OPENROUTER_PROVISIONING_KEY requirement) and return "" — this is what lets the
+ * platform run with zero OpenRouter credits. OpenRouter bots mint/reuse as usual.
+ */
+async function resolveRuntimeOpenRouterKey(
+  instance: Instance,
+  provider: LlmProvider = "openrouter",
+): Promise<string> {
+  if (provider === "nvidia") return ""
+  return getOrMintInstanceOpenRouterKey(instance)
 }
 
 /**
@@ -150,8 +179,11 @@ async function revokeInstanceOpenRouterKey(instance: Instance): Promise<void> {
   }
 }
 
-const FALLBACK_REGION = "us-east"
-const FALLBACK_PLAN = "g6-standard-2"
+// Used only on the legacy no-mapping path (routeDeployment returns zero
+// candidates). DigitalOcean codes, matching the env-default provider + the
+// Frankfurt-only region.
+const FALLBACK_REGION = "fra1"
+const FALLBACK_PLAN = "s-2vcpu-4gb"
 
 function bashSingleQuoteForScript(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`
@@ -530,7 +562,15 @@ echo "=== provision: v1_models_ok ==="
 /* ------------------------------------------------------------------ */
 
 function isLiveMode(): boolean {
-  return Boolean(process.env.LINODE_API_TOKEN && process.env.SSH_FLEET_PRIVATE_KEY)
+  // Live provisioning needs the fleet SSH key plus at least one provider token.
+  // Any enabled VPS provider's credential counts — DO is primary, but Linode/OVH
+  // remain valid so a multi-provider deployment still reports live mode.
+  const hasProviderToken = Boolean(
+    process.env.DIGITALOCEAN_API_TOKEN ||
+      process.env.LINODE_API_TOKEN ||
+      process.env.OVH_APP_KEY,
+  )
+  return hasProviderToken && Boolean(process.env.SSH_FLEET_PRIVATE_KEY)
 }
 
 function buildContainerName(instanceId: string): string {
@@ -540,18 +580,29 @@ function buildContainerName(instanceId: string): string {
 type BotEnv = Record<string, string>
 function buildBotEnv(instance: Instance, extras: BotEnv = {}): BotEnv {
   const tier = (instance.modelTier ?? "mid") as BudgetTier
-  const route = routeModel(tier)
+  const provider = resolveLlmProvider(instance)
+  const route = routeModel(tier, provider)
+
+  // NVIDIA-primary bots get the NVIDIA key in the LLM key slot; OpenRouter bots
+  // keep the shared OpenRouter key.
+  const primaryKey =
+    provider === "nvidia" ? nvidiaKeyForSlot("primary") : OPENROUTER_API_KEY()
 
   const env: BotEnv = {
     BOT_TOKEN: instance.botToken ?? "",
     SOUL_MD: instance.soulMd ?? "You are a helpful assistant.",
     MODEL: route.model,
     FALLBACK_MODEL: route.fallback,
-    OPENROUTER_API_KEY: OPENROUTER_API_KEY(),
+    LLM_PROVIDER: provider,
+    LLM_BASE_URL: route.baseUrl,
+    OPENROUTER_API_KEY: primaryKey,
     USAGE_INGEST_URL: `${NEXT_PUBLIC_GATEWAY_BASE_URL()}/api/usage/ingest`,
     INSTANCE_ID: instance.id,
     PORT: "3000",
   }
+
+  const nvidiaKey = nvidiaKeyForSlot("primary")
+  if (nvidiaKey) env.NVIDIA_API_KEY = nvidiaKey
 
   if (instance.telegramBotTokenEnc) {
     try {
@@ -1313,7 +1364,10 @@ async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
     /*           commit). Shared verbatim with the BYOS path — the only  */
     /*           difference upstream is how we got here (Linode VM vs.   */
     /*           the customer's own server).                             */
-    const openRouterApiKey = await getOrMintInstanceOpenRouterKey(instance)
+    const openRouterApiKey = await resolveRuntimeOpenRouterKey(
+      instance,
+      resolveLlmProvider(instance),
+    )
     return await configureRuntimeOverSsh(instance, target, ipAddress, runtime, {
       managedSubdomain: managedSubdomainForProvision,
       openRouterApiKey,
@@ -1351,6 +1405,7 @@ async function configureRuntimeOverSsh(
   opts: { managedSubdomain: string | null; openRouterApiKey: string; vmId: string | undefined },
 ): Promise<ProvisionResult> {
   const { managedSubdomain, openRouterApiKey, vmId } = opts
+  const llmProvider = resolveLlmProvider(instance)
   let currentStage: VpsStage = "writing_config"
 
   /* --- 5. Credentials --------------------------------------------- */
@@ -1378,13 +1433,17 @@ async function configureRuntimeOverSsh(
   const gatewayToken = generateGatewayToken()
   const webuiSecretKey = webuiEnabled ? generateGatewayToken() : ""
   const tier = (instance.modelTier ?? "mid") as BudgetTier
-  const route = routeModel(tier)
+  const route = routeModel(tier, llmProvider)
 
   // Hermes pins a ≥64k OpenRouter model via its own CLI (see renderInitScript); routeModel's
   // small `:free` slugs would be rejected by Hermes at startup. Other runtimes keep the
-  // routed model. Validate the slug up front so a bad model fails the deploy with a clear
+  // routed model. On the NVIDIA switch, Hermes uses the routed NVIDIA model directly.
+  // Validate the slug up front so a bad model fails the deploy with a clear
   // error instead of a silent gateway crash loop.
-  const initModel = runtime.id === "hermes" ? hermesModel(tier) : route.model
+  const initModel =
+    runtime.id === "hermes" && llmProvider === "openrouter"
+      ? hermesModel(tier)
+      : route.model
   if (runtime.renderInitScript && !isValidOpenRouterSlug(initModel)) {
     throw new Error(
       `${runtime.displayName} model "${initModel}" is not a valid OpenRouter <author>/<slug> ` +
@@ -1528,8 +1587,9 @@ async function configureRuntimeOverSsh(
       systemUser: runtime.paths.systemUser,
       cliBinary: runtime.cliBinary,
       envPath: runtime.paths.envPath,
-      provider: "openrouter",
+      provider: llmProvider,
       model: initModel,
+      baseUrl: route.baseUrl,
     })
     if (initScript) {
       const initStep = await sshRunScriptLogged(
@@ -1840,7 +1900,7 @@ async function provisionByosBot(instance: Instance): Promise<ProvisionResult> {
     const openRouterApiKey =
       instance.byosLlmMode === "own_key" && instance.byosOwnApiKeyEnc
         ? decryptSecret(instance.byosOwnApiKeyEnc)
-        : await getOrMintInstanceOpenRouterKey(instance)
+        : await resolveRuntimeOpenRouterKey(instance, resolveLlmProvider(instance))
 
     /* --- 4. Shared configure-over-SSH (no managed subdomain, no VM) - */
     return await configureRuntimeOverSsh(instance, target, host, runtime, {
@@ -2078,7 +2138,7 @@ export async function deleteBot(instance: Instance): Promise<DeleteResult> {
   // since disconnected Cloudflare we can't reach it — log the potential orphan.
   if (instance.cfUserRecordId && instance.cfZoneId) {
     try {
-      const token = await getCloudflareTokenForUser(instance.userId)
+      const token = await getCloudflareTokenForTeam(instance.teamId)
       await deleteDnsRecord(instance.cfUserRecordId, {
         token,
         zoneId: instance.cfZoneId,
@@ -2294,22 +2354,26 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
       : ""
 
     const tier = (instance.modelTier ?? "mid") as BudgetTier
-    const route = routeModel(tier)
+    const llmProvider = resolveLlmProvider(instance)
+    const route = routeModel(tier, llmProvider)
 
     // Resolve the LLM key. BYOS "own_key" instances inject the customer's
     // stored key; everyone else uses (or mints) the per-instance OpenRouter
-    // runtime key. Restart-only paths decrypt the existing key rather than
-    // minting again.
+    // runtime key (skipped for NVIDIA-primary bots). Restart-only paths decrypt
+    // the existing key rather than minting again.
     const openRouterApiKey =
       instance.byosLlmMode === "own_key" && instance.byosOwnApiKeyEnc
         ? decryptSecret(instance.byosOwnApiKeyEnc)
-        : await getOrMintInstanceOpenRouterKey(instance)
+        : await resolveRuntimeOpenRouterKey(instance, llmProvider)
 
     const gatewayToken = instance.gatewayTokenEnc
       ? decryptSecret(instance.gatewayTokenEnc)
       : generateGatewayToken()
 
-    const initModel = runtime.id === "hermes" ? hermesModel(tier) : route.model
+    const initModel =
+      runtime.id === "hermes" && llmProvider === "openrouter"
+        ? hermesModel(tier)
+        : route.model
     if (runtime.renderInitScript && !isValidOpenRouterSlug(initModel)) {
       throw new Error(
         `${runtime.displayName} model "${initModel}" is not a valid OpenRouter <author>/<slug> ` +
@@ -2340,8 +2404,9 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
         systemUser,
         cliBinary: runtime.cliBinary,
         envPath,
-        provider: "openrouter",
+        provider: llmProvider,
         model: initModel,
+        baseUrl: route.baseUrl,
       })
       if (initScript) {
         const initStep = await sshRunScriptLogged(
@@ -2417,4 +2482,64 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
       message: "Container restarted with new env.",
     })
   }
+}
+
+/**
+ * Retry a failed provision by recreating from scratch. Best-effort teardown of
+ * any partial provider VM + managed DNS record, clear all provision-derived
+ * columns, move the row back to `pending`, then re-run provisionBot — which,
+ * with vmId cleared, provisions a brand-new VM. The OpenRouter key is kept
+ * (minting is idempotent and tied to the instance's funded credits).
+ */
+export async function retryProvisionBot(instance: Instance): Promise<void> {
+  if (instance.vmId) {
+    try {
+      const provider = await getVmProviderById(instance.providerId)
+      await provider.deleteVM(instance.vmId)
+    } catch (err) {
+      await logInstanceEvent({
+        instanceId: instance.id,
+        level: "warn",
+        stage: "provision",
+        action: "retry_vm_teardown",
+        result: "error",
+        message: `Retry: partial VM teardown failed (continuing with a fresh VM): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      })
+    }
+  }
+  if (instance.cfRecordId || instance.managedSubdomain) {
+    try {
+      await deleteAgentSubdomain(instance.id, instance.cfRecordId)
+    } catch {
+      /* best-effort — the DNS upsert on the next run reconciles this */
+    }
+  }
+
+  await db
+    .update(instances)
+    .set({
+      vmId: null,
+      ipAddress: null,
+      managedSubdomain: null,
+      cfRecordId: null,
+      provisionStage: null,
+      failedStage: null,
+      lastError: null,
+      dnsStatus: null,
+      tlsStatus: null,
+      // Reset to pending directly (not via transitionInstance) so the reset
+      // doesn't depend on a failed_provisioning→pending edge existing in the
+      // state machine. provisionBot's own pending→provisioning transition is
+      // unambiguously legal.
+      status: "pending",
+    })
+    .where(eq(instances.id, instance.id))
+
+  const fresh = await db.query.instances.findFirst({
+    where: eq(instances.id, instance.id),
+  })
+  if (!fresh) throw new Error(`instance ${instance.id} no longer exists`)
+  await provisionBot(fresh)
 }

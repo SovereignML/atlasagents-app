@@ -3,7 +3,7 @@ import { auth } from "@/auth"
 import { db, instances, backupRecords, eq, and, desc } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { driveErrorResponse } from "@/lib/drive-errors"
-import { getDriveAccessTokenForUser, listBackups } from "@/lib/google-drive"
+import { getDriveAccessTokenForTeam, listBackups } from "@/lib/google-drive"
 import { BACKUP_SCHEMA_VERSION } from "@/lib/agent-backup"
 
 /**
@@ -32,13 +32,12 @@ export async function GET(
   if (!instance) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 })
   }
-  if (!isAdmin && instance.userId !== session.user.id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
+  // Listing is read-only — visibility (creator / team-owner / any grant) is
+  // already enforced by whereUserInstanceVisible above. No extra level gate.
 
   if (req.nextUrl.searchParams.get("source") === "drive") {
     try {
-      const accessToken = await getDriveAccessTokenForUser(instance.userId)
+      const accessToken = await getDriveAccessTokenForTeam(instance.teamId)
       const files = await listBackups(accessToken, instance.id)
       const known = await db.query.backupRecords.findMany({
         where: eq(backupRecords.instanceId, instance.id),
@@ -50,6 +49,7 @@ export async function GET(
         await db
           .insert(backupRecords)
           .values({
+            teamId: instance.teamId,
             userId: instance.userId,
             instanceId: instance.id,
             driveFileId: f.id,

@@ -58,7 +58,6 @@ type Item = {
   ipAddress: string | null
   runtime: string | null
   deploymentTarget: string | null
-  regionLabel: string
   serverLabel: string
   vcpu: number
   ramGb: number
@@ -85,7 +84,6 @@ function mapRowsToItems(
     ipAddress: string | null
     runtime?: string | null
     deploymentTarget?: string | null
-    region: { flag: string; name: string }
     serverConfig: { label: string; vcpu: number; ramGb: number }
     logs?: Array<{ id: string; level: string; message: string; createdAt: string | Date }>
   }>,
@@ -100,7 +98,6 @@ function mapRowsToItems(
       ipAddress: row.ipAddress,
       runtime: row.runtime ?? null,
       deploymentTarget: row.deploymentTarget ?? null,
-      regionLabel: `${row.region.flag} ${row.region.name}`,
       serverLabel: row.serverConfig.label,
       vcpu: row.serverConfig.vcpu,
       ramGb: row.serverConfig.ramGb,
@@ -301,9 +298,8 @@ export function InstancesFilter({ items: initialItems }: { items: Item[] }) {
                       <span className="font-mono text-xs text-muted-foreground">→ Manage</span>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
                     {[
-                      { label: "Region", value: instance.regionLabel },
                       { label: "Server", value: instance.serverLabel },
                       { label: "Specs", value: `${instance.vcpu} vCPU · ${instance.ramGb} GB` },
                       { label: "IP", value: instance.ipAddress || "Pending", mono: true },

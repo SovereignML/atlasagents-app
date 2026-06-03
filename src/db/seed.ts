@@ -203,7 +203,7 @@ async function main() {
       .values({
         slug: p.slug,
         name: p.name,
-        enabled: true,
+        enabled: p.enabled,
         priority: p.defaultPriority,
         credentialEnvKey: p.credentialEnvKey,
       })

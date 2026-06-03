@@ -15,6 +15,8 @@ import type { AgentConfig } from "@/lib/agent-config"
 import { selectSkills } from "@/configs/skill-map"
 import { generateSoul } from "@/lib/soul"
 import { routeModel } from "@/lib/model-router"
+import { getUserTeam } from "@/lib/team"
+import { isTeamSuspended } from "@/lib/tenant"
 import { logAuditEvent, type AuditAction } from "@/lib/audit"
 
 type Instance = InferSelectModel<typeof instances>
@@ -34,6 +36,8 @@ export type CreateInstanceArgs = {
   planSlug?: string
   regionSlug?: string
   billingInterval?: "month" | "year"
+  /** Team the agent belongs to. Defaults to the owner's active team. */
+  teamId?: string
   /** Optional deploy-only extras. */
   sshKeyId?: string
   rootPasswordEnc?: string
@@ -121,6 +125,16 @@ export async function createInstanceFromAgentFields(
   // ── Derive agent fields ───────────────────────────────────────────
   const agentFields = buildAgentFields(args.agentConfig)
 
+  // The agent belongs to the owner's active team (created lazily if needed).
+  const teamId = args.teamId ?? (await getUserTeam(args.userId))?.teamId
+  if (!teamId) return { ok: false, status: 500, error: "Could not resolve team" }
+
+  // A tenant admin can suspend an end-customer's (child) team — block new
+  // deploys for it. See src/lib/tenant.ts.
+  if (await isTeamSuspended(teamId)) {
+    return { ok: false, status: 403, error: "This account is suspended. Contact your administrator." }
+  }
+
   // ── Insert (retry once on the slug partial-unique violation) ──────
   let instance: Instance | undefined
   for (let attempt = 0; attempt < 2 && !instance; attempt++) {
@@ -129,6 +143,7 @@ export async function createInstanceFromAgentFields(
         .insert(instances)
         .values({
           userId: args.userId,
+          teamId,
           name: args.name.trim(),
           slug: createSlug(args.name),
           regionId: region.id,

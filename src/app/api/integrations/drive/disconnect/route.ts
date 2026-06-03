@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { db, driveConnections, eq } from "@/db"
+import { requireTeamManage } from "@/lib/team"
 import { logAuditEvent } from "@/lib/audit"
 import { decryptSecret } from "@/lib/crypto-secret"
 import { revokeDriveToken } from "@/lib/google-drive"
@@ -18,8 +19,17 @@ export async function POST() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
+  // Shared team connection — only owners/admins may disconnect it.
+  const team = await requireTeamManage(session.user.id)
+  if (!team) {
+    return NextResponse.json(
+      { error: "Only team owners and admins can disconnect a backup provider" },
+      { status: 403 },
+    )
+  }
+
   const conn = await db.query.driveConnections.findFirst({
-    where: eq(driveConnections.userId, session.user.id),
+    where: eq(driveConnections.teamId, team.teamId),
   })
   if (!conn) {
     return NextResponse.json({ success: true })
@@ -31,10 +41,11 @@ export async function POST() {
     // best-effort revoke; ignore
   }
 
-  await db.delete(driveConnections).where(eq(driveConnections.userId, session.user.id))
+  await db.delete(driveConnections).where(eq(driveConnections.teamId, team.teamId))
 
   await logAuditEvent({
     userId: session.user.id,
+    teamId: team.teamId,
     action: "drive.disconnect",
     targetType: "drive_connection",
     targetLabel: conn.googleEmail ?? undefined,

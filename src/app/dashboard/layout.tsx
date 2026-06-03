@@ -6,9 +6,8 @@ import { DashboardSidebar } from "@/components/layout/dashboard-sidebar"
 import { DashboardTopbar } from "@/components/layout/dashboard-topbar"
 import { ImpersonationBanner } from "@/components/layout/impersonation-banner"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
-import { getImpersonatedUserId } from "@/lib/impersonation"
-import { getEffectiveUserId } from "@/lib/effective-user"
-import { getUserTeam, canManageTeam } from "@/lib/team"
+import { getEffectiveUserId, getHonoredImpersonatedUserId } from "@/lib/effective-user"
+import { getUserTeam, canManageTeam, listUserTeams } from "@/lib/team"
 import { teamHasWhiteLabel } from "@/lib/white-label"
 import {
   buildBrandingCss,
@@ -17,7 +16,6 @@ import {
   resolveTeamByHost,
   type ResolvedBranding,
 } from "@/lib/tenant-branding"
-import { auth } from "@/auth"
 import { db, users, eq } from "@/db"
 
 export const dynamic = "force-dynamic"
@@ -49,9 +47,8 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const session = await auth()
-  const isAdmin = (session?.user as { role?: string } | undefined)?.role === "admin"
-  const impersonatedId = isAdmin ? await getImpersonatedUserId() : null
+  // Honors both platform-admin and tenant-admin impersonation (scope re-checked).
+  const impersonatedId = await getHonoredImpersonatedUserId()
 
   let impersonatedUser: { id: string; email: string; name: string | null } | null = null
   if (impersonatedId) {
@@ -71,12 +68,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Show the Branding nav item only to owners/admins of an entitled team
   // (based on the user's active team, independent of the host being viewed).
   let canManageBranding = false
+  let teamList: { teamId: string; name: string; role: string }[] = []
+  let activeTeamId: string | undefined
   const effectiveUserId = await getEffectiveUserId()
   if (effectiveUserId) {
     const managedTeam = await getUserTeam(effectiveUserId)
+    activeTeamId = managedTeam?.teamId
     if (managedTeam && canManageTeam(managedTeam.role)) {
       canManageBranding = await teamHasWhiteLabel(managedTeam.teamId)
     }
+    teamList = await listUserTeams(effectiveUserId)
   }
 
   return (
@@ -95,9 +96,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
           logoUrl={branding.logoUrl}
           logoMarkUrl={branding.logoMarkUrl}
           canManageBranding={canManageBranding}
+          canManageTenant={canManageBranding}
         />
         <SidebarInset>
-          <DashboardTopbar brandName={branding.brandName} />
+          <DashboardTopbar
+            brandName={branding.brandName}
+            teams={teamList}
+            activeTeamId={activeTeamId}
+          />
           <main className="flex-1 overflow-auto bg-background px-6 py-8 lg:px-12 lg:py-10">
             {children}
           </main>

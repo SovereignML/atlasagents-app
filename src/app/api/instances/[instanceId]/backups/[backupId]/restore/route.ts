@@ -3,9 +3,10 @@ import { z } from "zod"
 import { auth } from "@/auth"
 import { db, instances, instanceLogs, subscriptions, backupRecords, eq, and } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
+import { canOperateInstance } from "@/lib/instance-access"
 import { logAuditEvent } from "@/lib/audit"
 import { driveErrorResponse } from "@/lib/drive-errors"
-import { getDriveAccessTokenForUser, downloadBackup } from "@/lib/google-drive"
+import { getDriveAccessTokenForTeam, downloadBackup } from "@/lib/google-drive"
 import { validateBackupEnvelope, resolveRestoreFields } from "@/lib/agent-backup"
 import { createInstanceFromAgentFields } from "@/lib/agent-create"
 import { reprovisionBotEnv, provisionBot } from "@/lib/provisioner"
@@ -53,7 +54,8 @@ export async function POST(
   if (!sourceInstance) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 })
   }
-  if (!isAdmin && sourceInstance.userId !== session.user.id) {
+  // Restoring is an operation — requires Operator+ on the source agent.
+  if (!isAdmin && !(await canOperateInstance(session.user.id, sourceInstance.id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
   const record = await db.query.backupRecords.findFirst({
@@ -67,7 +69,7 @@ export async function POST(
   // ── Download + validate the backup content ──────────────────────────
   let fields: ReturnType<typeof resolveRestoreFields>
   try {
-    const accessToken = await getDriveAccessTokenForUser(ownerId)
+    const accessToken = await getDriveAccessTokenForTeam(sourceInstance.teamId)
     const raw = await downloadBackup(accessToken, record.driveFileId)
     let json: unknown
     try {
@@ -98,7 +100,8 @@ export async function POST(
     if (!target) {
       return NextResponse.json({ error: "Target agent not found" }, { status: 404 })
     }
-    if (!isAdmin && target.userId !== session.user.id) {
+    // In-place restore overwrites the target's settings — Operator+ on the target.
+    if (!isAdmin && !(await canOperateInstance(session.user.id, target.id))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
     if (target.status !== "running" && target.status !== "stopped") {
@@ -204,7 +207,7 @@ export async function POST(
     where: and(eq(subscriptions.userId, ownerId), eq(subscriptions.status, "active")),
     with: { plan: true },
   })
-  if (existingFree && existingFree.plan.tier === "free") {
+  if (existingFree && existingFree.plan?.tier === "free") {
     return NextResponse.json(
       { error: "You already have a free agent. Upgrade to deploy more.", code: "free_limit" },
       { status: 409 },

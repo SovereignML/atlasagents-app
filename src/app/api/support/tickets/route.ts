@@ -2,7 +2,8 @@ import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { db, eq, desc, users, supportTickets } from "@/db"
 import { supportTicketSchema } from "@/lib/validations"
-import { createSupportConversation } from "@/lib/chatwoot"
+import { createSupportConversation, resolveChatwootForTeam } from "@/lib/chatwoot"
+import { getUserTeam } from "@/lib/team"
 import { sendSupportTicketEmail } from "@/lib/email"
 import { logAuditEvent } from "@/lib/audit"
 
@@ -32,14 +33,20 @@ export async function POST(req: Request) {
   }
   const name = user.name || user.email
 
+  // Route to the tenant's Chatwoot when the user belongs to a white-label
+  // tenant, else the platform's. Store the resolving team so reply/status
+  // routes later resolve the SAME Chatwoot.
+  const teamId = (await getUserTeam(userId))?.teamId ?? null
+  const cfg = await resolveChatwootForTeam(teamId)
+
   // 1. Persist the ticket locally first so it's never lost.
   const [ticket] = await db
     .insert(supportTickets)
-    .values({ userId, subject, message, category, priority })
+    .values({ userId, subject, message, category, priority, chatwootTenantTeamId: teamId })
     .returning()
 
   // 2. Push into Chatwoot; fall back to email only if that fails/unconfigured.
-  const result = await createSupportConversation({
+  const result = await createSupportConversation(cfg, {
     userId,
     name,
     email: user.email,

@@ -7,6 +7,7 @@ import {
   subscriptions,
   instances,
   adminNotes,
+  teams,
   eq,
   and,
   or,
@@ -81,9 +82,9 @@ export async function GET(request: Request) {
     const userIds = rows.map((r) => r.id);
 
     const countExpr = sql<number>`count(*)::int`;
-    const [subCounts, instCounts, noteCounts] =
+    const [subCounts, instCounts, noteCounts, ownedTeams] =
       userIds.length === 0
-        ? [[], [], []]
+        ? [[], [], [], []]
         : await Promise.all([
             db
               .select({ userId: subscriptions.userId, count: countExpr })
@@ -100,14 +101,28 @@ export async function GET(request: Request) {
               .from(adminNotes)
               .where(inArray(adminNotes.userId, userIds))
               .groupBy(adminNotes.userId),
+            // Teams each user OWNS — white-label entitlement keys off the team
+            // owner, so these are the teams an admin would toggle. Surfaced as
+            // deep-links to /admin/teams.
+            db
+              .select({ ownerId: teams.ownerId, id: teams.id, name: teams.name })
+              .from(teams)
+              .where(inArray(teams.ownerId, userIds)),
           ]);
 
     const subMap = new Map(subCounts.map((r) => [r.userId, r.count]));
     const instMap = new Map(instCounts.map((r) => [r.userId, r.count]));
     const noteMap = new Map(noteCounts.map((r) => [r.userId, r.count]));
+    const teamMap = new Map<string, { id: string; name: string }[]>();
+    for (const t of ownedTeams) {
+      const list = teamMap.get(t.ownerId) ?? [];
+      list.push({ id: t.id, name: t.name });
+      teamMap.set(t.ownerId, list);
+    }
 
     const result = rows.map((u) => ({
       ...u,
+      teams: teamMap.get(u.id) ?? [],
       _count: {
         subscriptions: subMap.get(u.id) ?? 0,
         instances: instMap.get(u.id) ?? 0,

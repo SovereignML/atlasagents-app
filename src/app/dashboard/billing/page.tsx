@@ -1,6 +1,15 @@
 import Link from "next/link"
 import { redirect } from "next/navigation"
-import { ArrowDownRight, ArrowUpRight, Coins } from "lucide-react"
+import {
+  ArrowDownRight,
+  ArrowUpRight,
+  ChevronRight,
+  Clock,
+  Coins,
+  PauseCircle,
+  TrendingDown,
+  TriangleAlert,
+} from "lucide-react"
 
 import { auth } from "@/auth"
 import {
@@ -35,6 +44,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
 import { findPlanBySlug } from "@/configs/plans"
 import { getOrCreateWallet } from "@/lib/wallet"
 import { isStripeConfigured } from "@/lib/stripe"
@@ -74,6 +84,8 @@ const TX_LABEL: Record<string, string> = {
 function txLabel(t: string): string {
   return TX_LABEL[t] ?? t
 }
+
+type Health = "idle" | "healthy" | "low" | "critical"
 
 export default async function BillingPage() {
   const session = await auth()
@@ -170,6 +182,7 @@ export default async function BillingPage() {
     .map((e) => ({ ...e, total: e.compute + e.api }))
     .filter((e) => e.total > 0)
     .sort((a, b) => b.total - a.total)
+  const spend30 = agentBreakdown.reduce((sum, a) => sum + a.total, 0)
 
   const credits = Math.round(wallet.balance)
   const minimumCredits = Math.round(wallet.minimumBalance)
@@ -177,6 +190,10 @@ export default async function BillingPage() {
     dailyBurnCredits > 0 ? Math.max(0, Math.floor(credits / dailyBurnCredits)) : null
 
   const activeSubs = subs.filter((s) => s.status === "active")
+  // Current (active / past_due / incomplete) plans stay in the list; canceled
+  // ones are collapsed behind a toggle so they don't bury the live plans.
+  const currentSubs = subs.filter((s) => s.status !== "canceled")
+  const canceledSubs = subs.filter((s) => s.status === "canceled")
   const stripeOn = isStripeConfigured()
 
   // Re-fetch one more time so that the SSR balance reflects any deposit
@@ -187,63 +204,208 @@ export default async function BillingPage() {
   })
   const liveCredits = Math.round(liveBalance?.balance ?? credits)
 
+  // ─── Account health ────────────────────────────────────────────
+  // Folds runway and the auto-pause threshold into one signal that
+  // drives the hero accent, the runway bar, and the warning banner.
+  const belowMinimum = minimumCredits > 0 && liveCredits <= minimumCredits
+  const health: Health =
+    daysOfRunway === null
+      ? "idle"
+      : daysOfRunway < 7 || belowMinimum
+        ? "critical"
+        : daysOfRunway < 14
+          ? "low"
+          : "healthy"
+
+  // Runway bar fills toward a comfortable 30-day target.
+  const runwayPct =
+    daysOfRunway === null ? 0 : Math.min(100, Math.round((daysOfRunway / 30) * 100))
+
+  // Single lime accent (your --secondary token: #a3e635 in the dark app-shell)
+  // across every runway state — no emerald/amber/red.
+  const HEALTH_BAR: Record<Health, string> = {
+    idle: "bg-muted-foreground/40",
+    healthy: "bg-secondary",
+    low: "bg-secondary",
+    critical: "bg-secondary",
+  }
+  const HEALTH_TEXT: Record<Health, string> = {
+    idle: "text-muted-foreground",
+    healthy: "text-secondary",
+    low: "text-secondary",
+    critical: "text-secondary",
+  }
+
+  const renderPlan = (sub: (typeof subs)[number]) => {
+    const cfg = findPlanBySlug(sub.plan?.slug ?? "")
+    const includedCredits = sub.plan?.creditsPerPeriod ?? 0
+    return (
+      <Card key={sub.id} className="transition-shadow hover:shadow-[var(--shadow-hover)]">
+        <CardContent className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="font-medium text-foreground">
+                {sub.plan?.name ?? "Subscription"}{sub.plan ? " Plan" : ""}
+              </h3>
+              <Badge variant={statusBadgeVariant(sub.status)}>
+                {sub.status}
+              </Badge>
+              {includedCredits > 0 && (
+                <Badge variant="outline" className="font-mono text-[10px]">
+                  {includedCredits.toLocaleString()} cr / {sub.interval === "year" ? "yr" : "mo"}
+                </Badge>
+              )}
+            </div>
+            {sub.instance && sub.instance.status === "deleted" ? (
+              <p className="text-sm text-muted-foreground">Agent removed</p>
+            ) : sub.instance ? (
+              <p className="text-sm text-muted-foreground">
+                <Link
+                  href={`/dashboard/instances/${sub.instance.id}`}
+                  className="hover:text-foreground"
+                >
+                  {sub.instance.name}
+                </Link>{" "}
+                · {sub.instance.serverConfig.label}
+              </p>
+            ) : null}
+            {sub.currentPeriodEnd && (
+              <p className="font-mono text-[11px] text-muted-foreground">
+                Renews {sub.currentPeriodEnd.toISOString().slice(0, 10)}
+              </p>
+            )}
+          </div>
+          {cfg && cfg.tier !== "free" && (
+            <div className="text-right">
+              <p className="font-semibold text-foreground">
+                ${(sub.interval === "year"
+                  ? cfg.displayPriceYearly
+                  : cfg.displayPriceMonthly
+                ).toFixed(0)}
+                <span className="text-xs font-normal text-muted-foreground">
+                  /{sub.interval === "year" ? "yr" : "mo"}
+                </span>
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    )
+  }
+
   return (
     <PageContainer>
       <PageHeader
         title="Billing"
         description="Everything you spend runs on credits. 1 credit = $0.01 USD."
+        actions={
+          stripeOn ? <BillingPortalButton variant="inline" /> : undefined
+        }
       />
 
-      {/* ─── Hero stats ─────────────────────────────────────────── */}
+      {/* ─── Low-balance warning ────────────────────────────────── */}
+      {(health === "critical" || health === "low") && (
+        <div className="flex items-start gap-3 rounded-2xl border border-secondary/40 bg-secondary/10 px-4 py-3 text-sm">
+          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-secondary" />
+          <div className="space-y-0.5">
+            <p className="font-medium text-foreground">
+              {belowMinimum
+                ? "Balance at or below the auto-pause threshold"
+                : health === "critical"
+                  ? "Low balance — top up to keep your agents running"
+                  : "Running low on credits"}
+            </p>
+            <p className="text-[0.8rem] text-muted-foreground">
+              {daysOfRunway !== null
+                ? `At your current burn you have about ${daysOfRunway} day${daysOfRunway === 1 ? "" : "s"} of runway left. Agents auto-pause below ${minimumCredits.toLocaleString()} credits.`
+                : `Agents auto-pause below ${minimumCredits.toLocaleString()} credits.`}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Hero: balance + top up ─────────────────────────────── */}
       <div className="grid gap-5 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardDescription className="font-mono text-[10px] tracking-[0.1em] uppercase text-primary">
               Credit Balance
             </CardDescription>
-            <CardTitle className="flex items-baseline gap-3 text-4xl font-bold text-foreground">
-              <Coins className="size-7 text-primary" />
-              {liveCredits.toLocaleString()}
-              <span className="text-base font-normal text-muted-foreground">
-                credits
+            <CardTitle className="flex items-center gap-3 text-foreground">
+              <span className="flex size-11 items-center justify-center rounded-xl bg-secondary text-secondary-foreground">
+                <Coins className="size-5" />
+              </span>
+              <span className="flex items-baseline gap-2">
+                <span className="text-4xl font-bold tracking-tight tabular-nums">
+                  {liveCredits.toLocaleString()}
+                </span>
+                <span className="text-base font-normal text-muted-foreground">
+                  credits
+                </span>
               </span>
             </CardTitle>
             <p className="text-sm text-muted-foreground">
               ≈ {formatCreditsAsUsd(liveCredits)} of usable balance
             </p>
           </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-3">
-            <Stat
-              label="Daily burn"
-              value={`${dailyBurnCredits.toLocaleString()} cr`}
-              hint={
-                dailyBurnCredits > 0
-                  ? `≈ $${creditsToUsd(dailyBurnCredits).toFixed(2)}/day · compute + AI`
-                  : "no recent spend"
-              }
-            />
-            <Stat
-              label="Runway"
-              value={
-                daysOfRunway === null
-                  ? "—"
-                  : daysOfRunway > 999
-                    ? "999+ days"
-                    : `${daysOfRunway} day${daysOfRunway === 1 ? "" : "s"}`
-              }
-              hint={
-                daysOfRunway === null
-                  ? "depends on usage"
-                  : daysOfRunway < 7
-                    ? "top up soon"
-                    : "at current burn"
-              }
-            />
-            <Stat
-              label="Auto-pause at"
-              value={`${minimumCredits.toLocaleString()} cr`}
-              hint="agents stop below this"
-            />
+          <CardContent className="space-y-5">
+            {/* Runway health bar */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-[0.8rem]">
+                <span className="text-muted-foreground">Runway</span>
+                <span className={cn("font-medium", HEALTH_TEXT[health])}>
+                  {daysOfRunway === null
+                    ? "No recent spend"
+                    : daysOfRunway > 999
+                      ? "999+ days left"
+                      : `${daysOfRunway} day${daysOfRunway === 1 ? "" : "s"} left`}
+                </span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className={cn("h-full rounded-full transition-all", HEALTH_BAR[health])}
+                  style={{ width: `${daysOfRunway === null ? 0 : Math.max(runwayPct, 4)}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 divide-y rounded-xl border bg-muted/30 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+              <Stat
+                icon={<TrendingDown className="size-3.5" />}
+                label="Daily burn"
+                value={`${dailyBurnCredits.toLocaleString()} cr`}
+                hint={
+                  dailyBurnCredits > 0
+                    ? `≈ $${creditsToUsd(dailyBurnCredits).toFixed(2)}/day · compute + AI`
+                    : "no recent spend"
+                }
+              />
+              <Stat
+                icon={<Clock className="size-3.5" />}
+                label="Runway"
+                tone={HEALTH_TEXT[health]}
+                value={
+                  daysOfRunway === null
+                    ? "—"
+                    : daysOfRunway > 999
+                      ? "999+ days"
+                      : `${daysOfRunway} day${daysOfRunway === 1 ? "" : "s"}`
+                }
+                hint={
+                  daysOfRunway === null
+                    ? "depends on usage"
+                    : daysOfRunway < 7
+                      ? "top up soon"
+                      : "at current burn"
+                }
+              />
+              <Stat
+                icon={<PauseCircle className="size-3.5" />}
+                label="Auto-pause at"
+                value={`${minimumCredits.toLocaleString()} cr`}
+                hint="agents stop below this"
+              />
+            </div>
           </CardContent>
         </Card>
         <TopUpCard stripeConfigured={stripeOn} />
@@ -258,7 +420,7 @@ export default async function BillingPage() {
           ) : null
         }
       >
-        {subs.length === 0 ? (
+        {currentSubs.length === 0 && canceledSubs.length === 0 ? (
           <Card>
             <CardContent className="py-8">
               <Empty>
@@ -273,62 +435,25 @@ export default async function BillingPage() {
           </Card>
         ) : (
           <div className="space-y-3">
-            {subs.map((sub) => {
-              const cfg = findPlanBySlug(sub.plan?.slug ?? "")
-              const includedCredits = sub.plan?.creditsPerPeriod ?? 0
-              return (
-                <Card key={sub.id}>
-                  <CardContent className="flex items-start justify-between gap-4">
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="font-medium text-foreground">
-                          {sub.plan.name} Plan
-                        </h3>
-                        <Badge variant={statusBadgeVariant(sub.status)}>
-                          {sub.status}
-                        </Badge>
-                        {includedCredits > 0 && (
-                          <Badge variant="outline" className="font-mono text-[10px]">
-                            {includedCredits.toLocaleString()} cr / {sub.interval === "year" ? "yr" : "mo"}
-                          </Badge>
-                        )}
-                      </div>
-                      {sub.instance && sub.instance.status === "deleted" ? (
-                        <p className="text-sm text-muted-foreground">Agent removed</p>
-                      ) : sub.instance ? (
-                        <p className="text-sm text-muted-foreground">
-                          <Link
-                            href={`/dashboard/instances/${sub.instance.id}`}
-                            className="hover:text-foreground"
-                          >
-                            {sub.instance.name}
-                          </Link>{" "}
-                          · {sub.instance.region.name} · {sub.instance.serverConfig.label}
-                        </p>
-                      ) : null}
-                      {sub.currentPeriodEnd && (
-                        <p className="font-mono text-[11px] text-muted-foreground">
-                          Renews {sub.currentPeriodEnd.toISOString().slice(0, 10)}
-                        </p>
-                      )}
-                    </div>
-                    {cfg && cfg.tier !== "free" && (
-                      <div className="text-right">
-                        <p className="font-semibold text-foreground">
-                          ${(sub.interval === "year"
-                            ? cfg.displayPriceYearly
-                            : cfg.displayPriceMonthly
-                          ).toFixed(0)}
-                          <span className="text-xs font-normal text-muted-foreground">
-                            /{sub.interval === "year" ? "yr" : "mo"}
-                          </span>
-                        </p>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              )
-            })}
+            {currentSubs.length > 0 ? (
+              currentSubs.map(renderPlan)
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No active plans — see canceled history below.
+              </p>
+            )}
+
+            {canceledSubs.length > 0 && (
+              <details className="group/canceled">
+                <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1 text-sm text-muted-foreground transition-colors select-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+                  <ChevronRight className="size-4 transition-transform duration-200 group-open/canceled:rotate-90" />
+                  Show {canceledSubs.length} canceled {canceledSubs.length === 1 ? "plan" : "plans"}
+                </summary>
+                <div className="mt-3 space-y-3 opacity-55">
+                  {canceledSubs.map(renderPlan)}
+                </div>
+              </details>
+            )}
           </div>
         )}
       </PageSection>
@@ -338,6 +463,11 @@ export default async function BillingPage() {
         <PageSection
           title="Usage by agent"
           description="Credits spent in the last 30 days, split by compute and AI usage."
+          actions={
+            <Badge variant="outline" className="font-mono text-[10px]">
+              {spend30.toLocaleString()} cr · 30d
+            </Badge>
+          }
         >
           <Card className="overflow-hidden p-0">
             <Table>
@@ -353,13 +483,13 @@ export default async function BillingPage() {
                 {agentBreakdown.map((a) => (
                   <TableRow key={a.name}>
                     <TableCell className="pl-5 font-medium text-foreground">{a.name}</TableCell>
-                    <TableCell className="text-right font-mono text-sm text-muted-foreground">
+                    <TableCell className="text-right font-mono text-sm text-muted-foreground tabular-nums">
                       {a.compute.toLocaleString()}
                     </TableCell>
-                    <TableCell className="text-right font-mono text-sm text-muted-foreground">
+                    <TableCell className="text-right font-mono text-sm text-muted-foreground tabular-nums">
                       {a.api.toLocaleString()}
                     </TableCell>
-                    <TableCell className="pr-5 text-right font-mono text-sm font-medium text-foreground">
+                    <TableCell className="pr-5 text-right font-mono text-sm font-medium text-foreground tabular-nums">
                       {a.total.toLocaleString()}
                     </TableCell>
                   </TableRow>
@@ -414,7 +544,7 @@ export default async function BillingPage() {
                   const amountAbs = Math.abs(Math.round(tx.amount))
                   return (
                     <TableRow key={tx.id}>
-                      <TableCell className="pl-5 text-sm text-muted-foreground">
+                      <TableCell className="pl-5 text-sm text-muted-foreground whitespace-nowrap">
                         {tx.createdAt.toISOString().slice(0, 10)}
                       </TableCell>
                       <TableCell>
@@ -437,8 +567,8 @@ export default async function BillingPage() {
                       <TableCell
                         className={
                           isDebit
-                            ? "text-right font-mono text-sm text-destructive"
-                            : "text-right font-mono text-sm text-emerald-600 dark:text-emerald-400"
+                            ? "text-right font-mono text-sm text-destructive tabular-nums"
+                            : "text-right font-mono text-sm text-emerald-600 dark:text-emerald-400 tabular-nums"
                         }
                       >
                         <span className="inline-flex items-center gap-1">
@@ -451,7 +581,7 @@ export default async function BillingPage() {
                           {amountAbs.toLocaleString()}
                         </span>
                       </TableCell>
-                      <TableCell className="pr-5 text-right font-mono text-sm text-foreground">
+                      <TableCell className="pr-5 text-right font-mono text-sm text-foreground tabular-nums">
                         {Math.round(tx.balanceAfter).toLocaleString()}
                       </TableCell>
                     </TableRow>
@@ -462,12 +592,6 @@ export default async function BillingPage() {
           </Card>
         )}
       </PageSection>
-
-      {stripeOn && (
-        <div className="max-w-md">
-          <BillingPortalButton />
-        </div>
-      )}
     </PageContainer>
   )
 }
@@ -476,17 +600,22 @@ function Stat({
   label,
   value,
   hint,
+  icon,
+  tone,
 }: {
   label: string
   value: string
   hint?: string
+  icon?: React.ReactNode
+  tone?: string
 }) {
   return (
-    <div className="rounded-xl border bg-muted/30 px-4 py-3">
-      <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+    <div className="px-4 py-3">
+      <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+        {icon}
         {label}
       </p>
-      <p className="mt-1 text-lg font-semibold text-foreground">{value}</p>
+      <p className={cn("mt-1 text-lg font-semibold text-foreground", tone)}>{value}</p>
       {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
     </div>
   )

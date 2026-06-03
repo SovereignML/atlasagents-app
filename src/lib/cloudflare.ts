@@ -232,21 +232,22 @@ export async function getZoneSslMode(ctx: CfCtx): Promise<string | null> {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Per-user connection helpers (DB-backed)
+// Per-team connection helpers (DB-backed). One Cloudflare connection is
+// shared across all members of a team.
 // ──────────────────────────────────────────────────────────────────────
 
-export async function getCloudflareConnection(userId: string) {
+export async function getCloudflareConnectionForTeam(teamId: string) {
   return db.query.cloudflareConnections.findFirst({
-    where: eq(cloudflareConnections.userId, userId),
+    where: eq(cloudflareConnections.teamId, teamId),
   })
 }
 
 /**
- * Decrypt the user's stored Cloudflare token. Throws CloudflareNotConnectedError
+ * Decrypt the team's stored Cloudflare token. Throws CloudflareNotConnectedError
  * when no connection exists (→ 409 so the UI prompts a connect).
  */
-export async function getCloudflareTokenForUser(userId: string): Promise<string> {
-  const conn = await getCloudflareConnection(userId)
+export async function getCloudflareTokenForTeam(teamId: string): Promise<string> {
+  const conn = await getCloudflareConnectionForTeam(teamId)
   if (!conn) throw new CloudflareNotConnectedError()
   return decryptSecret(conn.apiTokenEnc)
 }

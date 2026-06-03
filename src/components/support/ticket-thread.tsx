@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Send } from "lucide-react"
+import { CheckCircle2, RotateCcw, Send } from "lucide-react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
@@ -12,7 +12,8 @@ import { Card, CardContent } from "@/components/ui/card"
 
 const STATUS_LABELS: Record<string, string> = {
   open: "Open",
-  pending: "Pending",
+  in_progress: "Being handled by our team",
+  pending: "Awaiting your reply",
   resolved: "Resolved",
 }
 
@@ -49,10 +50,12 @@ function formatTime(unixSeconds: number): string {
 export function TicketThread({ ticketId, initial }: TicketThreadProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [status, setStatus] = useState(initial.status)
-  const [liveChat, setLiveChat] = useState(initial.liveChat)
+  const [assigneeName, setAssigneeName] = useState<string | null>(null)
+  const [canReply, setCanReply] = useState(initial.liveChat)
   const [loaded, setLoaded] = useState(false)
   const [reply, setReply] = useState("")
   const [sending, setSending] = useState(false)
+  const [updatingStatus, setUpdatingStatus] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
 
   const load = useCallback(async () => {
@@ -63,8 +66,9 @@ export function TicketThread({ ticketId, initial }: TicketThreadProps) {
       if (!res.ok) return
       const data = await res.json()
       setMessages(data.messages ?? [])
-      setLiveChat(Boolean(data.liveChat))
-      if (data.ticket?.status) setStatus(data.ticket.status)
+      setCanReply(Boolean(data.canReply))
+      setAssigneeName(data.assigneeName ?? null)
+      if (data.status) setStatus(data.status)
     } finally {
       setLoaded(true)
     }
@@ -107,14 +111,63 @@ export function TicketThread({ ticketId, initial }: TicketThreadProps) {
     }
   }
 
+  async function onStatusChange(next: "resolved" | "open") {
+    if (updatingStatus) return
+    setUpdatingStatus(true)
+    try {
+      const res = await fetch(`/api/support/tickets/${ticketId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: next }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        toast.error(data?.error ?? "Failed to update ticket")
+        return
+      }
+      setStatus(next)
+      toast.success(next === "resolved" ? "Ticket marked resolved" : "Ticket reopened")
+      await load()
+    } catch {
+      toast.error("Something went wrong. Please try again.")
+    } finally {
+      setUpdatingStatus(false)
+    }
+  }
+
+  const isResolved = status === "resolved"
+  const statusLabel =
+    status === "in_progress" && assigneeName
+      ? `Being handled by ${assigneeName}`
+      : STATUS_LABELS[status] ?? status
+
   return (
     <Card>
       <CardContent className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <span className="text-sm text-muted-foreground">Conversation</span>
-          <Badge variant="outline" className="capitalize">
-            {STATUS_LABELS[status] ?? status}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant={isResolved ? "secondary" : "outline"}>{statusLabel}</Badge>
+            {isResolved ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={updatingStatus}
+                onClick={() => void onStatusChange("open")}
+              >
+                <RotateCcw className="size-4" /> Reopen
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={updatingStatus}
+                onClick={() => void onStatusChange("resolved")}
+              >
+                <CheckCircle2 className="size-4" /> Mark resolved
+              </Button>
+            )}
+          </div>
         </div>
 
         <div className="max-h-[55vh] space-y-3 overflow-y-auto pr-1">
@@ -140,7 +193,7 @@ export function TicketThread({ ticketId, initial }: TicketThreadProps) {
           <div ref={endRef} />
         </div>
 
-        {liveChat ? (
+        {canReply ? (
           <form onSubmit={onSend} className="flex items-end gap-2">
             <Textarea
               value={reply}

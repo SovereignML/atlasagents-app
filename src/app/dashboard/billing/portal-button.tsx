@@ -2,12 +2,17 @@
 
 import { useState } from "react"
 import { ExternalLink, Loader2 } from "lucide-react"
+import { toast } from "sonner"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
 
-export function BillingPortalButton() {
+export function BillingPortalButton({
+  variant = "card",
+}: {
+  variant?: "card" | "inline"
+}) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -18,15 +23,32 @@ export function BillingPortalButton() {
       const r = await fetch("/api/billing/portal", { method: "POST" })
       const j = (await r.json()) as { url?: string; error?: string }
       if (!r.ok || !j.url) {
-        setError(j.error || "Could not open billing portal")
+        const msg = j.error || "Could not open billing portal"
+        setError(msg)
+        if (variant === "inline") toast.error(msg)
         return
       }
       window.location.href = j.url
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(msg)
+      if (variant === "inline") toast.error(msg)
     } finally {
       setLoading(false)
     }
+  }
+
+  if (variant === "inline") {
+    return (
+      <Button variant="outline" size="sm" onClick={openPortal} disabled={loading}>
+        {loading ? (
+          <Loader2 data-icon="inline-start" className="animate-spin" />
+        ) : (
+          <ExternalLink data-icon="inline-start" />
+        )}
+        {loading ? "Opening…" : "Manage billing"}
+      </Button>
+    )
   }
 
   return (

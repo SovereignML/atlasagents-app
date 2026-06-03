@@ -1,0 +1,1 @@
+ALTER TABLE "TeamBranding" ADD COLUMN "cfCustomHostnameId" text;

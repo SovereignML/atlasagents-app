@@ -5,7 +5,7 @@ import { auth } from "@/auth"
 import { db, auditLogs, eq, desc, and, like } from "@/db"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { PageContainer, PageHeader } from "@/components/layout/page-container"
+import { PageContainer, PageHeader, PageSection } from "@/components/layout/page-container"
 import {
   Table,
   TableBody,
@@ -75,82 +75,94 @@ export default async function AuditLogPage({
     <PageContainer>
       <PageHeader
         title="Audit Log"
-        description="Every action taken on your account. Retained for 90 days (Pro) / 365 days (Enterprise)."
+        description="Every action taken on your account. Retained for 7 days."
       />
 
-      <div className="flex flex-wrap gap-2">
-        {FILTERS.map((f) => (
-          <Button
-            key={f.value}
-            size="sm"
-            variant={filter === f.value ? "default" : "outline"}
-            render={
-              <Link
-                href={f.value ? `/dashboard/audit-log?filter=${f.value}` : "/dashboard/audit-log"}
-              >
-                {f.label}
-              </Link>
-            }
-          />
-        ))}
-      </div>
-
-      <Card className="overflow-hidden p-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Time</TableHead>
-              <TableHead>Action</TableHead>
-              <TableHead>Target</TableHead>
-              <TableHead className="text-right">IP</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {events.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={4} className="py-12 text-center text-sm text-muted-foreground">
-                  No audit events recorded yet.
-                </TableCell>
-              </TableRow>
-            ) : (
-              events.map((e) => (
-                <TableRow key={e.id}>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    {e.createdAt.toISOString().replace("T", " ").slice(0, 19)}
-                  </TableCell>
-                  <TableCell
-                    className={`font-mono text-xs ${ACTION_STYLES[e.action] || "text-foreground"}`}
-                  >
-                    {e.action}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs text-foreground">
-                    {e.targetLabel || e.targetId || "—"}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                    {e.ipAddress || "—"}
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </Card>
-
-      {events.length >= pageSize && (
-        <div className="flex justify-end">
+      <PageSection
+        title="Activity"
+        description="Filter events by category or export the full log."
+        actions={
           <Button
             size="sm"
             variant="outline"
-            render={
-              <Link
-                href={`/dashboard/audit-log?${filter ? `filter=${filter}&` : ""}page=${page + 1}`}
-              >
-                Next Page
-              </Link>
-            }
+            render={<a href="/api/audit-log/export">Download CSV</a>}
           />
+        }
+      >
+        <div className="flex flex-wrap gap-2">
+          {FILTERS.map((f) => (
+            <Button
+              key={f.value}
+              size="sm"
+              variant={filter === f.value ? "default" : "outline"}
+              render={
+                <Link
+                  href={f.value ? `/dashboard/audit-log?filter=${f.value}` : "/dashboard/audit-log"}
+                >
+                  {f.label}
+                </Link>
+              }
+            />
+          ))}
         </div>
-      )}
+
+        <Card className="overflow-hidden p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="pl-5">Time</TableHead>
+                <TableHead>Action</TableHead>
+                <TableHead>Target</TableHead>
+                <TableHead className="pr-5 text-right">IP</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {events.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} className="py-12 text-center text-sm text-muted-foreground">
+                    No audit events recorded yet.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                events.map((e) => (
+                  <TableRow key={e.id}>
+                    <TableCell className="pl-5 font-mono text-xs text-muted-foreground">
+                      {e.createdAt.toISOString().replace("T", " ").slice(0, 19)}
+                    </TableCell>
+                    <TableCell
+                      className={`font-mono text-xs ${ACTION_STYLES[e.action] || "text-foreground"}`}
+                    >
+                      {e.action}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-foreground">
+                      {e.targetLabel || e.targetId || "—"}
+                    </TableCell>
+                    <TableCell className="pr-5 text-right font-mono text-xs text-muted-foreground">
+                      {e.ipAddress || "—"}
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </Card>
+
+        {events.length >= pageSize && (
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              render={
+                <Link
+                  href={`/dashboard/audit-log?${filter ? `filter=${filter}&` : ""}page=${page + 1}`}
+                >
+                  Next Page
+                </Link>
+              }
+            />
+          </div>
+        )}
+      </PageSection>
     </PageContainer>
   )
 }

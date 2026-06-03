@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { db, driveConnections, eq } from "@/db"
 import { BRANDING } from "@/configs/branding"
+import { canManageTeam, getMembershipRole, getUserTeam } from "@/lib/team"
 import { logAuditEvent } from "@/lib/audit"
 import { encryptSecret } from "@/lib/crypto-secret"
 import {
@@ -45,6 +46,19 @@ export async function GET(req: NextRequest) {
     return dest("error")
   }
 
+  // Resolve the target team. New consents carry it in the signed state; older
+  // ones (minted before this field existed) fall back to the active team.
+  let teamId = state.teamId
+  if (!teamId) {
+    const active = await getUserTeam(state.userId)
+    teamId = active?.teamId
+  }
+  if (!teamId) return dest("error")
+
+  // The connection is team-shared — the user must still be an owner/admin of it.
+  const role = await getMembershipRole(state.userId, teamId)
+  if (!canManageTeam(role)) return dest("error")
+
   try {
     const { refreshToken, accessToken } = await exchangeDriveCode(code)
 
@@ -52,7 +66,7 @@ export async function GET(req: NextRequest) {
     // should always yield one; if it doesn't (and we have no prior connection),
     // ask the user to retry.
     const existing = await db.query.driveConnections.findFirst({
-      where: eq(driveConnections.userId, state.userId),
+      where: eq(driveConnections.teamId, teamId),
     })
     if (!refreshToken && !existing) {
       return dest("norefresh")
@@ -66,10 +80,12 @@ export async function GET(req: NextRequest) {
         .set({
           ...(refreshToken ? { refreshTokenEnc: encryptSecret(refreshToken) } : {}),
           googleEmail: googleEmail ?? existing.googleEmail,
+          userId: state.userId,
         })
-        .where(eq(driveConnections.userId, state.userId))
+        .where(eq(driveConnections.teamId, teamId))
     } else {
       await db.insert(driveConnections).values({
+        teamId,
         userId: state.userId,
         refreshTokenEnc: encryptSecret(refreshToken as string),
         googleEmail,
@@ -79,6 +95,7 @@ export async function GET(req: NextRequest) {
 
     await logAuditEvent({
       userId: state.userId,
+      teamId,
       action: "drive.connect",
       targetType: "drive_connection",
       targetLabel: googleEmail ?? undefined,

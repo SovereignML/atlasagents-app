@@ -1,11 +1,10 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Check } from "lucide-react"
 
-import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -17,12 +16,10 @@ import {
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
-import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { AGENT_CATEGORIES } from "@/configs/agent-categories"
 import { BRANDING } from "@/configs/branding"
 import { DEPLOYABLE_PLANS, PLANS, type PlanConfig } from "@/configs/plans"
-import { REGIONS, type RegionConfig } from "@/configs/regions"
 import { SERVER_TYPES, type ServerTypeConfig } from "@/configs/server-types"
 import { calcPlanPrice, formatUsd } from "@/lib/pricing"
 import type { BillingInterval } from "@/lib/pricing"
@@ -44,31 +41,20 @@ type AgentConfig = {
   runtime: Runtime
 }
 
-const INTERFACES: { value: Interface; label: string; hint: string; enabled: boolean }[] = [
-  { value: "web", label: "Web Chat", hint: "Embeddable widget on your site", enabled: true },
-  { value: "telegram", label: "Telegram", hint: "Bot under your Telegram handle", enabled: false },
-  { value: "discord", label: "Discord", hint: "Invite to your server", enabled: false },
-  { value: "api", label: "REST API", hint: "Programmatic access only", enabled: false },
-]
-
-const DEPLOYMENT_TARGETS: {
-  value: DeploymentTarget
-  label: string
-  hint: string
-  enabled: boolean
-}[] = [
-  { value: "vps", label: "Dedicated VPS", hint: "Single-tenant, single instance, isolated", enabled: true },
-  { value: "shared", label: "Shared Cluster", hint: "Multi-tenant pool, cheapest, autoscaled", enabled: false },
-  { value: "serverless", label: "Serverless (Managed)", hint: "We run it — pay per request only", enabled: false },
-]
+// Interface and deployment target are fixed for the self-serve wizard: every
+// agent ships as an embeddable Web Chat widget on a dedicated VPS. They stay as
+// constants so the agentConfig payload keeps its shape, but the user no longer
+// picks them.
+const FIXED_INTERFACE: Interface = "web"
+const FIXED_DEPLOYMENT_TARGET: DeploymentTarget = "vps"
 
 const RUNTIME_OPTIONS: { value: Runtime; label: string; hint: string; enabled: boolean }[] = [
   { value: "openclaw", label: "OpenClaw", hint: "Default agent runtime", enabled: true },
   { value: "hermes", label: "Hermes", hint: "Nous Research Hermes (Python)", enabled: true },
 ]
 
-type Step = "project" | "interface" | "plan" | "advanced" | "billing"
-const ALL_STEPS: Step[] = ["project", "interface", "plan", "advanced", "billing"]
+type Step = "agent" | "project" | "plan" | "billing"
+const ALL_STEPS: Step[] = ["agent", "project", "plan", "billing"]
 
 const SELECTED_GLOW =
   "aria-pressed:border-ring aria-pressed:ring-1 aria-pressed:ring-ring aria-pressed:bg-ring/15 aria-pressed:hover:bg-ring/20 aria-pressed:text-foreground " +
@@ -83,10 +69,9 @@ function deploymentSlug(raw: string) {
 }
 
 const STEP_LABELS: Record<Step, string> = {
+  agent: "Agent",
   project: "Project",
-  interface: "Interface",
   plan: "Plan",
-  advanced: "Advanced",
   billing: "Billing",
 }
 
@@ -97,33 +82,17 @@ function resolveServerForPlan(plan: PlanConfig): ServerTypeConfig | null {
 
 export default function DeployPage() {
   const router = useRouter()
-  const [step, setStep] = useState<Step>("project")
+  const [step, setStep] = useState<Step>("agent")
   const [deploying, setDeploying] = useState(false)
 
   const [projectName, setProjectName] = useState("")
   const [useCase, setUseCase] = useState<string>("")
-  const [interfaceKind, setInterfaceKind] = useState<Interface>("web")
-  const [deploymentTarget] = useState<DeploymentTarget>("vps")
   const [runtime, setRuntime] = useState<Runtime>("openclaw")
 
-  const [selectedRegion, setSelectedRegion] = useState<RegionConfig | null>(null)
   const [billingInterval, setBillingInterval] = useState<BillingInterval>("month")
   const [selectedPlan, setSelectedPlan] = useState<PlanConfig | null>(null)
-  const [rootPassword, setRootPassword] = useState("")
-  const [sshKey, setSshKey] = useState("")
 
   const selectedServer = selectedPlan ? resolveServerForPlan(selectedPlan) : null
-  // Hermes always boxes Open WebUI as a sidecar, which needs ≥2GB RAM. The
-  // 1GB Nanode can't fit both, so we gate the Hermes runtime button on plan size.
-  const hermesRamOk = !!selectedServer && selectedServer.ramGb >= 2
-
-  // If the user picks Hermes on a 4GB plan, then backtracks to a 1GB plan,
-  // flip the runtime back to OpenClaw — keeps the form in a valid state.
-  useEffect(() => {
-    if (runtime === "hermes" && selectedServer && selectedServer.ramGb < 2) {
-      setRuntime("openclaw")
-    }
-  }, [runtime, selectedServer])
 
   const STEPS = ALL_STEPS
   const stepIdx = STEPS.indexOf(step)
@@ -131,16 +100,23 @@ export default function DeployPage() {
 
   const coreActions = selectedCategoryObj?.examples ? [...selectedCategoryObj.examples] : []
 
+  // Hermes always boxes Open WebUI as a sidecar, which needs ≥2GB RAM. With the
+  // runtime now chosen before the plan, we gate plan selection instead: a
+  // sub-2GB plan (the Free Nanode) can't host Hermes.
+  function planSupportsRuntime(plan: PlanConfig): boolean {
+    if (runtime !== "hermes") return true
+    const server = resolveServerForPlan(plan)
+    return !!server && server.ramGb >= 2
+  }
+
   const canNext = (() => {
     switch (step) {
+      case "agent":
+        return !!runtime
       case "project":
         return projectName.trim().length >= 2 && !!useCase
-      case "interface":
-        return !!interfaceKind && !!deploymentTarget && !!selectedRegion
       case "plan":
         return !!selectedPlan
-      case "advanced":
-        return true
       case "billing":
         return true
     }
@@ -156,7 +132,7 @@ export default function DeployPage() {
   const planPrice = selectedPlan ? calcPlanPrice(selectedPlan, billingInterval) : null
 
   async function handleDeploy() {
-    if (!projectName.trim() || !selectedPlan || !selectedRegion) return
+    if (!projectName.trim() || !selectedPlan) return
     setDeploying(true)
     try {
       const res = await fetch("/api/deploy", {
@@ -165,27 +141,24 @@ export default function DeployPage() {
         body: JSON.stringify({
           name: projectName.trim(),
           planSlug: selectedPlan.slug,
-          regionSlug: selectedRegion.slug,
           billingInterval,
-          rootPassword: rootPassword || undefined,
-          sshPublicKey: sshKey || undefined,
           agentConfig: {
             use_case: useCase,
             target_user: "",
             core_actions: coreActions,
             tone: "friendly",
-            interface: interfaceKind,
-            deployment_target: deploymentTarget,
+            interface: FIXED_INTERFACE,
+            deployment_target: FIXED_DEPLOYMENT_TARGET,
             knowledge_source: "none",
             budget_tier: "mid",
             runtime,
           } satisfies AgentConfig,
-          interfaceBinding: { kind: interfaceKind, mode: "immediate" },
+          interfaceBinding: { kind: FIXED_INTERFACE, mode: "immediate" },
         }),
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        toast.error(data.error || "Deployment failed")
+        toast.error(data.error || `Deployment failed (${res.status})`)
         return
       }
       if (data.checkoutUrl) {
@@ -250,6 +223,73 @@ export default function DeployPage() {
 
       <Card>
         <CardContent className="space-y-6 py-6">
+          {step === "agent" && (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">Choose Your Agent</h2>
+                <p className="text-sm text-muted-foreground">
+                  Pick the runtime that powers your bot.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Runtime Engine
+                </p>
+                <ToggleGroup
+                  value={[runtime]}
+                  onValueChange={(v) => {
+                    const next = v[0] as Runtime | undefined
+                    if (!next) return
+                    setRuntime(next)
+                    // Switching to Hermes invalidates a sub-2GB plan (Free) —
+                    // clear it so the form can't deploy an unsupported combo.
+                    if (
+                      next === "hermes" &&
+                      selectedPlan &&
+                      (resolveServerForPlan(selectedPlan)?.ramGb ?? 0) < 2
+                    ) {
+                      setSelectedPlan(null)
+                    }
+                  }}
+                  className="grid w-full grid-cols-1 gap-2 md:grid-cols-2"
+                  spacing={1}
+                >
+                  {RUNTIME_OPTIONS.map((r) => (
+                    <ToggleGroupItem
+                      key={r.value}
+                      value={r.value}
+                      disabled={!r.enabled}
+                      variant="outline"
+                      className={cn(
+                        "h-auto flex-col items-start whitespace-normal p-4 text-left",
+                        SELECTED_GLOW
+                      )}
+                    >
+                      <div className="flex w-full items-center justify-between">
+                        <p className="text-sm font-medium text-foreground">{r.label}</p>
+                        {!r.enabled && (
+                          <Badge variant="outline" className="text-[10px]">
+                            Coming soon
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">{r.hint}</p>
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+                {runtime === "hermes" && (
+                  <p className="text-xs text-muted-foreground">
+                    Hermes ships with the Open WebUI chat interface bundled — you&apos;ll get a web
+                    chat UI at <span className="font-mono">/</span> and the OpenAI-compatible API at{" "}
+                    <span className="font-mono">/v1</span> on the same public URL. Requires a plan
+                    with at least 2GB RAM.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
           {step === "project" && (
             <div className="space-y-6">
               <div>
@@ -309,190 +349,6 @@ export default function DeployPage() {
             </div>
           )}
 
-          {step === "interface" && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-lg font-semibold text-foreground">Interface &amp; Deployment</h2>
-                <p className="text-sm text-muted-foreground">
-                  Choose where users reach the bot, how it runs, and where it lives.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                  Interface · where users reach the bot
-                </p>
-                <ToggleGroup
-                  value={[interfaceKind]}
-                  onValueChange={(v) => v[0] && setInterfaceKind(v[0] as Interface)}
-                  className="grid w-full grid-cols-1 gap-2 md:grid-cols-2"
-                  spacing={1}
-                >
-                  {INTERFACES.map((i) => (
-                    <ToggleGroupItem
-                      key={i.value}
-                      value={i.value}
-                      disabled={!i.enabled}
-                      variant="outline"
-                      className={cn(
-                        "h-auto flex-col items-start whitespace-normal p-3 text-left",
-                        SELECTED_GLOW
-                      )}
-                    >
-                      <div className="flex w-full items-center justify-between">
-                        <p className="text-sm font-medium text-foreground">{i.label}</p>
-                        {!i.enabled && (
-                          <Badge variant="outline" className="text-[10px]">
-                            Coming soon
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground">{i.hint}</p>
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                  Deployment Target · how the bot runs
-                </p>
-                <ToggleGroup
-                  value={[deploymentTarget]}
-                  className="grid w-full grid-cols-1 gap-2 md:grid-cols-3"
-                  spacing={1}
-                >
-                  {DEPLOYMENT_TARGETS.map((d) => (
-                    <ToggleGroupItem
-                      key={d.value}
-                      value={d.value}
-                      disabled={!d.enabled}
-                      variant="outline"
-                      className={cn(
-                        "h-auto flex-col items-start whitespace-normal p-3 text-left",
-                        SELECTED_GLOW
-                      )}
-                    >
-                      <div className="flex w-full items-center justify-between">
-                        <p className="text-sm font-medium text-foreground">{d.label}</p>
-                        {!d.enabled && (
-                          <Badge variant="outline" className="text-[10px]">
-                            Coming soon
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground">{d.hint}</p>
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </div>
-
-              {deploymentTarget === "vps" && (
-                <div className="space-y-2">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Runtime Engine · which agent runtime powers the bot
-                  </p>
-                  <ToggleGroup
-                    value={[runtime]}
-                    onValueChange={(v) => {
-                      if (!v[0]) return
-                      setRuntime(v[0] as Runtime)
-                    }}
-                    className="grid w-full grid-cols-1 gap-2 md:grid-cols-2"
-                    spacing={1}
-                  >
-                    {RUNTIME_OPTIONS.map((r) => {
-                      // Hermes always ships with the Open WebUI sidecar — that needs
-                      // ≥2GB RAM, so the runtime button itself is gated on plan size.
-                      const ramBlocked = r.value === "hermes" && !hermesRamOk
-                      const disabled = !r.enabled || ramBlocked
-                      return (
-                        <ToggleGroupItem
-                          key={r.value}
-                          value={r.value}
-                          disabled={disabled}
-                          variant="outline"
-                          className={cn(
-                            "h-auto flex-col items-start whitespace-normal p-3 text-left",
-                            SELECTED_GLOW
-                          )}
-                        >
-                          <div className="flex w-full items-center justify-between">
-                            <p className="text-sm font-medium text-foreground">{r.label}</p>
-                            {!r.enabled ? (
-                              <Badge variant="outline" className="text-[10px]">
-                                Coming soon
-                              </Badge>
-                            ) : ramBlocked ? (
-                              <Badge variant="outline" className="text-[10px]">
-                                Needs ≥2GB plan
-                              </Badge>
-                            ) : null}
-                          </div>
-                          <p className="text-xs text-muted-foreground">{r.hint}</p>
-                        </ToggleGroupItem>
-                      )
-                    })}
-                  </ToggleGroup>
-                  {runtime === "hermes" && (
-                    <p className="text-xs text-muted-foreground">
-                      Hermes ships with the Open WebUI chat interface bundled — you&apos;ll get a web
-                      chat UI at <span className="font-mono">/</span> and the OpenAI-compatible API at{" "}
-                      <span className="font-mono">/v1</span> on the same public URL.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                  Location · server region
-                </p>
-                <Alert>
-                  <span className="size-2 animate-pulse rounded-full bg-primary" />
-                  <AlertDescription className="font-mono">
-                    All regions operational <span className="opacity-70">live</span>
-                  </AlertDescription>
-                </Alert>
-                <ToggleGroup
-                  value={selectedRegion ? [selectedRegion.slug] : []}
-                  onValueChange={(v) => {
-                    const slug = v[0]
-                    if (!slug) return
-                    const r = REGIONS.find((x) => x.slug === slug)
-                    if (r && r.available) setSelectedRegion(r)
-                  }}
-                  className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2"
-                  spacing={1}
-                >
-                  {REGIONS.map((r) => (
-                    <ToggleGroupItem
-                      key={r.slug}
-                      value={r.slug}
-                      disabled={!r.available}
-                      variant="outline"
-                      className={cn(
-                        "h-auto items-center gap-4 whitespace-normal p-4 text-left",
-                        SELECTED_GLOW
-                      )}
-                    >
-                      <span className="text-2xl">{r.flag}</span>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-foreground">{r.name}</p>
-                        <p className="text-xs text-muted-foreground">{r.country}</p>
-                      </div>
-                      {!r.available && (
-                        <Badge variant="outline" className="ml-auto text-[10px]">
-                          Soon
-                        </Badge>
-                      )}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </div>
-            </div>
-          )}
-
           {step === "plan" && (
             <div className="space-y-6">
               <div>
@@ -509,7 +365,7 @@ export default function DeployPage() {
                   const slug = v[0]
                   if (!slug) return
                   const p = DEPLOYABLE_PLANS.find((x) => x.slug === slug)
-                  if (p) setSelectedPlan(p)
+                  if (p && planSupportsRuntime(p)) setSelectedPlan(p)
                 }}
                 className="flex w-full flex-col gap-3"
                 spacing={1}
@@ -517,10 +373,13 @@ export default function DeployPage() {
                 {DEPLOYABLE_PLANS.map((plan) => {
                   const server = resolveServerForPlan(plan)
                   const price = plan.displayPriceMonthly
+                  const showSpecs = plan.tier !== "free"
+                  const runtimeBlocked = !planSupportsRuntime(plan)
                   return (
                     <ToggleGroupItem
                       key={plan.slug}
                       value={plan.slug}
+                      disabled={runtimeBlocked}
                       variant="outline"
                       className={cn(
                         "h-auto w-full flex-col items-stretch whitespace-normal p-5 text-left",
@@ -534,6 +393,11 @@ export default function DeployPage() {
                             <p className="text-lg font-semibold text-foreground">{plan.name}</p>
                             {plan.highlight && (
                               <Badge className="font-mono text-[10px]">Popular</Badge>
+                            )}
+                            {runtimeBlocked && (
+                              <Badge variant="outline" className="text-[10px]">
+                                Needs ≥2GB plan
+                              </Badge>
                             )}
                           </div>
                           <p className="mt-1 text-sm text-muted-foreground">{plan.description}</p>
@@ -549,7 +413,7 @@ export default function DeployPage() {
                           )}
                         </div>
                       </div>
-                      {server && (
+                      {showSpecs && server && (
                         <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
                           <span>{server.vcpu} vCPU</span>
                           <span>{server.ramGb} GB RAM</span>
@@ -585,16 +449,6 @@ export default function DeployPage() {
                         {enterprisePlan.enterprisePriceLabel}
                       </p>
                     </div>
-                    {(() => {
-                      const server = resolveServerForPlan(enterprisePlan)
-                      return server ? (
-                        <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                          <span>{server.vcpu} vCPU</span>
-                          <span>{server.ramGb} GB RAM</span>
-                          <span>{server.storageGb} GB Storage</span>
-                        </div>
-                      ) : null
-                    })()}
                     <div className="mt-4">
                       <a
                         href={BRANDING.demoUrl}
@@ -609,7 +463,7 @@ export default function DeployPage() {
                 </Card>
               )}
 
-              {selectedPlan && selectedServer && (
+              {selectedPlan && selectedPlan.tier !== "free" && selectedServer && (
                 <Card className="bg-muted/40">
                   <CardHeader>
                     <CardDescription className="font-mono text-[10px] tracking-[0.1em] uppercase text-primary">
@@ -638,44 +492,7 @@ export default function DeployPage() {
                   </CardContent>
                 </Card>
               )}
-            </div>
-          )}
 
-          {step === "advanced" && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-lg font-semibold text-foreground">Advanced Options</h2>
-                <p className="text-sm text-muted-foreground">
-                  Optional configuration. All fields are independent — fill only what you need.
-                </p>
-              </div>
-
-              <FieldGroup>
-                <Field>
-                  <FieldLabel htmlFor="root-password">Root Password</FieldLabel>
-                  <Input
-                    id="root-password"
-                    type="password"
-                    value={rootPassword}
-                    onChange={(e) => setRootPassword(e.target.value)}
-                    placeholder="Leave blank for auto-generated"
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="ssh-key">SSH Public Key</FieldLabel>
-                  <Textarea
-                    id="ssh-key"
-                    rows={3}
-                    value={sshKey}
-                    onChange={(e) => setSshKey(e.target.value)}
-                    placeholder="ssh-ed25519 AAAA..."
-                    className="font-mono text-sm"
-                  />
-                </Field>
-                <FieldDescription className="font-mono">
-                  Custom domains can be configured after deployment from the instance Controls tab.
-                </FieldDescription>
-              </FieldGroup>
             </div>
           )}
 
@@ -692,7 +509,7 @@ export default function DeployPage() {
                 <ToggleGroup
                   value={[billingInterval]}
                   onValueChange={(v) => v[0] && setBillingInterval(v[0] as BillingInterval)}
-                  className="grid w-full grid-cols-2 gap-4"
+                  className="grid w-full grid-cols-2 items-stretch gap-4"
                   spacing={1}
                 >
                   {(["month", "year"] as BillingInterval[]).map((interval) => (
@@ -701,7 +518,7 @@ export default function DeployPage() {
                       value={interval}
                       variant="outline"
                       className={cn(
-                        "h-auto flex-col gap-1 whitespace-normal p-6 text-center",
+                        "h-full min-h-[7.5rem] flex-col justify-center gap-1 whitespace-normal p-6 text-center",
                         SELECTED_GLOW
                       )}
                     >
@@ -711,11 +528,14 @@ export default function DeployPage() {
                       <p className="text-sm text-muted-foreground">
                         {interval === "month" ? "Pay month-to-month" : "Save ~17% (2 months free)"}
                       </p>
-                      {interval === "year" && (
-                        <Badge className="mt-2 bg-emerald-500/20 text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-300">
-                          Best Value
-                        </Badge>
-                      )}
+                      <Badge
+                        className={cn(
+                          "mt-2 bg-emerald-500/20 text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-300",
+                          interval !== "year" && "invisible"
+                        )}
+                      >
+                        Best Value
+                      </Badge>
                     </ToggleGroupItem>
                   ))}
                 </ToggleGroup>
@@ -732,19 +552,10 @@ export default function DeployPage() {
                 </CardHeader>
                 <CardContent>
                   <p className="text-xs text-muted-foreground">
-                    Interface: <span className="capitalize text-foreground">{interfaceKind}</span> ·
-                    <span className="ml-1">
-                      Deploy:{" "}
-                      <span className="capitalize text-foreground">{deploymentTarget}</span>
+                    Runtime:{" "}
+                    <span className="text-foreground">
+                      {RUNTIME_OPTIONS.find((r) => r.value === runtime)?.label ?? runtime}
                     </span>
-                    {deploymentTarget === "vps" && (
-                      <span className="ml-1">
-                        · Runtime:{" "}
-                        <span className="text-foreground">
-                          {RUNTIME_OPTIONS.find((r) => r.value === runtime)?.label ?? runtime}
-                        </span>
-                      </span>
-                    )}
                   </p>
                   {coreActions.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -780,19 +591,7 @@ export default function DeployPage() {
                     <p className="font-medium text-foreground">{selectedPlan?.name ?? "—"}</p>
                   </CardHeader>
                 </Card>
-                {selectedRegion && (
-                  <Card size="sm">
-                    <CardHeader>
-                      <CardDescription className="text-xs uppercase tracking-wide">
-                        Region
-                      </CardDescription>
-                      <p className="font-medium text-foreground">
-                        {selectedRegion.flag} {selectedRegion.name}
-                      </p>
-                    </CardHeader>
-                  </Card>
-                )}
-                {selectedServer && (
+                {selectedPlan && selectedPlan.tier !== "free" && selectedServer && (
                   <Card size="sm">
                     <CardHeader>
                       <CardDescription className="text-xs uppercase tracking-wide">
@@ -812,18 +611,6 @@ export default function DeployPage() {
                       </CardDescription>
                       <p className="font-medium text-foreground">
                         {billingInterval === "year" ? "Yearly" : "Monthly"}
-                      </p>
-                    </CardHeader>
-                  </Card>
-                )}
-                {sshKey && (
-                  <Card size="sm">
-                    <CardHeader>
-                      <CardDescription className="text-xs uppercase tracking-wide">
-                        SSH Key
-                      </CardDescription>
-                      <p className="truncate font-mono text-xs font-medium text-foreground">
-                        {sshKey.slice(0, 40)}...
                       </p>
                     </CardHeader>
                   </Card>

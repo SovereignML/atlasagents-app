@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { db, instances, instanceLogs, eq } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
+import { canOperateInstance } from "@/lib/instance-access"
 import { reprovisionBotEnv } from "@/lib/provisioner"
 import { logAuditEvent } from "@/lib/audit"
 import { AGENT_CATEGORIES } from "@/configs/agent-categories"
@@ -44,7 +45,8 @@ export async function PATCH(
   if (!instance) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 })
   }
-  if (!isAdmin && instance.userId !== session.user.id) {
+  // Changing the agent type is an operation — Operator+ on the agent.
+  if (!isAdmin && !(await canOperateInstance(session.user.id, instance.id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
   if (instance.status === "deleted") {

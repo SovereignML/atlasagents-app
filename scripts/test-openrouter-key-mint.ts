@@ -22,6 +22,7 @@ import {
   instances,
   regions,
   serverConfigs,
+  teams,
   users,
   eq,
 } from "@/db"
@@ -67,12 +68,19 @@ async function main() {
     .values({ email: testEmail, name: "OpenRouter Key Test" })
     .returning()
 
+  // Throwaway team — agents are team-scoped.
+  const [team] = await db
+    .insert(teams)
+    .values({ name: "OpenRouter Key Test Team", ownerId: user.id })
+    .returning()
+
   // Throwaway instance — minimal required fields, no real provisioning.
   const slug = `or-key-test-${randomUUID().slice(0, 8)}`
   const [inst] = await db
     .insert(instances)
     .values({
       userId: user.id,
+      teamId: team.id,
       name: "or-key-test",
       slug,
       regionId: region.id,

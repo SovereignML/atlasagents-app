@@ -39,6 +39,27 @@ export async function POST(req: Request) {
 
   const team = await db.query.teams.findFirst({ where: eq(teams.id, ctx.teamId) })
   if (!team) return NextResponse.json({ error: "Team not found" }, { status: 404 })
+
+  // Reject when the team is already at its seat limit. Mirrors the UI's
+  // `seatsUsed` (members + open invites) and the accept-time cap so the limit
+  // doesn't depend on the client. Platform staff bypass.
+  const isAdmin = (session.user as { role?: string }).role === "admin"
+  if (!isAdmin) {
+    const [memberCount, openInvites] = await Promise.all([
+      db.query.memberships.findMany({ where: eq(memberships.teamId, team.id) }),
+      db.query.teamInvites.findMany({
+        where: and(
+          eq(teamInvites.teamId, team.id),
+          isNull(teamInvites.acceptedAt),
+          isNull(teamInvites.revokedAt),
+        ),
+      }),
+    ])
+    if (memberCount.length + openInvites.length >= team.seatLimit) {
+      return NextResponse.json({ error: "Team is at seat limit" }, { status: 409 })
+    }
+  }
+
   const email = parsed.data.email.toLowerCase().trim()
 
   // If user already a member, reject.

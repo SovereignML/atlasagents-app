@@ -75,7 +75,16 @@ export type MintResult = {
  * The returned `key` is shown only once — callers MUST persist it (encrypted)
  * immediately or it is lost.
  */
-export async function mintRuntimeKey(args: MintArgs): Promise<MintResult> {
+export async function mintRuntimeKey(
+  args: MintArgs,
+  /**
+   * Override the parent provisioning key. Used for white-label reseller agents,
+   * which mint under the TENANT's own OpenRouter account (so the tenant bears
+   * their customers' LLM cost) instead of the platform key.
+   */
+  provisioningKeyOverride?: string,
+): Promise<MintResult> {
+  const parentKey = provisioningKeyOverride || provisioningKey()
   const payload: Record<string, unknown> = { name: args.label }
   if (args.limitUsd != null) payload.limit = args.limitUsd
 
@@ -89,7 +98,7 @@ export async function mintRuntimeKey(args: MintArgs): Promise<MintResult> {
   const res = await fetch(`${OPENROUTER_API}/keys`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${provisioningKey()}`,
+      Authorization: `Bearer ${parentKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),

@@ -3,6 +3,7 @@ import crypto from "node:crypto"
 import { auth } from "@/auth"
 import { db, instances, instanceLogs, eq } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
+import { canOperateInstance } from "@/lib/instance-access"
 import { reprovisionBotEnv } from "@/lib/provisioner"
 
 async function requireOwner(instanceId: string) {
@@ -17,7 +18,8 @@ async function requireOwner(instanceId: string) {
   if (!instance) {
     return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) }
   }
-  if (!isAdmin && instance.userId !== session.user.id) {
+  // The bot token is a secret — Operator+ on the agent.
+  if (!isAdmin && !(await canOperateInstance(session.user.id, instance.id))) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) }
   }
   if (instance.status === "deleted") {

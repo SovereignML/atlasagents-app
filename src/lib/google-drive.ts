@@ -93,6 +93,10 @@ function stateSecret(): string {
 
 export type DriveOAuthState = {
   userId: string
+  // Team the connection is being authorized for. The callback writes the
+  // DriveConnection to this team. Optional so consents minted before this
+  // field existed still verify (the callback falls back to the active team).
+  teamId?: string
   instanceId?: string
 }
 
@@ -123,12 +127,13 @@ export function verifyDriveState(raw: string | null): DriveOAuthState | null {
   try {
     const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
       userId: string
+      teamId?: string
       instanceId?: string
       ts: number
     }
     if (!decoded.userId || typeof decoded.ts !== "number") return null
     if (Date.now() - decoded.ts > STATE_TTL_MS) return null
-    return { userId: decoded.userId, instanceId: decoded.instanceId }
+    return { userId: decoded.userId, teamId: decoded.teamId, instanceId: decoded.instanceId }
   } catch {
     return null
   }
@@ -351,14 +356,14 @@ export async function deleteBackup(accessToken: string, fileId: string): Promise
 // ──────────────────────────────────────────────────────────────────────
 
 /**
- * Resolve a usable Drive access token for a user. Loads their connection,
- * decrypts the refresh token, and mints a fresh access token. If the refresh
- * token is dead (revoked), the stale connection row is deleted and
+ * Resolve a usable Drive access token for a team. Loads the team's shared
+ * connection, decrypts the refresh token, and mints a fresh access token. If
+ * the refresh token is dead (revoked), the stale connection row is deleted and
  * DriveAuthError is thrown so the caller can prompt re-connect.
  */
-export async function getDriveAccessTokenForUser(userId: string): Promise<string> {
+export async function getDriveAccessTokenForTeam(teamId: string): Promise<string> {
   const conn = await db.query.driveConnections.findFirst({
-    where: eq(driveConnections.userId, userId),
+    where: eq(driveConnections.teamId, teamId),
   })
   if (!conn) throw new DriveNotConnectedError()
 
@@ -369,7 +374,7 @@ export async function getDriveAccessTokenForUser(userId: string): Promise<string
   } catch (err) {
     if (err instanceof DriveAuthError) {
       // Stale grant — drop it so the UI shows "connect" again.
-      await db.delete(driveConnections).where(eq(driveConnections.userId, userId))
+      await db.delete(driveConnections).where(eq(driveConnections.teamId, teamId))
     }
     throw err
   }

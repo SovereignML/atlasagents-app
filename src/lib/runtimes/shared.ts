@@ -1,6 +1,6 @@
 import crypto from "node:crypto"
 import { buildGatewayAllowedOrigins } from "@/lib/instance-gateway-access"
-import { routeModel } from "@/lib/model-router"
+import { routeModel, resolveLlmProvider, nvidiaKeyForSlot } from "@/lib/model-router"
 import type { BudgetTier } from "@/lib/agent-config"
 import type {
   BootstrapRenderArgs,
@@ -86,24 +86,37 @@ export function createRuntime(spec: RuntimeSpec): RuntimeEngine {
 
   function buildEnv(args: BuildEnvArgs): RuntimeEnv {
     const tier = (args.instance.modelTier ?? "mid") as BudgetTier
-    const route = routeModel(tier)
+    const provider = resolveLlmProvider(args.instance)
+    const route = routeModel(tier, provider)
     const p = spec.envPrefix
+
+    // The runtime reads a single LLM key (OPENROUTER_API_KEY) paired with
+    // `${p}_LLM_BASE_URL`. For the NVIDIA-primary switch we point that pair at
+    // NVIDIA and feed it the NVIDIA key, so the bot has zero OpenRouter
+    // dependency. NOTE: the package's accepted `${p}_LLM_PROVIDER` values aren't
+    // documented — "nvidia" is set verbatim and should be verified on a real VPS.
+    const primaryKey =
+      provider === "nvidia" ? nvidiaKeyForSlot("primary") : args.openRouterApiKey
 
     const env: RuntimeEnv = {
       PORT: String(spec.gatewayPort),
       DOMAIN: args.instance.domain ?? "",
-      OPENROUTER_API_KEY: args.openRouterApiKey,
+      OPENROUTER_API_KEY: primaryKey,
       [`${p}_ADMIN_EMAIL`]: args.adminEmail,
       [`${p}_ADMIN_PASSWORD`]: args.adminPassword,
       [`${p}_MODEL`]: route.model,
       [`${p}_FALLBACK_MODEL`]: route.fallback,
-      [`${p}_LLM_PROVIDER`]: "openrouter",
-      [`${p}_LLM_BASE_URL`]: "https://openrouter.ai/api/v1",
+      [`${p}_LLM_PROVIDER`]: provider,
+      [`${p}_LLM_BASE_URL`]: route.baseUrl,
       INSTANCE_ID: args.instance.id,
     }
 
+    // Always expose the NVIDIA key so the best-effort cross-provider fallback can
+    // authenticate even on the OpenRouter-primary path.
+    const nvidiaKey = nvidiaKeyForSlot("primary")
+    if (nvidiaKey) env.NVIDIA_API_KEY = nvidiaKey
+
     if (route.fallbackProvider) {
-      env.NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || ""
       env[`${p}_FALLBACK_BASE_URL`] = route.fallbackProvider.baseUrl
       env[`${p}_FALLBACK_MODEL`] = route.fallbackProvider.model
     }

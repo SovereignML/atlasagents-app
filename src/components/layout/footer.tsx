@@ -84,10 +84,10 @@ const footerSections = [
   {
     title: "Company",
     links: [
-      { href: "/#pricing", label: "Pricing" },
+      { href: "https://blog.sovereignml.com", label: "Blog", external: true },
       { href: "/docs", label: "Docs", external: true },
       { href: "/docs#faq", label: "Resources" },
-      { href: BRANDING.demoUrl, label: "Book a Demo", external: true },
+      { href: "/careers", label: "Careers", hidden: true },
     ],
   },
   {
@@ -187,7 +187,9 @@ export default function Footer() {
           <div key={section.title} className="flex-1 max-lg:min-w-[40%]">
             <h3 className="mb-6 text-hero/[0.56] lg:mb-4">{section.title}</h3>
             <div className="relative flex flex-col">
-              {section.links.map((link) => {
+              {section.links
+                .filter((link) => !("hidden" in link && link.hidden))
+                .map((link) => {
                 const isExternal = "external" in link && link.external
                 const className =
                   "group relative flex w-max rounded-full py-2 text-hero-white outline-offset-2 focus-visible:outline focus-visible:outline-hero-white"

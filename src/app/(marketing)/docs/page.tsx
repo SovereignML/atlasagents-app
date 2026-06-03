@@ -41,12 +41,7 @@ const faqItems = [
   {
     question: "Can I deploy multiple agents?",
     answer:
-      "Yes. How many agents you can run at once depends on your plan (live agent limits and credits). Higher tiers add more live agents, credits, and throughput. Each agent gets its own configuration, region, compute tier, and monitoring dashboard.",
-  },
-  {
-    question: "What regions are available for deployment?",
-    answer:
-      "We currently offer 5 active regions: US East (Newark), US West (Fremont), EU Central (Frankfurt), EU West (London), and AP South (Singapore). Tokyo (AP Northeast) is coming soon. You can choose the region closest to your users for optimal latency.",
+      "Yes. How many agents you can run at once depends on your plan (live agent limits and credits). Higher tiers add more live agents, credits, and throughput. Each agent gets its own configuration, compute tier, and monitoring dashboard.",
   },
 ]
 
@@ -101,7 +96,6 @@ const sections = [
             "Create an account at sovereignml.com/register",
             "From your dashboard, click Deploy Agent",
             "Name your project — a URL slug is auto-generated",
-            "Choose a deployment region closest to your users",
             "Select a billing interval (monthly or yearly)",
             "Pick a compute tier based on your workload",
             "Optionally add SSH keys or extra storage",
@@ -161,15 +155,14 @@ const sections = [
     id: "deploy",
     content: (
       <div className="space-y-4 text-[var(--text-secondary)] text-sm leading-relaxed">
-        <p>The 6-step deploy wizard walks you through every configuration option:</p>
+        <p>The deploy wizard walks you through every configuration option:</p>
         <div className="space-y-3">
           {[
             { step: "1. Project", desc: "Enter your agent name. A URL-safe slug is auto-generated (e.g. my-support-agent → my-support-agent)." },
-            { step: "2. Region", desc: "Pick from 5 active regions. Choose the one geographically closest to your users for lowest latency." },
-            { step: "3. Billing", desc: "Choose monthly or yearly billing. Yearly saves ~17% (2 months free). Price updates in real-time." },
-            { step: "4. Server", desc: "Pick a compute tier: Standard (CX), Performance AMD (CPX), ARM (CAX), or Dedicated (CCX). 16 configurations from 2–16 vCPU." },
-            { step: "5. Advanced", desc: "Optional: set a root password (AES-256-GCM encrypted at rest), add an SSH key, or provision up to 1000 GB extra storage at $0.05/GB/mo." },
-            { step: "6. Review", desc: "Full config summary with itemized price breakdown. Confirm and deploy." },
+            { step: "2. Billing", desc: "Choose monthly or yearly billing. Yearly saves ~17% (2 months free). Price updates in real-time." },
+            { step: "3. Server", desc: "Pick a compute tier: Standard (CX), Performance AMD (CPX), ARM (CAX), or Dedicated (CCX). 16 configurations from 2–16 vCPU." },
+            { step: "4. Advanced", desc: "Optional: set a root password (AES-256-GCM encrypted at rest), add an SSH key, or provision up to 1000 GB extra storage at $0.05/GB/mo." },
+            { step: "5. Review", desc: "Full config summary with itemized price breakdown. Confirm and deploy." },
           ].map((item) => (
             <div key={item.step} className="flex gap-4 border-l-2 border-[var(--border-color)] pl-4">
               <div>

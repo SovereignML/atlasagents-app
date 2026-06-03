@@ -13,7 +13,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -27,6 +26,7 @@ import {
 } from "@/components/ui/card"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TwoFactorCard } from "@/components/auth/two-factor-card"
@@ -43,6 +43,14 @@ interface AccountData {
   telegramId: string | null
   twitterHandle: string | null
   discordId: string | null
+}
+
+interface DeletionRequest {
+  id: string
+  status: "pending" | "approved" | "denied"
+  reason: string | null
+  decisionNote: string | null
+  createdAt: string
 }
 
 export default function AccountPage() {
@@ -69,6 +77,13 @@ export default function AccountPage() {
   const [passwordError, setPasswordError] = useState("")
   const [passwordSaving, setPasswordSaving] = useState(false)
 
+  const [deletionRequest, setDeletionRequest] = useState<DeletionRequest | null>(null)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleteReason, setDeleteReason] = useState("")
+  const [deleteConfirm, setDeleteConfirm] = useState("")
+  const [deleteError, setDeleteError] = useState("")
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false)
+
   useEffect(() => {
     let cancelled = false
 
@@ -87,6 +102,14 @@ export default function AccountPage() {
           setTelegramId(data.telegramId || "")
           setTwitterHandle(data.twitterHandle || "")
           setDiscordId(data.discordId || "")
+        }
+
+        const delRes = await fetch("/api/auth/account/delete-request", {
+          credentials: "include",
+        })
+        if (!cancelled && delRes.ok) {
+          const delData = await delRes.json()
+          setDeletionRequest(delData.request)
         }
       } catch {
         /* ignore */
@@ -159,6 +182,45 @@ export default function AccountPage() {
       setPasswordError("Failed to update password")
     } finally {
       setPasswordSaving(false)
+    }
+  }
+
+  async function handleDeleteRequest() {
+    setDeleteError("")
+    setDeleteSubmitting(true)
+    try {
+      const res = await fetch("/api/auth/account/delete-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: deleteReason || undefined }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setDeletionRequest(data.request)
+        setDeleteOpen(false)
+        setDeleteReason("")
+        setDeleteConfirm("")
+      } else {
+        setDeleteError(data.error || "Failed to submit request")
+      }
+    } catch {
+      setDeleteError("Failed to submit request")
+    } finally {
+      setDeleteSubmitting(false)
+    }
+  }
+
+  async function handleCancelDeleteRequest() {
+    setDeleteSubmitting(true)
+    try {
+      const res = await fetch("/api/auth/account/delete-request", {
+        method: "DELETE",
+      })
+      if (res.ok) setDeletionRequest(null)
+    } catch {
+      /* ignore */
+    } finally {
+      setDeleteSubmitting(false)
     }
   }
 
@@ -446,37 +508,117 @@ export default function AccountPage() {
         <CardHeader>
           <CardTitle className="text-lg text-destructive">Delete Account</CardTitle>
           <CardDescription>
-            Permanently delete your account, all agents, subscriptions, and data. This cannot be
-            undone.
+            Request deletion of your account, all agents, subscriptions, and data. Our team
+            reviews each request before any data is removed. This cannot be undone.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <AlertDialog>
-            <AlertDialogTrigger
-              render={
-                <Button variant="destructive">
-                  <Trash2 data-icon="inline-start" />
-                  Delete Account
-                </Button>
+          {deletionRequest?.status === "pending" ? (
+            <>
+              <Alert>
+                <AlertDescription>
+                  Your deletion request is pending review by the SovereignML team. We&apos;ll email
+                  you once a decision is made.
+                </AlertDescription>
+              </Alert>
+              <Button
+                variant="outline"
+                disabled={deleteSubmitting}
+                onClick={handleCancelDeleteRequest}
+              >
+                {deleteSubmitting ? "Cancelling…" : "Cancel request"}
+              </Button>
+            </>
+          ) : deletionRequest?.status === "denied" ? (
+            <>
+              <Alert variant="destructive">
+                <AlertDescription>
+                  Your previous deletion request was declined.
+                  {deletionRequest.decisionNote ? ` Reason: ${deletionRequest.decisionNote}` : ""}
+                </AlertDescription>
+              </Alert>
+              <Button variant="destructive" onClick={() => setDeleteOpen(true)}>
+                <Trash2 data-icon="inline-start" />
+                Request deletion again
+              </Button>
+            </>
+          ) : deletionRequest?.status === "approved" ? (
+            <Alert>
+              <AlertDescription>
+                Your deletion request was approved and will be processed by our team shortly.
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <Button variant="destructive" onClick={() => setDeleteOpen(true)}>
+              <Trash2 data-icon="inline-start" />
+              Request account deletion
+            </Button>
+          )}
+
+          <AlertDialog
+            open={deleteOpen}
+            onOpenChange={(open) => {
+              setDeleteOpen(open)
+              if (!open) {
+                setDeleteReason("")
+                setDeleteConfirm("")
+                setDeleteError("")
               }
-            />
+            }}
+          >
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Delete your account?</AlertDialogTitle>
+                <AlertDialogTitle>Request account deletion?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  All agents, subscriptions, and data will be permanently removed. This cannot be
+                  This sends a deletion request to the SovereignML team for review. Once approved,
+                  all agents, subscriptions, and data are permanently removed. This cannot be
                   undone.
                 </AlertDialogDescription>
               </AlertDialogHeader>
+              <div className="space-y-3">
+                <Field>
+                  <FieldLabel htmlFor="delete-reason">Reason (optional)</FieldLabel>
+                  <Textarea
+                    id="delete-reason"
+                    placeholder="Let us know why you're leaving…"
+                    value={deleteReason}
+                    onChange={(e) => setDeleteReason(e.target.value)}
+                    maxLength={1000}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="delete-confirm">
+                    Type <span className="font-mono font-semibold">DELETE</span> to confirm
+                  </FieldLabel>
+                  <Input
+                    id="delete-confirm"
+                    value={deleteConfirm}
+                    onChange={(e) => setDeleteConfirm(e.target.value)}
+                    placeholder="DELETE"
+                    autoComplete="off"
+                  />
+                </Field>
+                {deleteError ? (
+                  <Alert variant="destructive">
+                    <AlertDescription>{deleteError}</AlertDescription>
+                  </Alert>
+                ) : null}
+              </div>
               <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction>I understand, delete</AlertDialogAction>
+                <AlertDialogCancel disabled={deleteSubmitting}>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  variant="destructive"
+                  disabled={deleteConfirm !== "DELETE" || deleteSubmitting}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    void handleDeleteRequest()
+                  }}
+                >
+                  {deleteSubmitting ? "Submitting…" : "Submit request"}
+                </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-          <p className="font-mono text-[10px] text-amber-500/80">
-            ⚠ deletion workflow + grace period pending
-          </p>
         </CardContent>
       </Card>
     </PageContainer>

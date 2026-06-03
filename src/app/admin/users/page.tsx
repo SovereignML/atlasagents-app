@@ -1,6 +1,7 @@
 "use client"
 
 import { Fragment, useCallback, useEffect, useState } from "react"
+import Link from "next/link"
 import { Search, X } from "lucide-react"
 
 import {
@@ -69,6 +70,7 @@ interface User {
   twitterHandle: string | null
   discordId: string | null
   createdAt: string
+  teams: { id: string; name: string }[]
   _count: { subscriptions: number; payments: number }
 }
 
@@ -289,6 +291,7 @@ export default function AdminUsersPage() {
                   <TableHead>User</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Team</TableHead>
                   <TableHead>Subs</TableHead>
                   <TableHead>Payments</TableHead>
                   <TableHead>Joined</TableHead>
@@ -299,14 +302,14 @@ export default function AdminUsersPage() {
                 {loading ? (
                   Array.from({ length: 3 }).map((_, i) => (
                     <TableRow key={i}>
-                      <TableCell colSpan={7}>
+                      <TableCell colSpan={8}>
                         <Skeleton className="h-6 w-full" />
                       </TableCell>
                     </TableRow>
                   ))
                 ) : users.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7}>
+                    <TableCell colSpan={8}>
                       <Empty>
                         <EmptyHeader>
                           <EmptyTitle>No users found</EmptyTitle>
@@ -344,6 +347,23 @@ export default function AdminUsersPage() {
                           <Badge variant={user.isBanned ? "destructive" : "default"}>
                             {user.isBanned ? "banned" : "active"}
                           </Badge>
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          {user.teams.length === 0 ? (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          ) : (
+                            <div className="flex flex-col gap-0.5">
+                              {user.teams.map((t) => (
+                                <Link
+                                  key={t.id}
+                                  href={`/admin/teams?teamId=${t.id}`}
+                                  className="text-sm text-primary hover:underline"
+                                >
+                                  {t.name}
+                                </Link>
+                              ))}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {user._count.subscriptions}
@@ -490,7 +510,7 @@ export default function AdminUsersPage() {
 
                       {expandedUserId === user.id && (
                         <TableRow className="bg-muted/30 hover:bg-muted/30">
-                          <TableCell colSpan={7} className="whitespace-normal p-6">
+                          <TableCell colSpan={8} className="whitespace-normal p-6">
                             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                               <div className="space-y-4">
                                 <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">

@@ -14,12 +14,14 @@ export type RegionConfig = {
 }
 
 export const REGIONS: readonly RegionConfig[] = [
+  // Frankfurt-only for now (DigitalOcean fra1). The other locations are kept in
+  // the catalog but disabled so they don't appear in the region picker.
   {
     slug: "us-east-1",
     name: "Newark",
     country: "United States (East)",
     flag: "\u{1F1FA}\u{1F1F8}",
-    available: true,
+    available: false,
     sortOrder: 10,
     providerRegion: "us-east",
   },
@@ -28,7 +30,7 @@ export const REGIONS: readonly RegionConfig[] = [
     name: "Fremont",
     country: "United States (West)",
     flag: "\u{1F1FA}\u{1F1F8}",
-    available: true,
+    available: false,
     sortOrder: 20,
     providerRegion: "us-west",
   },
@@ -39,7 +41,7 @@ export const REGIONS: readonly RegionConfig[] = [
     flag: "\u{1F1E9}\u{1F1EA}",
     available: true,
     sortOrder: 30,
-    providerRegion: "eu-central",
+    providerRegion: "fra1",
   },
   {
     slug: "eu-west-1",
@@ -55,7 +57,7 @@ export const REGIONS: readonly RegionConfig[] = [
     name: "Singapore",
     country: "Singapore",
     flag: "\u{1F1F8}\u{1F1EC}",
-    available: true,
+    available: false,
     sortOrder: 50,
     providerRegion: "ap-south",
   },

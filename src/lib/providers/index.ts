@@ -30,20 +30,27 @@ export async function getVmProviderBySlug(slug: string): Promise<VpsProvider> {
   return instantiateProvider(slug)
 }
 
+/** The env-default provider used when an instance has no owning provider row. */
+function defaultProvider(): VpsProvider {
+  return instantiateProvider(process.env.VM_PROVIDER ?? "digitalocean")
+}
+
 /**
- * Resolve the provider that owns an instance's VM. Falls back to Linode when
- * `providerId` is null (legacy/shared/byos rows predating multi-provider) or
- * the row can't be found — preserves the original single-provider behaviour.
+ * Resolve the provider that owns an instance's VM. Falls back to the env-default
+ * provider (VM_PROVIDER, DigitalOcean by default) when `providerId` is null
+ * (legacy/shared/byos rows predating multi-provider) or the row can't be found.
+ * Real multi-provider instances always carry a non-null providerId, so they
+ * resolve to their actual owner regardless of the default.
  */
 export async function getVmProviderById(providerId: string | null | undefined): Promise<VpsProvider> {
-  if (!providerId) return new LinodeProvider()
+  if (!providerId) return defaultProvider()
   const row = await db.query.providers.findFirst({
     where: eq(providers.id, providerId),
     columns: { slug: true },
   })
   if (!row) {
-    console.warn(`[providers] providerId ${providerId} not found — falling back to Linode`)
-    return new LinodeProvider()
+    console.warn(`[providers] providerId ${providerId} not found — falling back to default provider`)
+    return defaultProvider()
   }
   return instantiateProvider(row.slug)
 }

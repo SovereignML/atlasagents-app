@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
+import { requireTeamManage } from "@/lib/team"
 import { isDriveConfigured, buildDriveConsentUrl, signDriveState } from "@/lib/google-drive"
 
 /**
@@ -21,7 +22,16 @@ export async function GET(req: NextRequest) {
     )
   }
 
+  // The Drive connection is shared across the team — only owners/admins connect it.
+  const team = await requireTeamManage(session.user.id)
+  if (!team) {
+    return NextResponse.json(
+      { error: "Only team owners and admins can connect a backup provider" },
+      { status: 403 },
+    )
+  }
+
   const instanceId = req.nextUrl.searchParams.get("instanceId") ?? undefined
-  const state = signDriveState({ userId: session.user.id, instanceId })
+  const state = signDriveState({ userId: session.user.id, teamId: team.teamId, instanceId })
   return NextResponse.json({ url: buildDriveConsentUrl(state) })
 }

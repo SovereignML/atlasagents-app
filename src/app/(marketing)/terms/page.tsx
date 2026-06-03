@@ -18,7 +18,7 @@ These Terms apply to all users, including free-tier users, paid subscribers, and
     content: `SovereignML is an AI operations platform that allows users to deploy, manage, and scale intelligent AI agents. The Platform includes:
 
 • A web dashboard for deploying and monitoring agents
-• A 6-step deployment wizard with region, compute, and billing configuration
+• A deployment wizard with compute and billing configuration
 • Billing management via Stripe subscriptions
 • Account management including SSH keys, social profiles, and security settings
 • An Admin Panel accessible to users with the admin role

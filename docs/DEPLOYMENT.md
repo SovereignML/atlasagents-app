@@ -10,7 +10,7 @@ End-to-end: from fresh VPS → public HTTPS URL → one-click OpenClaw deploys w
 - A domain you control (e.g. `sovereignml.example.com`) with DNS access.
 - A **Linode** API token — [create one here](https://cloud.linode.com/profile/tokens) with scopes `linodes:read_write` + `stackscripts:read_write`. This is what the platform uses to spin up user VMs.
 - An **OpenRouter** API key — [get one here](https://openrouter.ai/keys). Powers OpenClaw's LLM calls.
-- *(Optional)* Stripe keys if you want real billing. Leave blank for dev mode (auto-activates instances, skips payment).
+- *(Optional in dev / **required in production**)* Stripe keys for real billing. Leave blank for dev mode (auto-activates instances, skips payment). **Dev mode is disabled when `NODE_ENV=production`** — a production build with blank Stripe keys fails config validation at boot, and every paid endpoint returns 503. See the [Stripe go-live checklist](#stripe-go-live-checklist) before launching.
 - *(Optional)* Google OAuth credentials if you want Google sign-in.
 
 ---
@@ -240,10 +240,21 @@ docker compose logs -f app
 # Postgres shell
 docker compose exec postgres psql -U sovereignml -d sovereignml
 
-# Backups (run on a cron)
+# Manual local backup (one-off)
 docker compose exec -T postgres pg_dump -U sovereignml sovereignml \
   | gzip > /var/backups/sovereignml-$(date +%F).sql.gz
 ```
+
+> **Managed off-site backups → Cloudflare R2.** The admin panel has a built-in
+> backup subsystem at **`/admin/backups`**: enter your R2 credentials once (stored
+> encrypted in the DB), then take on-demand `pg_dump` snapshots, list/download them,
+> restore from one, and run a nightly automated backup on a cron (see *Scheduled
+> jobs* below). It shells out to `pg_dump`/`pg_restore`, so the **app host must have
+> a `postgresql-client` whose major version is ≥ the Postgres server version**:
+> `apt-get install -y postgresql-client`. If those binaries aren't on `PATH`, set
+> `PG_DUMP_PATH` / `PG_RESTORE_PATH`. **Restore is destructive — it overwrites all
+> live data** (`pg_restore --clean`); quiesce the app first and only restore onto a
+> database you intend to replace.
 
 ---
 
@@ -306,13 +317,26 @@ Several subsystems are driven by cron hitting authenticated endpoints with a `Au
 |----------|-----------|-------------------|---------|
 | `POST /api/billing/usage-sync` | `USAGE_SYNC_CRON_TOKEN` | ~every 10 min | Poll OpenRouter spend, charge wallets, enforce caps ([BILLING.md](BILLING.md)). |
 | `POST /api/billing/daily` | `BILLING_CRON_TOKEN` | daily | Daily compute billing (accrues provider usage). |
+| `POST /api/audit-log/prune` | `AUDIT_RETENTION_CRON_TOKEN` | daily | Delete audit-log rows older than 7 days. |
 | `POST /api/admin/reconcile` | `RECONCILE_CRON_TOKEN` | daily | Orphan/state reconciliation; **also** runs provider health probes + budget/burn-rate sync so the router scores on fresh data ([PROVIDERS.md](PROVIDERS.md)). Allow ≥60s timeout. |
+| `POST /api/admin/backups/cron` | `BACKUP_CRON_TOKEN` | nightly | Full `pg_dump` of the database, streamed to Cloudflare R2, with retention pruning. Requires R2 creds configured in `/admin/backups` and a `postgresql-client` on the app host. Allow ≥120s timeout. |
 
 Each can also be triggered manually by an admin session from the admin panel. Wire them with any scheduler (system cron, a GitHub Actions schedule, or an external uptime/cron service).
+
+## Stripe go-live checklist
+
+Billing is fully implemented but disabled in dev (auto-grant). To take real payments in production, complete all of these — the server refuses to boot (`assertBillingConfig`) until the required pieces are in place:
+
+1. **Create products + prices** in the Stripe dashboard for each paid plan tier.
+2. **Set the `STRIPE_PRICE_*` IDs** in your env (12 of them, names match `src/configs/plans.ts`). *Currently informational only* — Checkout builds inline `price_data`, so these aren't required for payments to work yet, but set them for clean Stripe reporting/tax and future migration.
+3. **Register the webhook endpoint** `https://<your-domain>/api/webhooks/stripe` in the Stripe dashboard for the events the handler consumes: `checkout.session.completed`, `invoice.paid`, `invoice.payment_failed`, `invoice.voided`, `customer.subscription.updated/deleted`, `charge.refunded`, `charge.dispute.created/closed`. Paste the signing secret into `STRIPE_WEBHOOK_SECRET` (`whsec_…`).
+4. **Switch `STRIPE_SECRET_KEY` to a live key** (`sk_live_…`).
+5. **Enable + configure the Stripe Customer Portal** (Settings → Billing → Customer portal) — required by `/api/billing/portal`.
+6. **Set `NEXT_PUBLIC_APP_URL`** to your public `https://` domain (Checkout success/cancel redirects), and set the cron tokens `BILLING_CRON_TOKEN`, `RECONCILE_CRON_TOKEN`, `USAGE_SYNC_CRON_TOKEN`, `BACKUP_CRON_TOKEN`.
 
 ## What this does NOT cover
 
 - Multi-node / HA — this is a single-VPS deploy.
-- Stripe webhook setup — if you enable billing, configure webhook endpoint `https://sovereignml.example.com/api/stripe/webhook` in Stripe dashboard and paste the signing secret into `STRIPE_WEBHOOK_SECRET`.
+- Stripe webhook setup — see the [Stripe go-live checklist](#stripe-go-live-checklist) above; the webhook endpoint is `https://<your-domain>/api/webhooks/stripe`.
 - Email (Resend) — paste `RESEND_API_KEY` + `RESEND_FROM_EMAIL` if you want password-reset / magic-link flows.
 - Log shipping / metrics — run Grafana/Loki separately if you need it.

@@ -273,9 +273,6 @@ export default async function DashboardPage() {
                           </div>
                           <div className="flex items-center gap-4">
                             <div className="text-right text-sm">
-                              <p className="text-foreground">
-                                {instance.region.flag} {instance.region.name}
-                              </p>
                               <p className="font-mono text-xs text-muted-foreground">
                                 {instance.serverConfig.label} &middot; {instance.serverConfig.vcpu} vCPU &middot; {instance.serverConfig.ramGb} GB
                               </p>

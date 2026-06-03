@@ -16,7 +16,15 @@ export type ProviderDef = {
   name: string
   /** Env var that holds this provider's API token. Secrets never live in the DB. */
   credentialEnvKey: string
+  /** Higher wins routing. DO is primary today. */
   defaultPriority: number
+  /**
+   * Seed value for providers.enabled on FIRST insert only. Re-seed never
+   * clobbers this (admin overrides win) — flip enablement later via /admin/providers.
+   * Only DigitalOcean is active for now (it's the only provider we have credit on);
+   * the others stay seeded-but-disabled so they can be enabled without a redeploy.
+   */
+  enabled: boolean
   /** Seed values for provider_billing (USD). Internal-budget model. */
   budget: {
     monthlyCreditsUsd: number
@@ -27,25 +35,28 @@ export type ProviderDef = {
 
 export const PROVIDERS: readonly ProviderDef[] = [
   {
-    slug: "linode",
-    name: "Linode",
-    credentialEnvKey: "LINODE_API_TOKEN",
-    defaultPriority: 10,
-    budget: { monthlyCreditsUsd: 5000, softLimitUsd: 4000, hardLimitUsd: 5000 },
-  },
-  {
     slug: "digitalocean",
     name: "DigitalOcean",
     credentialEnvKey: "DIGITALOCEAN_API_TOKEN",
-    defaultPriority: 5,
+    defaultPriority: 100,
+    enabled: true,
     budget: { monthlyCreditsUsd: 3000, softLimitUsd: 2400, hardLimitUsd: 3000 },
   },
   {
     slug: "ovh",
     name: "OVHcloud",
     credentialEnvKey: "OVH_APP_KEY",
-    defaultPriority: 0,
+    defaultPriority: 80,
+    enabled: false,
     budget: { monthlyCreditsUsd: 2000, softLimitUsd: 1600, hardLimitUsd: 2000 },
+  },
+  {
+    slug: "linode",
+    name: "Linode",
+    credentialEnvKey: "LINODE_API_TOKEN",
+    defaultPriority: 20,
+    enabled: false,
+    budget: { monthlyCreditsUsd: 5000, softLimitUsd: 4000, hardLimitUsd: 5000 },
   },
 ] as const
 
@@ -61,11 +72,16 @@ export type ProviderPlanMapping = {
 // region-specific flavor id at create time. Linode/DO use the code verbatim.
 export const PROVIDER_PLAN_MAP: readonly ProviderPlanMapping[] = [
   // Shared CPU
+  // NOTE: DigitalOcean codes below are wired to the 4 plan tiers (free/builder/
+  // operator/scale → shared-1g/4g/8g/16g) using Regular SSD "Shared Basic" sizes
+  // available on the current DO account (size/droplet-capped). They intentionally
+  // run smaller than the serverConfig's advertised RAM; revisit after a DO limit
+  // increase. Prices are DO's actual monthly cost.
   {
-    serverConfigSlug: "shared-1g",
+    serverConfigSlug: "shared-1g", // plan: free
     codes: {
       linode: { code: "g6-nanode-1", monthlyCostUsd: 5 },
-      digitalocean: { code: "s-1vcpu-1gb", monthlyCostUsd: 6 },
+      digitalocean: { code: "s-1vcpu-2gb", monthlyCostUsd: 12 },
       ovh: { code: "d2-2", monthlyCostUsd: 11 },
     },
   },
@@ -78,26 +94,26 @@ export const PROVIDER_PLAN_MAP: readonly ProviderPlanMapping[] = [
     },
   },
   {
-    serverConfigSlug: "shared-4g",
+    serverConfigSlug: "shared-4g", // plan: builder
     codes: {
       linode: { code: "g6-standard-2", monthlyCostUsd: 24 },
-      digitalocean: { code: "s-2vcpu-4gb", monthlyCostUsd: 24 },
+      digitalocean: { code: "s-2vcpu-2gb", monthlyCostUsd: 18 },
       ovh: { code: "d2-4", monthlyCostUsd: 22 },
     },
   },
   {
-    serverConfigSlug: "shared-8g",
+    serverConfigSlug: "shared-8g", // plan: operator
     codes: {
       linode: { code: "g6-standard-4", monthlyCostUsd: 48 },
-      digitalocean: { code: "s-4vcpu-8gb", monthlyCostUsd: 48 },
+      digitalocean: { code: "s-2vcpu-4gb", monthlyCostUsd: 24 },
       ovh: { code: "d2-8", monthlyCostUsd: 44 },
     },
   },
   {
-    serverConfigSlug: "shared-16g",
+    serverConfigSlug: "shared-16g", // plan: scale
     codes: {
       linode: { code: "g6-standard-6", monthlyCostUsd: 96 },
-      digitalocean: { code: "s-8vcpu-16gb", monthlyCostUsd: 96 },
+      digitalocean: { code: "s-4vcpu-8gb", monthlyCostUsd: 48 },
       ovh: { code: "b2-15", monthlyCostUsd: 66 },
     },
   },

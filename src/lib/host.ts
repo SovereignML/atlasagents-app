@@ -50,7 +50,12 @@ export function normalizeCustomDomain(input: string): string | null {
   return host
 }
 
-/** The CNAME target customers point their custom domain at. */
+/**
+ * The CNAME target customers point their custom domain at. With Cloudflare for
+ * SaaS this must be the SaaS fallback-origin / custom-hostname target (set
+ * WHITELABEL_CNAME_TARGET to it), NOT the app host directly — Cloudflare's edge
+ * terminates TLS for the customer hostname and proxies to our origin.
+ */
 export function getCnameTarget(): string {
   const explicit = process.env.WHITELABEL_CNAME_TARGET
   if (explicit) return explicit

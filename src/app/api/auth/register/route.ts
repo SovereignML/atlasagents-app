@@ -3,6 +3,8 @@ import { db, users, eq } from "@/db"
 import { hashPassword } from "@/lib/password"
 import { registerSchema } from "@/lib/validations"
 import { rateLimit } from "@/lib/rate-limit"
+import { resolveTeamByHost } from "@/lib/tenant-branding"
+import { getTenantConfig, createChildTeam } from "@/lib/tenant"
 
 export async function POST(req: Request) {
   try {
@@ -37,11 +39,43 @@ export async function POST(req: Request) {
       )
     }
 
-    await db.insert(users).values({
-      name,
-      email,
-      hashedPassword: await hashPassword(password),
-    })
+    const [newUser] = await db
+      .insert(users)
+      .values({
+        name,
+        email,
+        hashedPassword: await hashPassword(password),
+      })
+      .returning({ id: users.id })
+
+    // Self-serve white-label signup: if this registration happened on a tenant's
+    // verified custom domain, attach the new account as a child team under that
+    // tenant. On the canonical host (or any non-tenant domain) this is a no-op —
+    // the user gets a personal team lazily on first login (getUserTeam).
+    try {
+      const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host")
+      const tenantTeamId = newUser ? await resolveTeamByHost(host) : null
+      // Only attach under a real reseller tenant (resolveTeamByHost returns the
+      // domain owner; confirm it actually runs a reseller tenant).
+      const cfg = tenantTeamId ? await getTenantConfig(tenantTeamId) : null
+      if (tenantTeamId && newUser && cfg) {
+        const child = await createChildTeam({
+          parentTeamId: tenantTeamId,
+          name: `${name}'s account`,
+          ownerUserId: newUser.id,
+          agentLimit: cfg?.defaultChildAgentLimit,
+          seatLimit: cfg?.defaultChildSeatLimit,
+        })
+        await db
+          .update(users)
+          .set({ activeTeamId: child.id })
+          .where(eq(users.id, newUser.id))
+      }
+    } catch (err) {
+      // Never fail registration over tenant attachment — log and continue; the
+      // account exists and can be re-attached by the tenant admin if needed.
+      console.error("[register] tenant attach failed:", err)
+    }
 
     return NextResponse.json(
       { message: "Account created successfully" },

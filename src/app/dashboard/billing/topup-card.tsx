@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useEffect, useRef, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, Plus, Zap } from "lucide-react"
 
@@ -28,8 +28,22 @@ const SELECTED_GLOW =
 
 export function TopUpCard({ stripeConfigured }: { stripeConfigured: boolean }) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [credits, setCredits] = useState<number>(2_000)
   const [loading, setLoading] = useState(false)
+  const confirmedTopup = useRef(false)
+
+  // On return from Stripe Checkout (?topup=success) confirm the payment. The
+  // webhook credits the wallet asynchronously, so refresh and let the user know
+  // the balance is on its way. Strip the param so it can't re-fire on refresh.
+  useEffect(() => {
+    if (confirmedTopup.current) return
+    if (searchParams.get("topup") !== "success") return
+    confirmedTopup.current = true
+    toast.success("Payment received — credits will appear in a few seconds.")
+    router.refresh()
+    router.replace("/dashboard/billing")
+  }, [searchParams, router])
 
   async function buyCredits() {
     setLoading(true)

@@ -1,49 +1,134 @@
 // Chatwoot integration — server-side helpers.
 //
-// Two responsibilities:
-//   1. `chatwootIdentifierHash` — HMAC used by the live-chat widget to
-//      verify the logged-in user (Chatwoot "identity validation").
-//   2. `createSupportConversation` — turns an in-app ticket into a
-//      contact + conversation in the Chatwoot inbox via the Application API.
+// Every helper takes a resolved `ChatwootConfig` so the SAME code serves two
+// cases:
+//   • the platform Chatwoot (env config) for normal customers, and
+//   • a white-label tenant's OWN Chatwoot (bring-your-own creds, stored
+//     encrypted on tenantConfig) for that tenant's end-customers.
+// Resolve which one applies with `resolveChatwootForTeam(teamId)`.
 //
-// Everything degrades gracefully: if the env vars below are unset the
-// helpers no-op (return null) so callers can fall back to email.
+// Everything degrades gracefully: with no usable config the helpers no-op
+// (return skipped/null/false/[]) so callers fall back to email.
 
 import { createHmac } from "node:crypto"
+import { decryptSecret } from "./crypto-secret"
+import { getTenantForTeam, getTenantConfig } from "./tenant"
 
-const baseUrl = process.env.NEXT_PUBLIC_CHATWOOT_BASE_URL?.replace(/\/$/, "")
-const apiToken = process.env.CHATWOOT_API_ACCESS_TOKEN
-const accountId = process.env.CHATWOOT_ACCOUNT_ID
-const inboxId = process.env.CHATWOOT_INBOX_ID
-const hmacToken = process.env.CHATWOOT_HMAC_TOKEN
+/** Everything needed to talk to one Chatwoot account/inbox via the API. */
+export type ChatwootConfig = {
+  baseUrl: string
+  apiToken: string
+  accountId: string
+  inboxId: string
+  hmacToken: string | null
+}
 
-/** True when the server has everything needed to create tickets via the API. */
-export function chatwootConfigured(): boolean {
-  return Boolean(baseUrl && apiToken && accountId && inboxId)
+/** Public config the live-chat widget needs (no secrets). */
+export type ChatwootWidgetConfig = { baseUrl: string; websiteToken: string }
+
+/** Platform-wide Chatwoot from env, or null if not fully configured. */
+export function platformChatwootConfig(): ChatwootConfig | null {
+  const baseUrl = process.env.NEXT_PUBLIC_CHATWOOT_BASE_URL?.replace(/\/$/, "")
+  const apiToken = process.env.CHATWOOT_API_ACCESS_TOKEN
+  const accountId = process.env.CHATWOOT_ACCOUNT_ID
+  const inboxId = process.env.CHATWOOT_INBOX_ID
+  if (!baseUrl || !apiToken || !accountId || !inboxId) return null
+  return {
+    baseUrl,
+    apiToken,
+    accountId,
+    inboxId,
+    hmacToken: process.env.CHATWOOT_HMAC_TOKEN || null,
+  }
+}
+
+function platformWidgetConfig(): ChatwootWidgetConfig | null {
+  const baseUrl = process.env.NEXT_PUBLIC_CHATWOOT_BASE_URL?.replace(/\/$/, "")
+  const websiteToken = process.env.NEXT_PUBLIC_CHATWOOT_WEBSITE_TOKEN
+  if (!baseUrl || !websiteToken) return null
+  return { baseUrl, websiteToken }
 }
 
 /**
- * HMAC-SHA256 of the user identifier, keyed by CHATWOOT_HMAC_TOKEN. The widget
- * passes this as `identifier_hash` so Chatwoot trusts the supplied identity.
+ * The Chatwoot a given team's tickets should use: the team's parent tenant's
+ * BYO Chatwoot when fully configured, otherwise the platform Chatwoot, otherwise
+ * null (caller falls back to email).
+ */
+export async function resolveChatwootForTeam(
+  teamId: string | null | undefined,
+): Promise<ChatwootConfig | null> {
+  if (teamId) {
+    const tenantId = await getTenantForTeam(teamId)
+    if (tenantId) {
+      const cfg = await getTenantConfig(tenantId)
+      if (
+        cfg?.chatwootBaseUrl &&
+        cfg.chatwootApiTokenEnc &&
+        cfg.chatwootAccountId &&
+        cfg.chatwootInboxId
+      ) {
+        return {
+          baseUrl: cfg.chatwootBaseUrl.replace(/\/$/, ""),
+          apiToken: decryptSecret(cfg.chatwootApiTokenEnc),
+          accountId: cfg.chatwootAccountId,
+          inboxId: cfg.chatwootInboxId,
+          hmacToken: cfg.chatwootHmacTokenEnc ? decryptSecret(cfg.chatwootHmacTokenEnc) : null,
+        }
+      }
+    }
+  }
+  return platformChatwootConfig()
+}
+
+/** Widget (public) config for a team: tenant's if set, else platform. */
+export async function resolveChatwootWidgetForTeam(
+  teamId: string | null | undefined,
+): Promise<ChatwootWidgetConfig | null> {
+  if (teamId) {
+    const tenantId = await getTenantForTeam(teamId)
+    if (tenantId) {
+      const cfg = await getTenantConfig(tenantId)
+      if (cfg?.chatwootBaseUrl && cfg.chatwootWebsiteToken) {
+        return {
+          baseUrl: cfg.chatwootBaseUrl.replace(/\/$/, ""),
+          websiteToken: cfg.chatwootWebsiteToken,
+        }
+      }
+    }
+  }
+  return platformWidgetConfig()
+}
+
+/** True when `cfg` is usable (non-null). */
+export function chatwootConfigured(cfg: ChatwootConfig | null): cfg is ChatwootConfig {
+  return Boolean(cfg)
+}
+
+/**
+ * HMAC-SHA256 of the user identifier, keyed by the config's HMAC token. The
+ * widget passes this as `identifier_hash` so Chatwoot trusts the identity.
  * Returns null when no HMAC token is configured (identity validation off).
  */
-export function chatwootIdentifierHash(identifier: string): string | null {
-  if (!hmacToken) return null
-  return createHmac("sha256", hmacToken).update(identifier).digest("hex")
+export function chatwootIdentifierHash(
+  cfg: ChatwootConfig | null,
+  identifier: string,
+): string | null {
+  if (!cfg?.hmacToken) return null
+  return createHmac("sha256", cfg.hmacToken).update(identifier).digest("hex")
 }
 
 type ContactInbox = { source_id: string; inbox?: { id: number } }
 type SearchContact = { id: number; email?: string | null; contact_inboxes?: ContactInbox[] }
 
-async function cwFetch(path: string, init: RequestInit): Promise<unknown> {
-  const res = await fetch(`${baseUrl}/api/v1/accounts/${accountId}${path}`, {
+async function cwFetch(cfg: ChatwootConfig, path: string, init: RequestInit): Promise<unknown> {
+  const res = await fetch(`${cfg.baseUrl}/api/v1/accounts/${cfg.accountId}${path}`, {
     ...init,
     // Fail fast: a slow/unreachable Chatwoot host must not hang the request
     // that's awaiting it (the in-app ticket POST). Aborts after 10s.
     signal: AbortSignal.timeout(10_000),
     headers: {
       "Content-Type": "application/json",
-      api_access_token: apiToken as string,
+      api_access_token: cfg.apiToken,
       ...(init.headers ?? {}),
     },
   })
@@ -70,23 +155,26 @@ export type CreateConversationResult =
  * `skipped` if unconfigured, or `failed` (with the reason) if any API call
  * errors — the caller falls back to email in the last two cases.
  */
-export async function createSupportConversation(args: {
-  userId: string
-  name: string
-  email: string
-  subject: string
-  message: string
-  priority: string
-}): Promise<CreateConversationResult> {
-  if (!chatwootConfigured()) return { status: "skipped" }
-  const inbox = Number(inboxId)
+export async function createSupportConversation(
+  cfg: ChatwootConfig | null,
+  args: {
+    userId: string
+    name: string
+    email: string
+    subject: string
+    message: string
+    priority: string
+  },
+): Promise<CreateConversationResult> {
+  if (!cfg) return { status: "skipped" }
+  const inbox = Number(cfg.inboxId)
 
   try {
     let contactId: number | null = null
     let sourceId: string | null = null
 
     // 1. Reuse an existing contact for this email if one exists.
-    const search = (await cwFetch(`/contacts/search?q=${encodeURIComponent(args.email)}`, {
+    const search = (await cwFetch(cfg, `/contacts/search?q=${encodeURIComponent(args.email)}`, {
       method: "GET",
     })) as { payload?: SearchContact[] }
     const existing = search.payload?.find(
@@ -99,7 +187,7 @@ export async function createSupportConversation(args: {
 
     // 2. Otherwise create the contact (bound to our inbox → yields a source_id).
     if (!contactId) {
-      const created = (await cwFetch(`/contacts`, {
+      const created = (await cwFetch(cfg, `/contacts`, {
         method: "POST",
         body: JSON.stringify({
           inbox_id: inbox,
@@ -119,7 +207,7 @@ export async function createSupportConversation(args: {
 
     // 3. Ensure a contact_inbox (source_id) exists for the target inbox.
     if (!sourceId) {
-      const ci = (await cwFetch(`/contacts/${contactId}/contact_inboxes`, {
+      const ci = (await cwFetch(cfg, `/contacts/${contactId}/contact_inboxes`, {
         method: "POST",
         body: JSON.stringify({ inbox_id: inbox }),
       })) as { source_id?: string; payload?: { source_id?: string } }
@@ -128,7 +216,7 @@ export async function createSupportConversation(args: {
     if (!sourceId) throw new Error("no source_id for inbox")
 
     // 4. Open the conversation.
-    const conversation = (await cwFetch(`/conversations`, {
+    const conversation = (await cwFetch(cfg, `/conversations`, {
       method: "POST",
       body: JSON.stringify({
         source_id: sourceId,
@@ -141,7 +229,7 @@ export async function createSupportConversation(args: {
     if (!conversationId) throw new Error("no conversation id returned")
 
     // 5. Post the ticket body as the first (incoming) message.
-    await cwFetch(`/conversations/${conversationId}/messages`, {
+    await cwFetch(cfg, `/conversations/${conversationId}/messages`, {
       method: "POST",
       body: JSON.stringify({
         content: `**${args.subject}**\n\n${args.message}`,
@@ -184,10 +272,13 @@ type CwMessage = {
  * display. Returns [] if unconfigured or on any error (the detail view still
  * renders the locally-stored ticket).
  */
-export async function getConversationMessages(conversationId: number): Promise<ChatMessage[]> {
-  if (!chatwootConfigured()) return []
+export async function getConversationMessages(
+  cfg: ChatwootConfig | null,
+  conversationId: number,
+): Promise<ChatMessage[]> {
+  if (!cfg) return []
   try {
-    const data = (await cwFetch(`/conversations/${conversationId}/messages`, {
+    const data = (await cwFetch(cfg, `/conversations/${conversationId}/messages`, {
       method: "GET",
     })) as { payload?: CwMessage[] }
     return (data.payload ?? [])
@@ -211,12 +302,13 @@ export async function getConversationMessages(conversationId: number): Promise<C
  * Returns true on success, false if unconfigured or the API call fails.
  */
 export async function postConversationReply(
+  cfg: ChatwootConfig | null,
   conversationId: number,
   content: string,
 ): Promise<boolean> {
-  if (!chatwootConfigured()) return false
+  if (!cfg) return false
   try {
-    await cwFetch(`/conversations/${conversationId}/messages`, {
+    await cwFetch(cfg, `/conversations/${conversationId}/messages`, {
       method: "POST",
       body: JSON.stringify({ content, message_type: "incoming" }),
     })
@@ -224,5 +316,137 @@ export async function postConversationReply(
   } catch (err) {
     console.error("[chatwoot] postConversationReply failed:", err)
     return false
+  }
+}
+
+/**
+ * Post a reply as the AGENT (outgoing) — used by the tenant support inbox where
+ * the tenant answers their own end-customers. Returns true on success.
+ */
+export async function postAgentReply(
+  cfg: ChatwootConfig | null,
+  conversationId: number,
+  content: string,
+): Promise<boolean> {
+  if (!cfg) return false
+  try {
+    await cwFetch(cfg, `/conversations/${conversationId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ content, message_type: "outgoing" }),
+    })
+    return true
+  } catch (err) {
+    console.error("[chatwoot] postAgentReply failed:", err)
+    return false
+  }
+}
+
+/** Live conversation state used to drive the in-app ticket status badge. */
+export type ConversationState = {
+  status: string // open | resolved | pending | snoozed
+  assigneeName: string | null
+}
+
+type CwConversation = {
+  status?: string | null
+  meta?: { assignee?: { name?: string | null } | null } | null
+}
+
+/**
+ * Read a conversation's status and assigned agent so the customer can see
+ * whether their ticket is being handled. Returns null if unconfigured or on
+ * any error (the detail view then keeps the locally-stored status).
+ */
+export async function getConversation(
+  cfg: ChatwootConfig | null,
+  conversationId: number,
+): Promise<ConversationState | null> {
+  if (!cfg) return null
+  try {
+    const data = (await cwFetch(cfg, `/conversations/${conversationId}`, {
+      method: "GET",
+    })) as CwConversation
+    return {
+      status: typeof data.status === "string" ? data.status : "open",
+      assigneeName: data.meta?.assignee?.name ?? null,
+    }
+  } catch (err) {
+    console.error("[chatwoot] getConversation failed:", err)
+    return null
+  }
+}
+
+/**
+ * Resolve or reopen the conversation so admins see the customer's action in
+ * Chatwoot. Returns true on success, false if unconfigured or the call fails.
+ */
+export async function setConversationStatus(
+  cfg: ChatwootConfig | null,
+  conversationId: number,
+  status: "resolved" | "open",
+): Promise<boolean> {
+  if (!cfg) return false
+  try {
+    await cwFetch(cfg, `/conversations/${conversationId}/toggle_status`, {
+      method: "POST",
+      body: JSON.stringify({ status }),
+    })
+    return true
+  } catch (err) {
+    console.error("[chatwoot] setConversationStatus failed:", err)
+    return false
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Tenant support inbox — list conversations for the agent-facing view.
+// ──────────────────────────────────────────────────────────────────────
+
+export type ChatConversation = {
+  id: number
+  status: string
+  contactName: string | null
+  subject: string | null
+  updatedAt: number
+}
+
+type CwListConversation = {
+  id: number
+  status?: string | null
+  additional_attributes?: { subject?: string | null } | null
+  meta?: { sender?: { name?: string | null } | null } | null
+  timestamp?: number | null
+  last_activity_at?: number | null
+}
+
+/**
+ * List conversations in the config's inbox (newest activity first), for the
+ * tenant support inbox. Returns [] if unconfigured or on error.
+ */
+export async function listConversations(
+  cfg: ChatwootConfig | null,
+  opts?: { status?: "open" | "resolved" | "pending" | "all" },
+): Promise<ChatConversation[]> {
+  if (!cfg) return []
+  const status = opts?.status ?? "open"
+  try {
+    const data = (await cwFetch(
+      cfg,
+      `/conversations?inbox_id=${encodeURIComponent(cfg.inboxId)}&status=${status}`,
+      { method: "GET" },
+    )) as { data?: { payload?: CwListConversation[] }; payload?: CwListConversation[] }
+    const payload = data.data?.payload ?? data.payload ?? []
+    return payload
+      .map<ChatConversation>((c) => ({
+        id: c.id,
+        status: typeof c.status === "string" ? c.status : "open",
+        contactName: c.meta?.sender?.name ?? null,
+        subject: c.additional_attributes?.subject ?? null,
+        updatedAt: c.last_activity_at ?? c.timestamp ?? 0,
+      }))
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+  } catch (err) {
+    console.error("[chatwoot] listConversations failed:", err)
+    return []
   }
 }

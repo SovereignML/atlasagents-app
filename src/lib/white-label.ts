@@ -1,43 +1,31 @@
-// White-label entitlement. The feature is gated on the team OWNER having an
-// active scale/enterprise subscription. The check is intentionally cheap and
-// called live on every branding read / domain action, so a downgrade reverts
-// the look (and stops cert renewal) immediately without deleting stored config.
+// White-label entitlement. The feature is gated on a single admin-controlled
+// flag, `Team.whiteLabelEnabled`, which is the SOLE source of truth. A platform
+// admin flips it from /admin/teams (see src/app/api/admin/teams). Subscription
+// tier no longer auto-grants — the migration that introduced the flag backfilled
+// it for teams that held an active enterprise subscription at the time. The check
+// is intentionally cheap and called live on every branding read / domain action,
+// so revoking the flag reverts the look (and stops cert renewal) immediately
+// without deleting stored config.
 
-import { db, teams, subscriptions, eq, and, inArray } from "@/db"
+import { db, teams, eq } from "@/db"
 
-/** Plan tiers that unlock white-label. Single source of truth. */
-export const WHITE_LABEL_TIERS = ["scale", "enterprise"] as const
+/** Plan tiers historically associated with white-label. Kept for pricing copy
+ *  and the one-time backfill; no longer used to gate access at runtime. */
+export const WHITE_LABEL_TIERS = ["enterprise"] as const
 
-// Subscription.status values that count as "live". `stripe-events.ts` writes
-// "active"/"past_due"/"canceled" plus, on update, the raw Stripe status (which
-// can be "trialing"). We treat active + trialing as entitled.
-const ACTIVE_STATUSES = ["active", "trialing"] as const
-
-/** Whether a plan tier string unlocks white-label. */
+/** Whether a plan tier string is the white-label tier (pricing copy only). */
 export function tierHasWhiteLabel(tier: string | null | undefined): boolean {
-  return tier === "scale" || tier === "enterprise"
+  return tier === "enterprise"
 }
 
 /**
- * True when the team's owner has at least one active (or trialing) subscription
- * on a scale/enterprise plan. Robust to a user holding several subscriptions
- * (e.g. one per instance) — any qualifying one unlocks the team.
+ * True when an admin has enabled white-label for the team. Single source of
+ * truth — see `Team.whiteLabelEnabled` and the /admin/teams toggle.
  */
 export async function teamHasWhiteLabel(teamId: string): Promise<boolean> {
   const team = await db.query.teams.findFirst({
     where: eq(teams.id, teamId),
-    columns: { ownerId: true },
+    columns: { whiteLabelEnabled: true },
   })
-  if (!team) return false
-
-  const subs = await db.query.subscriptions.findMany({
-    where: and(
-      eq(subscriptions.userId, team.ownerId),
-      inArray(subscriptions.status, [...ACTIVE_STATUSES]),
-    ),
-    columns: {},
-    with: { plan: { columns: { tier: true } } },
-  })
-
-  return subs.some((s) => tierHasWhiteLabel(s.plan?.tier))
+  return team?.whiteLabelEnabled ?? false
 }

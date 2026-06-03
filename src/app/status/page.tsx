@@ -11,17 +11,8 @@ const SERVICES = [
   { name: "Auth (NextAuth)", status: "operational", uptime: 99.99 },
 ]
 
-const REGIONS = [
-  { name: "us-east", flag: "\u{1F1FA}\u{1F1F8}", uptime: 99.99 },
-  { name: "us-west", flag: "\u{1F1FA}\u{1F1F8}", uptime: 99.98 },
-  { name: "eu-central", flag: "\u{1F1E9}\u{1F1EA}", uptime: 99.99 },
-  { name: "eu-west", flag: "\u{1F1EE}\u{1F1EA}", uptime: 99.97 },
-  { name: "ap-south", flag: "\u{1F1F8}\u{1F1EC}", uptime: 99.95 },
-  { name: "ap-northeast", flag: "\u{1F1EF}\u{1F1F5}", uptime: 99.96 },
-]
-
 const INCIDENTS = [
-  { date: "2026-03-28", title: "Brief gateway latency spike (us-east)", status: "resolved", duration: "12 min" },
+  { date: "2026-03-28", title: "Brief gateway latency spike", status: "resolved", duration: "12 min" },
   { date: "2026-03-14", title: "Scheduled Stripe webhook maintenance", status: "resolved", duration: "30 min" },
 ]
 
@@ -63,7 +54,7 @@ export default function StatusPage() {
                 {allOk ? "All systems operational" : "Incident in progress"}
               </h1>
               <p className="text-sm text-[var(--text-secondary)] mt-1">
-                Live from Uptime Kuma probes across 6 regions, every 60 seconds.
+                Live from Uptime Kuma probes, every 60 seconds.
               </p>
             </div>
           </Reveal>
@@ -95,24 +86,6 @@ export default function StatusPage() {
                       {s.uptime.toFixed(2)}%
                     </span>
                   </div>
-                </RevealItem>
-              ))}
-            </RevealGroup>
-          </section>
-
-          <section>
-            <h2 className="text-xs font-mono text-[var(--text-secondary)] mb-3">
-              Regions (30-day uptime)
-            </h2>
-            <RevealGroup className="grid grid-cols-2 md:grid-cols-3 gap-0 rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] overflow-hidden">
-              {REGIONS.map((r) => (
-                <RevealItem
-                  key={r.name}
-                  className="p-4 border-r border-b border-[var(--border-color)] last:border-r-0 transition-colors hover:bg-[var(--card-hover)]"
-                >
-                  <p className="text-xl">{r.flag}</p>
-                  <p className="font-mono text-sm mt-1">{r.name}</p>
-                  <p className="font-mono text-xs text-primary mt-1 tabular-nums">{r.uptime.toFixed(2)}%</p>
                 </RevealItem>
               ))}
             </RevealGroup>

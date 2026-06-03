@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { db, cloudflareConnections, instances, eq, and, isNotNull, isNull } from "@/db"
+import { requireTeamManage } from "@/lib/team"
 import { logAuditEvent } from "@/lib/audit"
 
 /**
@@ -17,18 +18,27 @@ export async function POST() {
   }
   const userId = session.user.id
 
+  // Shared team connection — only owners/admins may disconnect it.
+  const team = await requireTeamManage(userId)
+  if (!team) {
+    return NextResponse.json(
+      { error: "Only team owners and admins can disconnect an integration" },
+      { status: 403 },
+    )
+  }
+
   const conn = await db.query.cloudflareConnections.findFirst({
-    where: eq(cloudflareConnections.userId, userId),
+    where: eq(cloudflareConnections.teamId, team.teamId),
   })
   if (!conn) {
     return NextResponse.json({ success: true, orphaned: [] })
   }
 
-  // Instances still bound to a record in the user's zone — these become
+  // Instances still bound to a record in the team's zone — these become
   // orphaned (the record stays in Cloudflare) once the token is gone.
   const bound = await db.query.instances.findMany({
     where: and(
-      eq(instances.userId, userId),
+      eq(instances.teamId, team.teamId),
       isNotNull(instances.cfUserRecordId),
       isNull(instances.deletedAt),
     ),
@@ -36,10 +46,11 @@ export async function POST() {
   })
   const orphaned = bound.map((i) => i.domain).filter((d): d is string => Boolean(d))
 
-  await db.delete(cloudflareConnections).where(eq(cloudflareConnections.userId, userId))
+  await db.delete(cloudflareConnections).where(eq(cloudflareConnections.teamId, team.teamId))
 
   await logAuditEvent({
     userId,
+    teamId: team.teamId,
     action: "cloudflare.disconnect",
     targetType: "cloudflare_connection",
     meta: { orphanedCount: orphaned.length },

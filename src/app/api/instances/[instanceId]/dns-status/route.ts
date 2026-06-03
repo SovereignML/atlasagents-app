@@ -24,9 +24,7 @@ export async function GET(
   if (!instance) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 })
   }
-  if (!isAdmin && instance.userId !== session.user.id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
+  // Read-only — whereUserInstanceVisible already enforces visibility (Viewer+).
   if (instance.status === "deleted") {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 })
   }

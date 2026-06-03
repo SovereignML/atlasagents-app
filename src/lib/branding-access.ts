@@ -1,6 +1,6 @@
 // Shared access guard for white-label branding routes. Requires an
 // authenticated owner/admin of a team that is currently entitled (active
-// scale/enterprise subscription). Also resolves the team owner's id, which
+// enterprise subscription). Also resolves the team owner's id, which
 // keys domain-ownership verification (so the row is stable regardless of which
 // admin initiates it).
 

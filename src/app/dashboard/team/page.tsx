@@ -1,32 +1,54 @@
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
-import { db, eq, and, isNull, memberships, teamInvites, teams, users } from "@/db"
-import { getUserTeam, listUserTeams, type TeamRole } from "@/lib/team"
-import { TeamClient } from "./team-client"
+import {
+  db,
+  eq,
+  and,
+  desc,
+  isNull,
+  inArray,
+  memberships,
+  teamInvites,
+  teams,
+  subscriptions,
+  driveConnections,
+  cloudflareConnections,
+  sshKeys,
+  backupRecords,
+  teamBranding,
+} from "@/db"
+import { getUserTeam, listUserTeams, canManageTeam, type TeamRole } from "@/lib/team"
+import { teamHasWhiteLabel } from "@/lib/white-label"
+import { isDriveConfigured } from "@/lib/google-drive"
+import { PageContainer, PageHeader } from "@/components/layout/page-container"
+import { TeamTabs } from "./team-tabs"
+import type { BrandingState } from "../settings/branding/branding-client"
 
 export const dynamic = "force-dynamic"
 
-export default async function TeamPage() {
+export default async function TeamPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>
+}) {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
   const userId = session.user.id
+  const { tab } = await searchParams
 
   const ctx = await getUserTeam(userId)
   if (!ctx) redirect("/dashboard")
   const activeTeamId = ctx.teamId
-
-  const team = await db.query.teams.findFirst({
-    where: eq(teams.id, activeTeamId),
-  })
-  if (!team) redirect("/dashboard")
-
   const myRole: TeamRole = ctx.role
+  const canManage = canManageTeam(myRole)
+
+  const team = await db.query.teams.findFirst({ where: eq(teams.id, activeTeamId) })
+  if (!team) redirect("/dashboard")
 
   const memberRows = await db.query.memberships.findMany({
     where: eq(memberships.teamId, team.id),
     with: { user: { columns: { id: true, name: true, email: true } } },
   })
-
   const invites = await db.query.teamInvites.findMany({
     where: and(
       eq(teamInvites.teamId, team.id),
@@ -49,21 +71,100 @@ export default async function TeamPage() {
 
   const allTeams = await listUserTeams(userId)
 
-  void users
+  // ── Plan label (highest active/trialing tier on the team owner) ───────
+  const ownerSubs = await db.query.subscriptions.findMany({
+    where: and(
+      eq(subscriptions.userId, team.ownerId),
+      inArray(subscriptions.status, ["active", "trialing"]),
+    ),
+    columns: {},
+    with: { plan: { columns: { name: true, sortOrder: true } } },
+  })
+  const planLabel =
+    ownerSubs
+      .map((s) => s.plan)
+      .filter((p): p is NonNullable<typeof p> => Boolean(p))
+      .sort((a, b) => b.sortOrder - a.sortOrder)[0]?.name ?? "Free"
+
+  // ── Team-shared providers (all keyed by the active team) ──────────────
+  const driveConn = await db.query.driveConnections.findFirst({
+    where: eq(driveConnections.teamId, activeTeamId),
+  })
+  const cloudflareConn = await db.query.cloudflareConnections.findFirst({
+    where: eq(cloudflareConnections.teamId, activeTeamId),
+  })
+  const keyRows = await db.query.sshKeys.findMany({
+    where: eq(sshKeys.teamId, activeTeamId),
+    orderBy: desc(sshKeys.createdAt),
+  })
+  const backupRows = await db.query.backupRecords.findMany({
+    where: eq(backupRecords.teamId, activeTeamId),
+    orderBy: desc(backupRecords.createdAt),
+    limit: 25,
+  })
+
+  // ── Branding tab (only for white-label-entitled owners/admins) ────────
+  let branding: BrandingState | null = null
+  if (canManage && (await teamHasWhiteLabel(activeTeamId))) {
+    const row = await db.query.teamBranding.findFirst({
+      where: eq(teamBranding.teamId, activeTeamId),
+    })
+    branding = {
+      brandName: row?.brandName ?? "",
+      supportEmail: row?.supportEmail ?? "",
+      logoUrl: row?.logoUrl ?? "",
+      logoMarkUrl: row?.logoMarkUrl ?? "",
+      faviconUrl: row?.faviconUrl ?? "",
+      primaryLight: row?.primaryLight ?? "",
+      accentLight: row?.accentLight ?? "",
+      primaryDark: row?.primaryDark ?? "",
+      accentDark: row?.accentDark ?? "",
+      brandingEnabled: row?.brandingEnabled ?? true,
+    }
+  }
 
   return (
-    <TeamClient
-      team={{ id: team.id, name: team.name, seatLimit: team.seatLimit }}
-      myRole={myRole}
-      members={members}
-      invites={invites.map((i) => ({
-        id: i.id,
-        email: i.email,
-        role: i.role as TeamRole,
-        expiresAt: i.expiresAt.toISOString(),
-      }))}
-      allTeams={allTeams.map((t) => ({ teamId: t.teamId, name: t.name, role: t.role }))}
-      activeTeamId={activeTeamId}
-    />
+    <PageContainer>
+      <PageHeader title="Team" description={team.name} />
+      <TeamTabs
+        active={tab || "members"}
+        canManage={canManage}
+        team={{ id: team.id, name: team.name, seatLimit: team.seatLimit, planLabel }}
+        myRole={myRole}
+        members={members}
+        invites={invites.map((i) => ({
+          id: i.id,
+          email: i.email,
+          role: i.role as TeamRole,
+          expiresAt: i.expiresAt.toISOString(),
+        }))}
+        allTeams={allTeams.map((t) => ({ teamId: t.teamId, name: t.name, role: t.role }))}
+        activeTeamId={activeTeamId}
+        drive={{
+          configured: isDriveConfigured(),
+          connected: Boolean(driveConn),
+          email: driveConn?.googleEmail ?? null,
+        }}
+        backups={backupRows.map((b) => ({
+          id: b.id,
+          fileName: b.fileName,
+          agentName: b.agentName,
+          sizeBytes: b.sizeBytes,
+          createdAt: b.createdAt.toISOString(),
+        }))}
+        cloudflare={{
+          connected: Boolean(cloudflareConn),
+          accountName: cloudflareConn?.accountName ?? null,
+          email: cloudflareConn?.email ?? null,
+        }}
+        sshKeys={keyRows.map((k) => ({
+          id: k.id,
+          name: k.name,
+          fingerprint: k.fingerprint,
+          createdAt: k.createdAt.toISOString(),
+        }))}
+        branding={branding}
+      />
+    </PageContainer>
   )
 }

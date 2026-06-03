@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { db, instances, eq } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
+import { canOperateInstance } from "@/lib/instance-access"
 import { decryptSecret } from "@/lib/crypto-secret"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
 
@@ -22,7 +23,8 @@ export async function GET(
   if (!instance) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 })
   }
-  if (!isAdmin && instance.userId !== session.user.id) {
+  // Admin login credentials are secrets — Operator+ on the agent.
+  if (!isAdmin && !(await canOperateInstance(session.user.id, instance.id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
   if (instance.status === "deleted") {

@@ -78,20 +78,18 @@ export interface VpsProvider extends VmProvider {
 }
 
 /**
- * Legacy env-driven factory (`VM_PROVIDER`, default "linode"). Retained for the
- * shared-cluster / non-routed paths. The VPS path uses the router + the
- * slug/id factories in src/lib/providers.
+ * Legacy env-driven factory (`VM_PROVIDER`, default "digitalocean"). Retained for
+ * the shared-cluster / non-routed paths. The VPS path uses the router + the
+ * slug/id factories in src/lib/providers. Delegates to the slug factory so every
+ * supported provider (linode / digitalocean / ovh) works here too.
+ *
+ * Dynamic import avoids a module-load cycle (providers/index → adapters →
+ * vm-provider).
  */
 export async function getVmProvider(): Promise<VmProvider> {
-  const provider = process.env.VM_PROVIDER ?? "linode"
-  switch (provider) {
-    case "linode": {
-      const { LinodeProvider } = await import("@/lib/linode")
-      return new LinodeProvider()
-    }
-    default:
-      throw new Error(`Unknown VM_PROVIDER: ${provider}`)
-  }
+  const slug = process.env.VM_PROVIDER ?? "digitalocean"
+  const { instantiateProvider } = await import("@/lib/providers")
+  return instantiateProvider(slug)
 }
 
 export async function describeVmError(err: unknown): Promise<string> {

@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { db, instances, backupRecords, eq, and } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
+import { canOperateInstance } from "@/lib/instance-access"
 import { logAuditEvent } from "@/lib/audit"
 import { driveErrorResponse } from "@/lib/drive-errors"
-import { getDriveAccessTokenForUser, deleteBackup } from "@/lib/google-drive"
+import { getDriveAccessTokenForTeam, deleteBackup } from "@/lib/google-drive"
 
 /**
  * DELETE /api/instances/[instanceId]/backups/[backupId]
@@ -31,7 +32,8 @@ export async function DELETE(
   if (!instance) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 })
   }
-  if (!isAdmin && instance.userId !== session.user.id) {
+  // Deleting a backup is an operation — requires Operator+ on this agent.
+  if (!isAdmin && !(await canOperateInstance(session.user.id, instance.id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
@@ -43,7 +45,7 @@ export async function DELETE(
   }
 
   try {
-    const accessToken = await getDriveAccessTokenForUser(instance.userId)
+    const accessToken = await getDriveAccessTokenForTeam(instance.teamId)
     await deleteBackup(accessToken, record.driveFileId)
   } catch (err) {
     const mapped = driveErrorResponse(err)
@@ -56,6 +58,7 @@ export async function DELETE(
 
   await logAuditEvent({
     userId: session.user.id,
+    teamId: instance.teamId,
     action: "instance.backup.delete",
     targetType: "instance",
     targetId: instance.id,

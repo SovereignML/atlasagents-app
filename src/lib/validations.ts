@@ -38,6 +38,22 @@ export const supportReplySchema = z.object({
   content: z.string().min(1, "Reply can't be empty").max(5000),
 })
 
+// Customers may only resolve or reopen their own ticket; admins drive the
+// in_progress/pending states from Chatwoot.
+export const supportStatusSchema = z.object({
+  status: z.enum(["resolved", "open"]),
+})
+
+export const deletionRequestSchema = z.object({
+  reason: z.string().max(1000).optional(),
+})
+
+export const deletionDecisionSchema = z.object({
+  id: z.string().min(1),
+  action: z.enum(["approve", "deny"]),
+  note: z.string().max(1000).optional(),
+})
+
 export const providerUpdateSchema = z
   .object({
     enabled: z.boolean().optional(),
@@ -63,3 +79,5 @@ export type RegisterInput = z.infer<typeof registerSchema>
 export type DeployInput = z.infer<typeof deploySchema>
 export type SupportTicketInput = z.infer<typeof supportTicketSchema>
 export type SupportReplyInput = z.infer<typeof supportReplySchema>
+export type DeletionRequestInput = z.infer<typeof deletionRequestSchema>
+export type DeletionDecisionInput = z.infer<typeof deletionDecisionSchema>

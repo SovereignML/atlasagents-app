@@ -59,7 +59,9 @@ That script is idempotent and does everything the old runbook did by hand:
 - `DB_SEED=1 bash scripts/bootstrap-pg.sh` also runs the seed.
 
 Add any other secrets you need (`NEXTAUTH_URL`, `STRIPE_*`, `RESEND_*`,
-...) to `.env` after the script finishes.
+...) to `.env` after the script finishes. For real payments, follow the
+Stripe go-live checklist in `docs/DEPLOYMENT.md` — in production the app
+won't boot without valid Stripe keys, webhook secret, and cron tokens.
 
 ## 4. Build
 
@@ -107,7 +109,7 @@ pm2 restart redesigned-giggle       # or: sudo systemctl restart redesigned-gigg
 Point nginx / Cloudflare Tunnel at `127.0.0.1:3000`. Standard Next.js
 reverse-proxy setup — no special headers required beyond `X-Forwarded-*`.
 
-For **per-team white-label custom dashboard domains**, the public listener must be **Caddy** (on-demand TLS) instead of nginx/Tunnel — see §10.
+**Per-team white-label custom dashboard domains** are served via **Cloudflare for SaaS** (the edge terminates TLS and proxies to your origin), so they no longer require Caddy as the public listener — see §10.
 
 ## 8. Cloudflare (managed agent hostnames / VPS edge)
 
@@ -135,25 +137,24 @@ Backups contain agent **settings only** (config, persona, skills, model tier, in
 
 ## 10. Custom dashboard domains (per-team white-label)
 
-Teams on **Scale/Enterprise** can serve the dashboard on their own domain (e.g. `app.agency.com`). This needs Caddy as the public **`:443`** listener in front of the Next app, because TLS for arbitrary customer domains is issued **on demand**.
+Teams on **Enterprise** can serve the dashboard on their own domain (e.g. `app.agency.com`). TLS for these third-party domains is handled by **Cloudflare for SaaS (Custom Hostnames)** — Cloudflare's edge terminates TLS and proxies to your origin. No Caddy on-demand TLS, no per-domain cert issuance in the app.
 
-> A Cloudflare Tunnel **cannot** terminate TLS for third-party customer domains (it can't fetch Let's Encrypt certs for domains it doesn't control). So for white-label domains, Caddy — not a tunnel — must be the public listener. The app must bind to **`127.0.0.1:3000`** (loopback).
+**Platform setup (one-time):**
 
-**Setup:**
+1. Enable **Cloudflare for SaaS** on a zone in your platform Cloudflare account and configure a **fallback origin** pointing at the app server (set **`WHITELABEL_FALLBACK_ORIGIN`**).
+2. Set env:
+   - **`CLOUDFLARE_API_TOKEN`** — token with **SSL and Certificates: Edit** (plus the existing DNS scopes) on that zone.
+   - **`CLOUDFLARE_SAAS_ZONE_ID`** — the SaaS-enabled zone id (falls back to `CLOUDFLARE_ZONE_ID` if unset).
+   - **`WHITELABEL_CNAME_TARGET`** — the CNAME target customers point their domain at (the SaaS custom-hostname target).
+3. The app registers/polls/deletes custom hostnames via `src/lib/cloudflare-saas.ts`. The canonical dashboard host can stay behind Caddy (`deploy/Caddyfile`) or any proxy.
 
-1. Install Caddy on the app host and use **`deploy/Caddyfile`**:
-   - set the ACME **`email`** and replace **`app.example.com`** with your canonical dashboard host;
-   - the catch-all `https://` block issues per-domain certs on demand.
-2. The on-demand `ask` points at **`/api/internal/tls-authorize`** — Caddy calls it over loopback before issuing each cert; it returns `200` only when the SNI is a **verified** custom domain on a **currently-entitled** team. The Caddyfile also `respond 403`s `/api/internal/*` from the public site blocks so the endpoint isn't externally probeable. Optionally set **`TLS_AUTHORIZE_SECRET`** (an extra shared-secret header) if you front the ask with your own proxy.
-3. Tell customers to point their domain at you with a **CNAME** to the value shown in the branding settings UI (defaults to your canonical host; override with **`WHITELABEL_CNAME_TARGET`**).
+**Per-team flow** (in `/dashboard/settings/branding`): connect domain → the app registers a Cloudflare custom hostname → add the **CNAME** to `WHITELABEL_CNAME_TARGET` → Cloudflare completes DV and issues the cert. The status route polls Cloudflare and flips DNS/TLS/verified badges; the domain only resolves once Cloudflare reports the cert **active**.
 
-**Per-team flow** (in `/dashboard/settings/branding`): connect domain → publish the **`_sovereignml-verify.<domain>`** TXT record → **Verify** (proves ownership) → add the **CNAME** → first HTTPS hit triggers on-demand cert issuance. DNS/TLS status badges poll automatically.
+> **Migration:** before retiring the old Caddy on-demand-TLS catch-all, run **`npm run whitelabel:backfill-hostnames`** to register a Cloudflare custom hostname for every already-verified domain — otherwise live tenant domains lose TLS.
 
 **OAuth on custom domains:** provider redirect URIs can't be pre-registered for arbitrary domains, so the login page on a custom host shows **email/password only** — OAuth (Google/Twitter/Apple) stays on the canonical domain. Register OAuth redirect URIs only for the canonical host.
 
-**Downgrade:** entitlement is re-checked live on every branding read and every cert `ask`, so a team that drops below Scale/Enterprise reverts to the default look and stops getting fresh certs — its stored config is kept (re-upgrading restores it).
-
-**Alternative:** Cloudflare for SaaS (custom hostnames) can offload TLS to Cloudflare's edge instead of Caddy on-demand; reuse `src/lib/cloudflare.ts`'s fetch wrapper against the `/custom_hostnames` API. The Caddy path is the default here (no extra Cloudflare product, self-hosted-friendly).
+**Downgrade:** entitlement is re-checked live on every branding read, so a team that drops below Enterprise reverts to the default look — its stored config is kept (re-upgrading restores it).
 
 ## When instance (VPS) provisioning fails
 
