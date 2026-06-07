@@ -4,9 +4,11 @@ import {
   db,
   eq,
   and,
+  ne,
   desc,
   isNull,
   inArray,
+  instances,
   memberships,
   teamInvites,
   teams,
@@ -70,6 +72,28 @@ export default async function TeamPage({
     })
 
   const allTeams = await listUserTeams(userId)
+
+  // ── Danger Zone gating (owner-only) ───────────────────────────────────
+  // Surfaces why a delete is (dis)allowed; the actual guards re-run in deleteTeam.
+  let danger: { liveAgents: number; childOrgs: number; ownedTeams: number } | null = null
+  if (myRole === "owner") {
+    const [liveAgentRows, childRows, ownedRows] = await Promise.all([
+      db.query.instances.findMany({
+        where: and(eq(instances.teamId, activeTeamId), ne(instances.status, "deleted")),
+        columns: { id: true },
+      }),
+      db.query.teams.findMany({
+        where: eq(teams.parentTeamId, activeTeamId),
+        columns: { id: true },
+      }),
+      db.query.teams.findMany({ where: eq(teams.ownerId, userId), columns: { id: true } }),
+    ])
+    danger = {
+      liveAgents: liveAgentRows.length,
+      childOrgs: childRows.length,
+      ownedTeams: ownedRows.length,
+    }
+  }
 
   // ── Plan label (highest active/trialing tier on the team owner) ───────
   const ownerSubs = await db.query.subscriptions.findMany({
@@ -164,6 +188,7 @@ export default async function TeamPage({
           createdAt: k.createdAt.toISOString(),
         }))}
         branding={branding}
+        danger={danger}
       />
     </PageContainer>
   )

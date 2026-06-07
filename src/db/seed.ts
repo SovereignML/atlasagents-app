@@ -36,6 +36,9 @@ async function main() {
       name: "Admin",
       hashedPassword: hashSync(adminPassword, 10),
       role: "admin",
+      // Pre-verified so the seeded admin never sees the verify-email banner.
+      // (Existing DBs: UPDATE "User" SET "emailVerified" = now() WHERE email = ...)
+      emailVerified: new Date(),
     })
     .onConflictDoNothing({ target: users.email })
 

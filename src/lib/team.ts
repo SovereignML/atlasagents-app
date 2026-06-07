@@ -1,4 +1,18 @@
-import { db, teams, memberships, users, eq, and, sql } from "@/db"
+import {
+  db,
+  teams,
+  memberships,
+  users,
+  instances,
+  subscriptions,
+  auditLogs,
+  eq,
+  and,
+  ne,
+  or,
+  inArray,
+  sql,
+} from "@/db"
 import { createId } from "@paralleldrive/cuid2"
 
 export const ROLES = ["owner", "admin", "developer", "viewer"] as const
@@ -84,6 +98,75 @@ export async function createTeam(
       .values({ teamId: team.id, userId, role: "owner" })
       .onConflictDoNothing()
     return team
+  })
+}
+
+/**
+ * Permanently deletes a team that is safe to remove. Owner-only and guarded so
+ * we never orphan live infrastructure or customer orgs. Throws a typed
+ * `Error(<code>)` the route maps to an HTTP status:
+ *   NOT_FOUND | FORBIDDEN | LAST_TEAM | HAS_AGENTS | HAS_CHILDREN
+ *
+ * All guards run inside the transaction (behind the same per-user `FOR UPDATE`
+ * lock `createTeam` uses) so a concurrent deploy / invite-accept can't race past
+ * them. Most related rows FK-cascade on the `teams` delete; the two that don't
+ * (`subscriptions.teamId` and `auditLogs.teamId`) are cleaned up here so nothing
+ * dangles. Returns the deleted team's name for audit logging.
+ */
+export async function deleteTeam(userId: string, teamId: string): Promise<string> {
+  return await db.transaction(async (tx) => {
+    // Serialize against this user's concurrent create/delete (same lock as createTeam).
+    await tx.execute(sql`SELECT 1 FROM "User" WHERE id = ${userId} FOR UPDATE`)
+
+    const team = await tx.query.teams.findFirst({ where: eq(teams.id, teamId) })
+    if (!team) throw new Error("NOT_FOUND")
+    // Owner-only — stronger than canManageTeam (a team admin cannot delete).
+    if (team.ownerId !== userId) throw new Error("FORBIDDEN")
+
+    // Keep at least one owned team so the user always has a workspace (and we
+    // avoid getUserTeam lazily recreating a personal team).
+    const owned = await tx.query.teams.findMany({
+      where: eq(teams.ownerId, userId),
+      columns: { id: true },
+    })
+    if (owned.length <= 1) throw new Error("LAST_TEAM")
+
+    // Block on any non-deleted agent — guarantees there's no live droplet to
+    // tear down. Fully-deleted instance rows are fine (they cascade).
+    const liveAgent = await tx.query.instances.findFirst({
+      where: and(eq(instances.teamId, teamId), ne(instances.status, "deleted")),
+      columns: { id: true },
+    })
+    if (liveAgent) throw new Error("HAS_AGENTS")
+
+    // Block reseller parents with child end-customer orgs (they'd be orphaned).
+    const child = await tx.query.teams.findFirst({
+      where: eq(teams.parentTeamId, teamId),
+      columns: { id: true },
+    })
+    if (child) throw new Error("HAS_CHILDREN")
+
+    // No-residue cleanup for rows that don't FK-cascade.
+    const instanceIds = (
+      await tx.query.instances.findMany({
+        where: eq(instances.teamId, teamId),
+        columns: { id: true },
+      })
+    ).map((r) => r.id)
+    await tx
+      .delete(subscriptions)
+      .where(
+        instanceIds.length
+          ? or(eq(subscriptions.teamId, teamId), inArray(subscriptions.instanceId, instanceIds))
+          : eq(subscriptions.teamId, teamId),
+      )
+    await tx.delete(auditLogs).where(eq(auditLogs.teamId, teamId))
+
+    // Cascade handles memberships, instances, invites, branding, providers,
+    // ssh keys, backup records, tenant config.
+    await tx.delete(teams).where(eq(teams.id, teamId))
+
+    return team.name
   })
 }
 

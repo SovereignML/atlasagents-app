@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useState } from "react"
+import { useCallback, useState } from "react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -14,11 +14,18 @@ import {
 } from "@/components/ui/card"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { TurnstileWidget } from "@/components/auth/turnstile-widget"
+
+const turnstileEnabled = !!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY
 
 export default function ForgotPasswordPage() {
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
   const [loading, setLoading] = useState(false)
+  const [turnstileToken, setTurnstileToken] = useState("")
+
+  const onTurnstileVerify = useCallback((token: string) => setTurnstileToken(token), [])
+  const onTurnstileExpire = useCallback(() => setTurnstileToken(""), [])
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -33,7 +40,7 @@ export default function ForgotPasswordPage() {
       const res = await fetch("/api/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, turnstileToken }),
       })
 
       const data = await res.json()
@@ -80,12 +87,16 @@ export default function ForgotPasswordPage() {
               />
             </Field>
           </FieldGroup>
+          <TurnstileWidget
+            onVerify={onTurnstileVerify}
+            onExpire={onTurnstileExpire}
+          />
           <Button
             type="submit"
             variant="gradient"
             size="pill"
             className="w-full"
-            disabled={loading}
+            disabled={loading || (turnstileEnabled && !turnstileToken)}
           >
             {loading ? "Sending..." : "Send Reset Link"}
           </Button>

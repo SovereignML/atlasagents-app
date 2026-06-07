@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import { signIn } from "next-auth/react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -22,6 +22,9 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { OAuthButtons, type OAuthAvailability } from "@/components/auth/oauth-buttons"
+import { TurnstileWidget } from "@/components/auth/turnstile-widget"
+
+const turnstileEnabled = !!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY
 
 export interface LoginFormProps {
   /** Backwards-compatible flag — also enables Google if true. */
@@ -46,11 +49,16 @@ export function LoginForm({ showGoogleOAuth = false, providers }: LoginFormProps
   const [password, setPassword] = useState("")
   const [twoFactorRequired, setTwoFactorRequired] = useState(false)
   const [code, setCode] = useState("")
+  const [turnstileToken, setTurnstileToken] = useState("")
+
+  const onTurnstileVerify = useCallback((token: string) => setTurnstileToken(token), [])
+  const onTurnstileExpire = useCallback(() => setTurnstileToken(""), [])
 
   async function submitCredentials(payload: {
     email: string
     password: string
     code?: string
+    turnstileToken?: string
   }) {
     const result = await signIn("credentials", {
       ...payload,
@@ -65,6 +73,15 @@ export function LoginForm({ showGoogleOAuth = false, providers }: LoginFormProps
       }
       if (result.code === "TwoFactorInvalid") {
         setError("Invalid 2FA code. Try again.")
+        return
+      }
+      if (result.code === "TurnstileFailed") {
+        setError("Verification failed. Please try again.")
+        setTurnstileToken("")
+        return
+      }
+      if (result.code === "RateLimited") {
+        setError("Too many sign-in attempts. Please wait a few minutes and try again.")
         return
       }
       setError("Invalid email or password")
@@ -86,7 +103,7 @@ export function LoginForm({ showGoogleOAuth = false, providers }: LoginFormProps
       const nextPassword = (formData.get("password") as string) ?? ""
       setEmail(nextEmail)
       setPassword(nextPassword)
-      await submitCredentials({ email: nextEmail, password: nextPassword })
+      await submitCredentials({ email: nextEmail, password: nextPassword, turnstileToken })
     } finally {
       setLoading(false)
     }
@@ -212,12 +229,16 @@ export function LoginForm({ showGoogleOAuth = false, providers }: LoginFormProps
                 Forgot password?
               </Link>
             </div>
+            <TurnstileWidget
+              onVerify={onTurnstileVerify}
+              onExpire={onTurnstileExpire}
+            />
             <Button
               type="submit"
               variant="gradient"
               size="pill"
               className="w-full"
-              disabled={loading}
+              disabled={loading || (turnstileEnabled && !turnstileToken)}
             >
               {loading ? "Signing in..." : "Sign In"}
             </Button>

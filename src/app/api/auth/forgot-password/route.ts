@@ -2,11 +2,12 @@ import { NextResponse } from "next/server"
 import { db, users, verificationTokens, eq } from "@/db"
 import { rateLimit } from "@/lib/rate-limit"
 import { sendPasswordResetEmail } from "@/lib/email"
+import { verifyTurnstileToken } from "@/lib/turnstile"
 import crypto from "crypto"
 
 export async function POST(request: Request) {
   try {
-    const { email } = await request.json()
+    const { email, turnstileToken } = await request.json()
     if (!email || typeof email !== "string") {
       return NextResponse.json({ error: "Email is required" }, { status: 400 })
     }
@@ -14,6 +15,14 @@ export async function POST(request: Request) {
     // Rate limit: 3 per email per hour
     if (!(await rateLimit(`forgot-password:${email.toLowerCase()}`, 3, 60 * 60 * 1000))) {
       return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 })
+    }
+
+    const ip = request.headers.get("x-forwarded-for") || undefined
+    if (!(await verifyTurnstileToken(turnstileToken, ip))) {
+      return NextResponse.json(
+        { error: "Verification failed. Please try again." },
+        { status: 400 },
+      )
     }
 
     // Always return success to not leak whether email exists

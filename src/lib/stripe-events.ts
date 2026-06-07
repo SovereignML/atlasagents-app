@@ -20,6 +20,8 @@ import { describeVmError } from "@/lib/vm-provider"
 import { usdToCredits } from "@/lib/credit-pricing"
 import { notify } from "@/lib/notifications/dispatch"
 import { createAdminNotification } from "@/lib/admin-notify"
+import { claimEvent } from "@/lib/idempotency"
+import { posthogServer } from "@/lib/posthog-server"
 
 // ---------- checkout.session.completed ----------
 // Triggered when the user finishes paying. Flips Instance to "running",
@@ -135,6 +137,18 @@ export async function handleCheckoutSessionCompleted(
     level: "info",
     message: "Deployment provisioned via Stripe checkout. Status: running.",
   })
+
+  // Fire-and-forget analytics; no-op when PostHog isn't configured.
+  posthogServer.capture({
+    distinctId: instance.userId,
+    event: "subscription_changed",
+    properties: {
+      action: "created",
+      plan: plan.slug,
+      interval: metadata.interval ?? "month",
+      instanceId,
+    },
+  })
 }
 
 // ---------- customer.subscription.updated ----------
@@ -154,6 +168,17 @@ export async function handleSubscriptionUpdated(
       cancelAtPeriodEnd: sub.cancel_at_period_end,
     })
     .where(eq(subscriptions.id, local.id))
+
+  posthogServer.capture({
+    distinctId: local.userId,
+    event: "subscription_changed",
+    properties: {
+      action: "updated",
+      status: sub.status,
+      cancelAtPeriodEnd: sub.cancel_at_period_end,
+      instanceId: local.instanceId,
+    },
+  })
 }
 
 // ---------- customer.subscription.deleted ----------
@@ -170,6 +195,16 @@ export async function handleSubscriptionDeleted(
     .update(subscriptions)
     .set({ status: "canceled" })
     .where(eq(subscriptions.id, local.id))
+
+  posthogServer.capture({
+    distinctId: local.userId,
+    event: "subscription_changed",
+    properties: {
+      action: "canceled",
+      status: "canceled",
+      instanceId: local.instanceId,
+    },
+  })
 
   if (local.instance && local.instance.status === "running") {
     const { isAboveMinimum } = await import("@/lib/wallet")
@@ -282,6 +317,75 @@ export async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> 
       console.error(`[stripe] depositToWallet failed for user ${local.userId}:`, err)
     }
   }
+}
+
+// ---------- invoice.upcoming ----------
+// Stripe fires this a few days (default 3, configurable in Billing settings)
+// before a subscription renews. We send a heads-up reminder via the
+// notification dispatcher (in-app + email per user preferences).
+//
+// NOTE: the flat `invoice.subscription` field exists because src/lib/stripe.ts
+// pins apiVersion "2024-06-20". Newer API versions move it under
+// `invoice.parent.subscription_details` — bumping the version breaks this
+// handler (and handleInvoicePaid/handleInvoicePaymentFailed above) together.
+
+export async function handleInvoiceUpcoming(invoice: Stripe.Invoice): Promise<void> {
+  const subId =
+    typeof invoice.subscription === "string"
+      ? invoice.subscription
+      : invoice.subscription?.id
+  if (!subId) return // one-off invoice, not a subscription renewal
+
+  const local = await db.query.subscriptions.findFirst({
+    where: eq(subscriptions.stripeSubscriptionId, subId),
+    with: { plan: true, instance: true },
+  })
+  if (!local) return
+  // Reseller subs are billed on the tenant's connected Stripe account and
+  // arrive via src/lib/stripe-connect-events.ts — never remind from here.
+  if (local.connectAccountId) return
+  // No reminder when the subscription won't actually renew.
+  if (local.cancelAtPeriodEnd || local.status === "canceled") return
+
+  // One reminder per subscription per renewal period. The route-level
+  // claimEvent("stripe", event.id) only dedups exact event redeliveries;
+  // this key dedups distinct invoice.upcoming events for the same renewal.
+  const periodKey = invoice.period_end ?? invoice.next_payment_attempt ?? 0
+  const claimed = await claimEvent("renewal_reminder", `${subId}:${periodKey}`)
+  if (!claimed) return
+
+  // Amount comes from the invoice — plans carry no price (pricing lives in Stripe).
+  const amount = (invoice.amount_due ?? invoice.total ?? 0) / 100
+  const currency = (invoice.currency ?? "usd").toUpperCase()
+  const amountLabel = `${currency} ${amount.toFixed(2)}`
+
+  const renewDate =
+    local.currentPeriodEnd ??
+    (invoice.period_end ? new Date(invoice.period_end * 1000) : null)
+  const dateLabel = renewDate
+    ? renewDate.toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      })
+    : "soon"
+
+  const planName = local.plan?.name ?? "your plan"
+  await notify({
+    userId: local.userId,
+    category: "billing",
+    type: "subscription_renewal_reminder",
+    title: "Your subscription renews soon",
+    message: `Your ${planName} subscription${local.instance ? ` for "${local.instance.name}"` : ""} renews on ${dateLabel}. ${amountLabel} will be charged to your payment method on file. No action is needed if everything looks right.`,
+    url: "/dashboard/billing",
+    instanceId: local.instance?.id,
+    meta: {
+      stripeSubscriptionId: subId,
+      amountDue: invoice.amount_due,
+      currency: invoice.currency,
+      periodEnd: periodKey,
+    },
+  })
 }
 
 // ---------- invoice.payment_failed ----------

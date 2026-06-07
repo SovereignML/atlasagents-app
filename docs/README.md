@@ -24,6 +24,7 @@
 | Document | Purpose |
 |----------|---------|
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Stand up the control plane: VPS, env, DNS, reverse proxy, scheduled jobs |
+| [SENTRY.md](SENTRY.md) | Error monitoring: what's captured, env vars, source maps, verification |
 
 ### History
 

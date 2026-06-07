@@ -8,6 +8,7 @@ import {
   instances,
   adminNotes,
   teams,
+  memberships,
   eq,
   and,
   or,
@@ -82,7 +83,7 @@ export async function GET(request: Request) {
     const userIds = rows.map((r) => r.id);
 
     const countExpr = sql<number>`count(*)::int`;
-    const [subCounts, instCounts, noteCounts, ownedTeams] =
+    const [subCounts, instCounts, noteCounts, membershipTeams] =
       userIds.length === 0
         ? [[], [], [], []]
         : await Promise.all([
@@ -101,23 +102,39 @@ export async function GET(request: Request) {
               .from(adminNotes)
               .where(inArray(adminNotes.userId, userIds))
               .groupBy(adminNotes.userId),
-            // Teams each user OWNS — white-label entitlement keys off the team
-            // owner, so these are the teams an admin would toggle. Surfaced as
+            // Teams each user has access to (via membership) and at what
+            // role. Owners always have an "owner" membership row, so this
+            // covers owned and member-of teams alike. Surfaced as
             // deep-links to /admin/teams.
             db
-              .select({ ownerId: teams.ownerId, id: teams.id, name: teams.name })
-              .from(teams)
-              .where(inArray(teams.ownerId, userIds)),
+              .select({
+                userId: memberships.userId,
+                id: teams.id,
+                name: teams.name,
+                role: memberships.role,
+              })
+              .from(memberships)
+              .innerJoin(teams, eq(memberships.teamId, teams.id))
+              .where(inArray(memberships.userId, userIds)),
           ]);
 
     const subMap = new Map(subCounts.map((r) => [r.userId, r.count]));
     const instMap = new Map(instCounts.map((r) => [r.userId, r.count]));
     const noteMap = new Map(noteCounts.map((r) => [r.userId, r.count]));
-    const teamMap = new Map<string, { id: string; name: string }[]>();
-    for (const t of ownedTeams) {
-      const list = teamMap.get(t.ownerId) ?? [];
-      list.push({ id: t.id, name: t.name });
-      teamMap.set(t.ownerId, list);
+    const roleRank: Record<string, number> = {
+      owner: 0,
+      admin: 1,
+      developer: 2,
+      viewer: 3,
+    };
+    const teamMap = new Map<string, { id: string; name: string; role: string }[]>();
+    for (const t of membershipTeams) {
+      const list = teamMap.get(t.userId) ?? [];
+      list.push({ id: t.id, name: t.name, role: t.role });
+      teamMap.set(t.userId, list);
+    }
+    for (const list of teamMap.values()) {
+      list.sort((a, b) => (roleRank[a.role] ?? 9) - (roleRank[b.role] ?? 9));
     }
 
     const result = rows.map((u) => ({

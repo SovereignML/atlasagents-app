@@ -5,6 +5,7 @@ import { cookies, headers } from "next/headers"
 import { DashboardSidebar } from "@/components/layout/dashboard-sidebar"
 import { DashboardTopbar } from "@/components/layout/dashboard-topbar"
 import { ImpersonationBanner } from "@/components/layout/impersonation-banner"
+import { VerifyEmailBanner } from "@/components/dashboard/verify-email-banner"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { getEffectiveUserId, getHonoredImpersonatedUserId } from "@/lib/effective-user"
 import { getUserTeam, canManageTeam, listUserTeams } from "@/lib/team"
@@ -70,6 +71,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let canManageBranding = false
   let teamList: { teamId: string; name: string; role: string }[] = []
   let activeTeamId: string | undefined
+  // Show the soft "verify your email" banner only for an unverified credentials
+  // user viewing their OWN dashboard. OAuth-only users have a null hashedPassword
+  // (and are auto-verified anyway), so they never qualify; hidden while
+  // impersonating to avoid confusing an admin with someone else's prompt.
+  let showVerifyBanner = false
   const effectiveUserId = await getEffectiveUserId()
   if (effectiveUserId) {
     const managedTeam = await getUserTeam(effectiveUserId)
@@ -78,6 +84,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
       canManageBranding = await teamHasWhiteLabel(managedTeam.teamId)
     }
     teamList = await listUserTeams(effectiveUserId)
+
+    if (!impersonatedUser) {
+      const u = await db.query.users.findFirst({
+        where: eq(users.id, effectiveUserId),
+        columns: { emailVerified: true, hashedPassword: true },
+      })
+      showVerifyBanner = !!u && u.emailVerified == null && u.hashedPassword != null
+    }
   }
 
   return (
@@ -105,6 +119,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             activeTeamId={activeTeamId}
           />
           <main className="flex-1 overflow-auto bg-background px-6 py-8 lg:px-12 lg:py-10">
+            {showVerifyBanner && <VerifyEmailBanner />}
             {children}
           </main>
         </SidebarInset>

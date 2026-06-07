@@ -47,6 +47,11 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
@@ -70,7 +75,7 @@ interface User {
   twitterHandle: string | null
   discordId: string | null
   createdAt: string
-  teams: { id: string; name: string }[]
+  teams: { id: string; name: string; role: string }[]
   _count: { subscriptions: number; payments: number }
 }
 
@@ -91,6 +96,17 @@ function getInitials(name: string | null, email: string): string {
       .join("")
   }
   return email.slice(0, 2).toUpperCase()
+}
+
+function roleVariant(role: string): "default" | "secondary" | "outline" {
+  switch (role) {
+    case "owner":
+      return "default"
+    case "admin":
+      return "secondary"
+    default: // developer | viewer
+      return "outline"
+  }
 }
 
 export default function AdminUsersPage() {
@@ -352,17 +368,45 @@ export default function AdminUsersPage() {
                           {user.teams.length === 0 ? (
                             <span className="text-xs text-muted-foreground">—</span>
                           ) : (
-                            <div className="flex flex-col gap-0.5">
-                              {user.teams.map((t) => (
-                                <Link
-                                  key={t.id}
-                                  href={`/admin/teams?teamId=${t.id}`}
-                                  className="text-sm text-primary hover:underline"
-                                >
-                                  {t.name}
-                                </Link>
-                              ))}
-                            </div>
+                            <Popover>
+                              <PopoverTrigger
+                                render={
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 px-2 font-medium"
+                                  >
+                                    {user.teams.length}
+                                  </Button>
+                                }
+                              />
+                              <PopoverContent className="w-72 p-2" align="start">
+                                <p className="px-2 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                  Team access
+                                </p>
+                                <div className="flex max-h-64 flex-col overflow-y-auto">
+                                  {user.teams.map((t) => (
+                                    <div
+                                      key={t.id}
+                                      className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-muted/50"
+                                    >
+                                      <Link
+                                        href={`/admin/teams?teamId=${t.id}`}
+                                        className="truncate text-sm text-primary hover:underline"
+                                      >
+                                        {t.name}
+                                      </Link>
+                                      <Badge
+                                        variant={roleVariant(t.role)}
+                                        className="shrink-0"
+                                      >
+                                        {t.role}
+                                      </Badge>
+                                    </div>
+                                  ))}
+                                </div>
+                              </PopoverContent>
+                            </Popover>
                           )}
                         </TableCell>
                         <TableCell className="text-muted-foreground">

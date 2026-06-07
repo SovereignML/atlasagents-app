@@ -10,6 +10,7 @@ import {
   handleChargeDisputeCreated,
   handleChargeDisputeClosed,
   handleInvoiceVoided,
+  handleInvoiceUpcoming,
 } from "@/lib/stripe-events"
 import { claimEvent, releaseEvent } from "@/lib/idempotency"
 
@@ -64,6 +65,9 @@ export async function POST(req: NextRequest) {
         break
       case "invoice.voided":
         await handleInvoiceVoided(event.data.object)
+        break
+      case "invoice.upcoming":
+        await handleInvoiceUpcoming(event.data.object)
         break
       case "charge.refunded":
         await handleChargeRefunded(event.data.object)

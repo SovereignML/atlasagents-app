@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { useCallback, useState } from "react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -21,6 +21,9 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { OAuthButtons, type OAuthAvailability } from "@/components/auth/oauth-buttons"
+import { TurnstileWidget } from "@/components/auth/turnstile-widget"
+
+const turnstileEnabled = !!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY
 
 export interface RegisterFormProps {
   showGoogleOAuth?: boolean
@@ -37,6 +40,10 @@ export function RegisterForm({ showGoogleOAuth = false, providers }: RegisterFor
 
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
+  const [turnstileToken, setTurnstileToken] = useState("")
+
+  const onTurnstileVerify = useCallback((token: string) => setTurnstileToken(token), [])
+  const onTurnstileExpire = useCallback(() => setTurnstileToken(""), [])
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -51,7 +58,7 @@ export function RegisterForm({ showGoogleOAuth = false, providers }: RegisterFor
     const res = await fetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({ name, email, password, turnstileToken }),
     })
 
     const data = await res.json()
@@ -121,12 +128,16 @@ export function RegisterForm({ showGoogleOAuth = false, providers }: RegisterFor
                 minLength={6}
               />
             </Field>
+            <TurnstileWidget
+              onVerify={onTurnstileVerify}
+              onExpire={onTurnstileExpire}
+            />
             <Button
               type="submit"
               variant="gradient"
               size="pill"
               className="w-full"
-              disabled={loading}
+              disabled={loading || (turnstileEnabled && !turnstileToken)}
             >
               {loading ? "Creating account..." : "Create Account"}
             </Button>

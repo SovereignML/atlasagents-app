@@ -6,6 +6,7 @@ export function LoginBanners() {
   const searchParams = useSearchParams()
   const reset = searchParams.get("reset") === "true"
   const registered = searchParams.get("registered") === "true"
+  const verified = searchParams.get("verified") === "true"
 
   return (
     <>
@@ -17,6 +18,11 @@ export function LoginBanners() {
       {registered && (
         <div className="w-full max-w-md p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm text-center mb-4">
           Account created. Sign in to continue.
+        </div>
+      )}
+      {verified && (
+        <div className="w-full max-w-md p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm text-center mb-4">
+          Email verified. You can now sign in.
         </div>
       )}
     </>

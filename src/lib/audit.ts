@@ -34,6 +34,7 @@ export type AuditAction =
   | "team.role_change"
   | "team.switch"
   | "team.create"
+  | "team.delete"
   | "branding.update"
   | "branding.asset.upload"
   | "branding.domain.set"

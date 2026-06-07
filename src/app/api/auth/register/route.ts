@@ -5,6 +5,9 @@ import { registerSchema } from "@/lib/validations"
 import { rateLimit } from "@/lib/rate-limit"
 import { resolveTeamByHost } from "@/lib/tenant-branding"
 import { getTenantConfig, createChildTeam } from "@/lib/tenant"
+import { verifyTurnstileToken } from "@/lib/turnstile"
+import { issueAndSendVerification } from "@/lib/email-verification"
+import { posthogServer } from "@/lib/posthog-server"
 
 export async function POST(req: Request) {
   try {
@@ -17,6 +20,16 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json()
+
+    // Turnstile is verified off the raw body (not part of registerSchema, which
+    // only models user data). No-op when Turnstile isn't configured.
+    if (!(await verifyTurnstileToken(body?.turnstileToken, ip === "unknown" ? undefined : ip))) {
+      return NextResponse.json(
+        { error: "Verification failed. Please try again." },
+        { status: 400 }
+      )
+    }
+
     const result = registerSchema.safeParse(body)
 
     if (!result.success) {
@@ -48,6 +61,15 @@ export async function POST(req: Request) {
       })
       .returning({ id: users.id })
 
+    // Fire-and-forget analytics; no-op when PostHog isn't configured.
+    if (newUser) {
+      posthogServer.capture({
+        distinctId: newUser.id,
+        event: "user_signed_up",
+        properties: { method: "credentials" },
+      })
+    }
+
     // Self-serve white-label signup: if this registration happened on a tenant's
     // verified custom domain, attach the new account as a child team under that
     // tenant. On the canonical host (or any non-tenant domain) this is a no-op —
@@ -75,6 +97,15 @@ export async function POST(req: Request) {
       // Never fail registration over tenant attachment — log and continue; the
       // account exists and can be re-attached by the tenant admin if needed.
       console.error("[register] tenant attach failed:", err)
+    }
+
+    // Issue an email-verification token and send the link. Best-effort — never
+    // fail the signup over email delivery; the user can resend from the
+    // dashboard banner. `emailVerified` stays null until they click the link.
+    try {
+      await issueAndSendVerification(email)
+    } catch (err) {
+      console.error("[register] verification email failed:", err)
     }
 
     return NextResponse.json(
