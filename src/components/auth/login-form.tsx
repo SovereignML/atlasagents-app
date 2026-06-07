@@ -80,6 +80,10 @@ export function LoginForm({ showGoogleOAuth = false, providers }: LoginFormProps
         setTurnstileToken("")
         return
       }
+      if (result.code === "RateLimited") {
+        setError("Too many sign-in attempts. Please wait a few minutes and try again.")
+        return
+      }
       setError("Invalid email or password")
       setTwoFactorRequired(false)
       return

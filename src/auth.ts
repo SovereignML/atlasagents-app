@@ -15,6 +15,7 @@ import {
 import { verifyTotpToken } from "@/lib/totp"
 import { consumeBackupCode, decryptTotpSecret } from "@/lib/two-factor"
 import { verifyTurnstileToken } from "@/lib/turnstile"
+import { rateLimit } from "@/lib/rate-limit"
 
 /**
  * `code` is overridden so the client can distinguish the 2FA challenge step
@@ -30,6 +31,10 @@ class TwoFactorInvalid extends CredentialsSignin {
 
 class TurnstileFailed extends CredentialsSignin {
   code = "TurnstileFailed"
+}
+
+class RateLimited extends CredentialsSignin {
+  code = "RateLimited"
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -91,8 +96,21 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // Cloudflare Turnstile token (only present/verified on the first step).
         turnstileToken: { label: "Turnstile", type: "text" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
         if (!credentials?.email || !credentials?.password) return null
+
+        // Brute-force guard: fixed-window limits per email and per IP. Counts
+        // every attempt (incl. 2FA re-submits), so caps are generous — they
+        // only bite on credential-stuffing patterns, not real users.
+        const email = (credentials.email as string).toLowerCase().trim()
+        const ip =
+          request?.headers?.get?.("x-forwarded-for")?.split(",")[0]?.trim() ||
+          "unknown"
+        const [emailOk, ipOk] = await Promise.all([
+          rateLimit(`login:email:${email}`, 10, 15 * 60 * 1000),
+          rateLimit(`login:ip:${ip}`, 30, 15 * 60 * 1000),
+        ])
+        if (!emailOk || !ipOk) throw new RateLimited()
 
         // Verify Turnstile only on the initial submit. CF tokens are single-use,
         // and the 2FA re-submit reuses the same email/password with a `code`, so
