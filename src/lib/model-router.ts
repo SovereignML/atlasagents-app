@@ -147,14 +147,14 @@ export function routeModel(
  * `:free` slugs above are unusable here. Slugs must be live OpenRouter `<author>/<slug>`
  * with ≥64k context.
  *
- * TODO(openrouter): replace these with the chosen ≥64k OpenRouter slugs per tier — the same
- * place the per-key credit limits are maintained. The default below is a conservative,
- * broadly-available ≥64k placeholder so deploys aren't broken-by-default; swap as needed.
+ * Cost-efficient OSS ladder (slugs + pricing verified live against
+ * https://openrouter.ai/api/v1/models on 2026-06-07). `low` matches the
+ * `routeModel` OpenRouter primary so platform behavior stays consistent.
  */
 const HERMES_MODELS: Record<BudgetTier, string> = {
-  low: "anthropic/claude-3.5-sonnet", // 200k ctx — PLACEHOLDER, replace
-  mid: "anthropic/claude-3.5-sonnet", // 200k ctx — PLACEHOLDER, replace
-  high: "anthropic/claude-3.5-sonnet", // 200k ctx — PLACEHOLDER, replace
+  low: "minimax/minimax-m2.5", // 204k ctx — $0.15/$1.15 per M
+  mid: "z-ai/glm-4.7", // 202k ctx — $0.40/$1.75 per M
+  high: "moonshotai/kimi-k2.6", // 262k ctx — $0.68/$3.42 per M
 }
 
 /**

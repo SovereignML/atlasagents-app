@@ -1,6 +1,6 @@
 // Next.js runs register() once at server startup (Node runtime only).
-// We use it to fail fast on a broken production billing config rather than
-// discovering it per-request.
+// We use it to fail fast on broken production config — billing (billing-config)
+// and platform-wide vars (env-check) — rather than discovering it per-request.
 
 export async function register() {
   // Only validate at actual server start (Node runtime), not during `next build`
@@ -11,6 +11,8 @@ export async function register() {
     process.env.NEXT_PHASE !== "phase-production-build"
   ) {
     const { assertBillingConfig } = await import("@/lib/billing-config")
+    const { assertEnv } = await import("@/lib/env-check")
     assertBillingConfig()
+    assertEnv()
   }
 }
