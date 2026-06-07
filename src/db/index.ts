@@ -3,12 +3,21 @@
 // One module, one connection pool, one `db` handle. Importable as
 // `@/db` from anywhere. Throws loudly at module load if DATABASE_URL
 // is missing — no silent "connection string: undefined" failures.
+//
+// Exception: during `next build` (page-data collection imports every route
+// module), the throw is skipped — CI builds without runtime secrets by
+// design (.github/workflows/ci.yml), same NEXT_PHASE guard as
+// src/instrumentation.ts. No query runs at build time (all routes are
+// dynamic), and a secret-less boot still fails loudly here + in env-check.
 
 import { drizzle } from "drizzle-orm/node-postgres"
 import { Pool } from "pg"
 import * as schema from "./schema"
 
-if (!process.env.DATABASE_URL) {
+if (
+  !process.env.DATABASE_URL &&
+  process.env.NEXT_PHASE !== "phase-production-build"
+) {
   throw new Error(
     "DATABASE_URL is not set. This project loads exactly one env file — " +
       "`.env` at the repo root. Run `bash scripts/bootstrap-pg.sh` or " +
