@@ -1,4 +1,5 @@
 import type { NextConfig } from "next"
+import { withSentryConfig } from "@sentry/nextjs"
 
 const devOrigins = [
   "sovereignml.com",
@@ -77,4 +78,15 @@ const nextConfig: NextConfig = {
   },
 }
 
-export default nextConfig
+// Sentry build-time plugin: instruments the bundles and (only when
+// SENTRY_AUTH_TOKEN + org/project are set) uploads source maps on build.
+// Without those vars it's a no-op wrapper, so dev/CI builds are unaffected.
+export default withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  silent: !process.env.CI,
+  // Keep client bundles lean; we don't proxy events through the app.
+  widenClientFileUpload: false,
+  disableLogger: true,
+})
