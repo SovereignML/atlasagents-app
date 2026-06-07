@@ -1,8 +1,11 @@
 'use client';
 
-import Image from 'next/image';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { Ghost } from 'lucide-react';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
+
+import { Button } from '@/components/ui/button';
 
 const containerVariants: Variants = {
   hidden: {
@@ -100,9 +103,14 @@ const ghostVariants: Variants = {
   }
 };
 
-export function NotFound() {
+export function NotFound({ isLoggedIn }: { isLoggedIn: boolean }) {
+  const router = useRouter();
+
+  const primaryHref = isLoggedIn ? "/dashboard" : "/";
+  const primaryLabel = isLoggedIn ? "Back to dashboard" : "Back home";
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-white px-4">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-background px-4">
       <AnimatePresence mode="wait">
         <motion.div
           className="text-center"
@@ -113,7 +121,7 @@ export function NotFound() {
         >
           <div className="flex items-center justify-center gap-4 md:gap-6 mb-8 md:mb-12">
             <motion.span
-              className="text-[80px] md:text-[120px] font-bold text-[#222222] opacity-70 font-signika select-none"
+              className="text-[80px] md:text-[120px] font-bold text-foreground opacity-70 select-none"
               variants={numberVariants}
               custom={-1}
             >
@@ -124,18 +132,14 @@ export function NotFound() {
               whileHover="hover"
               animate={["visible", "floating"]}
             >
-              <Image
-                src="https://xubohuah.github.io/xubohua.top/Group.png"
-                alt="Ghost"
-                width={120}
-                height={120}
-                className="w-[80px] h-[80px] md:w-[120px] md:h-[120px] object-contain select-none"
-                draggable="false"
-                priority
+              <Ghost
+                aria-hidden
+                className="w-20 h-20 md:w-28 md:h-28 text-foreground/70 select-none"
+                strokeWidth={1.5}
               />
             </motion.div>
             <motion.span
-              className="text-[80px] md:text-[120px] font-bold text-[#222222] opacity-70 font-signika select-none"
+              className="text-[80px] md:text-[120px] font-bold text-foreground opacity-70 select-none"
               variants={numberVariants}
               custom={1}
             >
@@ -144,47 +148,36 @@ export function NotFound() {
           </div>
 
           <motion.h1
-            className="text-3xl md:text-5xl font-bold text-[#222222] mb-4 md:mb-6 opacity-70 font-dm-sans select-none"
+            className="text-3xl md:text-5xl font-bold text-foreground mb-4 md:mb-6 opacity-90 select-none"
             variants={itemVariants}
           >
             Boo! Page missing!
           </motion.h1>
 
           <motion.p
-            className="text-lg md:text-xl text-[#222222] mb-8 md:mb-12 opacity-50 font-dm-sans select-none"
+            className="text-lg md:text-xl text-muted-foreground mb-8 md:mb-12 select-none"
             variants={itemVariants}
           >
-            Whoops! This page must be a ghost - it&apos;s not here!
+            Whoops! This page must be a ghost &mdash; it&apos;s not here!
           </motion.p>
 
           <motion.div
-            variants={itemVariants}
-            whileHover={{
-              scale: 1.05,
-              transition: {
-                duration: 0.3,
-                ease: [0.43, 0.13, 0.23, 0.96]
-              }
-            }}
-          >
-            <Link
-              href="https://xubh.top/"
-              className="inline-block bg-[#222222] text-white px-8 py-3 rounded-full text-lg font-medium hover:bg-[#000000] transition-colors font-dm-sans select-none"
-            >
-              Find shelter
-            </Link>
-          </motion.div>
-
-          <motion.div
-            className="mt-12"
+            className="flex flex-col sm:flex-row items-center justify-center gap-3"
             variants={itemVariants}
           >
-            <Link
-              href="#"
-              className="text-[#222222] opacity-50 hover:opacity-70 transition-opacity underline font-dm-sans select-none"
+            <Button
+              size="pill"
+              render={<Link href={primaryHref} />}
             >
-              What means 404?
-            </Link>
+              {primaryLabel}
+            </Button>
+            <Button
+              variant="outline"
+              size="pill"
+              onClick={() => router.back()}
+            >
+              Go back
+            </Button>
           </motion.div>
         </motion.div>
       </AnimatePresence>

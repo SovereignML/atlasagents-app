@@ -14,6 +14,7 @@ import {
 } from "@/lib/oauth"
 import { verifyTotpToken } from "@/lib/totp"
 import { consumeBackupCode, decryptTotpSecret } from "@/lib/two-factor"
+import { verifyTurnstileToken } from "@/lib/turnstile"
 
 /**
  * `code` is overridden so the client can distinguish the 2FA challenge step
@@ -25,6 +26,10 @@ class TwoFactorRequired extends CredentialsSignin {
 
 class TwoFactorInvalid extends CredentialsSignin {
   code = "TwoFactorInvalid"
+}
+
+class TurnstileFailed extends CredentialsSignin {
+  code = "TurnstileFailed"
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -83,9 +88,21 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         password: { label: "Password", type: "password" },
         // Optional second-factor code: TOTP or backup code.
         code: { label: "2FA code", type: "text" },
+        // Cloudflare Turnstile token (only present/verified on the first step).
+        turnstileToken: { label: "Turnstile", type: "text" },
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null
+
+        // Verify Turnstile only on the initial submit. CF tokens are single-use,
+        // and the 2FA re-submit reuses the same email/password with a `code`, so
+        // skip re-verification then. No-op when Turnstile isn't configured.
+        if (!credentials?.code) {
+          const ok = await verifyTurnstileToken(
+            credentials?.turnstileToken as string | undefined,
+          )
+          if (!ok) throw new TurnstileFailed()
+        }
 
         const user = await db.query.users.findFirst({
           where: eq(users.email, credentials.email as string),
@@ -151,9 +168,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (!user?.email) return true
       const dbUser = await db.query.users.findFirst({
         where: eq(users.email, user.email),
-        columns: { isBanned: true },
+        columns: { isBanned: true, emailVerified: true },
       })
       if (dbUser?.isBanned) return false
+      // OAuth providers attest the email — auto-verify so these users never see
+      // the "verify your email" prompt. The DrizzleAdapter has already upserted
+      // the row by the time this callback runs.
+      if (dbUser && dbUser.emailVerified == null) {
+        await db
+          .update(users)
+          .set({ emailVerified: new Date() })
+          .where(eq(users.email, user.email))
+      }
       return true
     },
     async jwt({ token, user, account }) {

@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { usePathname, useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
   LayoutDashboard,
   Rocket,
@@ -37,6 +37,7 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
+  useSidebar,
 } from "@/components/ui/sidebar"
 
 type Icon = typeof LayoutDashboard
@@ -125,7 +126,9 @@ function TeamNavItem({
   subItems: SubItem[]
 }) {
   const pathname = usePathname()
+  const router = useRouter()
   const searchParams = useSearchParams()
+  const { state, isMobile } = useSidebar()
   const onTeam = pathname === item.href
   const activeTab = onTeam ? searchParams.get("tab") || "members" : null
   const [open, setOpen] = useState(onTeam)
@@ -137,7 +140,16 @@ function TeamNavItem({
         <SidebarMenuButton
           isActive={onTeam}
           tooltip={item.label}
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => {
+            // Collapsed icon mode can't show the submenu — navigate to the
+            // default (Members) tab instead. The mobile sheet always renders
+            // expanded, so it keeps the toggle behavior.
+            if (state === "collapsed" && !isMobile) {
+              router.push("/dashboard/team?tab=members")
+              return
+            }
+            setOpen((o) => !o)
+          }}
         >
           <Icon />
           <span className="flex-1 group-data-[collapsible=icon]:hidden">{item.label}</span>
