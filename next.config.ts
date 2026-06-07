@@ -58,6 +58,8 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: "standalone",
+  // PostHog proxy paths (/ingest/...) must not be trailing-slash redirected.
+  skipTrailingSlashRedirect: true,
   ...(devOrigins.length > 0 ? { allowedDevOrigins: devOrigins } : {}),
   serverExternalPackages: ["ssh2", "node-ssh", "cpu-features"],
   images: {
@@ -74,6 +76,21 @@ const nextConfig: NextConfig = {
     return [
       { source: "/signup", destination: "/register", permanent: false },
       ...(apex ? [apex] : []),
+    ]
+  },
+  async rewrites() {
+    // PostHog reverse proxy: browser events go to our own domain (/ingest) so
+    // ad-blockers don't drop them. The /static/ rule must precede the
+    // catch-all. See docs/POSTHOG.md.
+    return [
+      {
+        source: "/ingest/static/:path*",
+        destination: "https://us-assets.i.posthog.com/static/:path*",
+      },
+      {
+        source: "/ingest/:path*",
+        destination: "https://us.i.posthog.com/:path*",
+      },
     ]
   },
 }

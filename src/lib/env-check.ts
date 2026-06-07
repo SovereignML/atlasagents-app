@@ -86,6 +86,18 @@ function collect(): CheckResult {
     )
   }
 
+  // ── PostHog: optional analytics — warn only, never an error ──
+  if (!set("NEXT_PUBLIC_POSTHOG_KEY")) {
+    warnings.push(
+      "NEXT_PUBLIC_POSTHOG_KEY is not set — product analytics, session replay, and feature flags are disabled.",
+    )
+    if (set("POSTHOG_KEY")) {
+      warnings.push(
+        "POSTHOG_KEY is set but NEXT_PUBLIC_POSTHOG_KEY is not — server events will fire with no client analytics (likely a misconfiguration).",
+      )
+    }
+  }
+
   return { errors, warnings }
 }
 

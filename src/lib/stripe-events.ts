@@ -21,6 +21,7 @@ import { usdToCredits } from "@/lib/credit-pricing"
 import { notify } from "@/lib/notifications/dispatch"
 import { createAdminNotification } from "@/lib/admin-notify"
 import { claimEvent } from "@/lib/idempotency"
+import { posthogServer } from "@/lib/posthog-server"
 
 // ---------- checkout.session.completed ----------
 // Triggered when the user finishes paying. Flips Instance to "running",
@@ -136,6 +137,18 @@ export async function handleCheckoutSessionCompleted(
     level: "info",
     message: "Deployment provisioned via Stripe checkout. Status: running.",
   })
+
+  // Fire-and-forget analytics; no-op when PostHog isn't configured.
+  posthogServer.capture({
+    distinctId: instance.userId,
+    event: "subscription_changed",
+    properties: {
+      action: "created",
+      plan: plan.slug,
+      interval: metadata.interval ?? "month",
+      instanceId,
+    },
+  })
 }
 
 // ---------- customer.subscription.updated ----------
@@ -155,6 +168,17 @@ export async function handleSubscriptionUpdated(
       cancelAtPeriodEnd: sub.cancel_at_period_end,
     })
     .where(eq(subscriptions.id, local.id))
+
+  posthogServer.capture({
+    distinctId: local.userId,
+    event: "subscription_changed",
+    properties: {
+      action: "updated",
+      status: sub.status,
+      cancelAtPeriodEnd: sub.cancel_at_period_end,
+      instanceId: local.instanceId,
+    },
+  })
 }
 
 // ---------- customer.subscription.deleted ----------
@@ -171,6 +195,16 @@ export async function handleSubscriptionDeleted(
     .update(subscriptions)
     .set({ status: "canceled" })
     .where(eq(subscriptions.id, local.id))
+
+  posthogServer.capture({
+    distinctId: local.userId,
+    event: "subscription_changed",
+    properties: {
+      action: "canceled",
+      status: "canceled",
+      instanceId: local.instanceId,
+    },
+  })
 
   if (local.instance && local.instance.status === "running") {
     const { isAboveMinimum } = await import("@/lib/wallet")

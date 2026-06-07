@@ -7,6 +7,7 @@ import { resolveTeamByHost } from "@/lib/tenant-branding"
 import { getTenantConfig, createChildTeam } from "@/lib/tenant"
 import { verifyTurnstileToken } from "@/lib/turnstile"
 import { issueAndSendVerification } from "@/lib/email-verification"
+import { posthogServer } from "@/lib/posthog-server"
 
 export async function POST(req: Request) {
   try {
@@ -59,6 +60,15 @@ export async function POST(req: Request) {
         hashedPassword: await hashPassword(password),
       })
       .returning({ id: users.id })
+
+    // Fire-and-forget analytics; no-op when PostHog isn't configured.
+    if (newUser) {
+      posthogServer.capture({
+        distinctId: newUser.id,
+        event: "user_signed_up",
+        properties: { method: "credentials" },
+      })
+    }
 
     // Self-serve white-label signup: if this registration happened on a tenant's
     // verified custom domain, attach the new account as a child team under that
