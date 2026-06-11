@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
-import { db, eq, tenantConfig } from "@/db"
+import { db, tenantConfig } from "@/db"
 import { requireTenantAdmin, isTenantGuardError } from "@/lib/tenant-admin-access"
 import { getTenantConfig } from "@/lib/tenant"
 import { encryptSecret } from "@/lib/crypto-secret"

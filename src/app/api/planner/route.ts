@@ -1,10 +1,20 @@
 import { NextResponse } from "next/server"
 import { AGENT_CATEGORIES } from "@/configs/agent-categories"
+import { rateLimit } from "@/lib/rate-limit"
 
 const PRO_AGENTS = new Set(["devops", "research", "content", "sales", "social"])
 
 export async function POST(request: Request) {
   try {
+    // Public, unauthenticated endpoint — cap per-IP to deter abuse.
+    const ip = request.headers.get("x-forwarded-for") || "unknown"
+    if (!(await rateLimit(`planner:${ip}`, 30, 60_000))) {
+      return NextResponse.json(
+        { error: "Too many requests. Try again shortly." },
+        { status: 429 }
+      )
+    }
+
     const body = await request.json()
     const { useCase } = body
 

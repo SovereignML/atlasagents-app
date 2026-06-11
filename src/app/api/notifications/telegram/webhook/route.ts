@@ -18,7 +18,14 @@ import { sendTelegramRaw } from "@/lib/notifications/channels/telegram"
  */
 export async function POST(req: NextRequest) {
   const secret = process.env.NOTIFY_TELEGRAM_WEBHOOK_SECRET
-  if (secret && req.headers.get("x-telegram-bot-api-secret-token") !== secret) {
+  const provided = req.headers.get("x-telegram-bot-api-secret-token")
+  // Fail closed in production: an unset secret means the webhook is
+  // unauthenticated, so don't process arbitrary callers. Dev (no
+  // NODE_ENV=production) still works without a secret for local testing.
+  if (process.env.NODE_ENV === "production" && !secret) {
+    return NextResponse.json({ ok: true })
+  }
+  if (secret && provided !== secret) {
     return NextResponse.json({ ok: true }) // ignore unauthenticated calls quietly
   }
 

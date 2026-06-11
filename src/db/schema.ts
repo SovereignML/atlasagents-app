@@ -368,6 +368,13 @@ export const instances = pgTable(
     openclawAdminEmail: text(),
     openclawAdminPasswordEnc: text(),
     gatewayTokenEnc: text(),
+    // Per-instance event-ingest bearer token (AES-GCM at rest), minted at
+    // provision time and injected into the agent env as
+    // PLATFORM_EVENT_INGEST_TOKEN. SEPARATE from gatewayTokenEnc for least
+    // privilege: a leaked ingest token can only POST observability events to
+    // /api/instances/<id>/events, never reach the gateway. NULL on rows
+    // provisioned before this column existed — backfilled on next reprovision.
+    eventIngestTokenEnc: text(),
 
     // Per-instance OpenRouter runtime key, minted via OpenRouter's
     // Provisioning API at provision time and revoked on delete. Replaces the
@@ -423,6 +430,11 @@ export const instances = pgTable(
     kumaUptimeRatio: doublePrecision(), // 24h window, 0–1
     kumaCertDaysRemaining: integer(),
     kumaCheckedAt: timestamp({ mode: "date", withTimezone: false }),
+
+    // Last time the agent POSTed an observability event to the ingest endpoint.
+    // Distinct from lastActiveAt (which tracks end-user interaction); this
+    // tracks the event pipeline's liveness. NULL until the first event lands.
+    lastEventAt: timestamp({ mode: "date", withTimezone: false }),
 
     provisionStage: text(),
     failedStage: text(),
@@ -855,6 +867,84 @@ export const instanceLogs = pgTable(
     createdAt: now(),
   },
   (t) => [index("InstanceLog_instanceId_idx").on(t.instanceId)],
+)
+
+// AgentEvent — the high-volume agent runtime stream (runs, tool calls,
+// messages, errors), distinct from InstanceLog (low-volume platform-side ops
+// log). Written by the ingest endpoint (/api/instances/<id>/events) from
+// agent-emitted batches. `teamId` is DENORMALIZED off the instance so a tenant
+// can roll up cost/health/activity across every client agent in one indexed
+// scan without joining. High churn — pruned on a retention cron. See the
+// observability plan.
+export const agentEvents = pgTable(
+  "AgentEvent",
+  {
+    id: cuid().primaryKey(),
+    instanceId: text()
+      .notNull()
+      .references(() => instances.id, { onDelete: "cascade" }),
+    teamId: text()
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    // run.started | run.finished | tool.called | message | error | heartbeat
+    type: text().notNull(),
+    // Agent-supplied wall-clock of the event; createdAt is our server receipt.
+    occurredAt: timestamp({ mode: "date", withTimezone: false }),
+    // Correlates events belonging to the same agent run/conversation.
+    runId: text(),
+    sessionId: text(),
+    // LLM accounting (optional — only set on run/message events).
+    model: text(),
+    tokensIn: integer(),
+    tokensOut: integer(),
+    costUsd: doublePrecision(),
+    latencyMs: integer(),
+    // "ok" | "error" — set on run.finished / tool.called outcomes.
+    status: text(),
+    detail: jsonb(),
+    createdAt: now(),
+  },
+  (t) => [
+    index("AgentEvent_instanceId_createdAt_idx").on(t.instanceId, t.createdAt),
+    index("AgentEvent_teamId_createdAt_idx").on(t.teamId, t.createdAt),
+    index("AgentEvent_type_idx").on(t.type),
+  ],
+)
+
+// AlertRule — user-defined threshold on a monitoring metric. `instanceId` NULL
+// means the rule applies to EVERY agent in the team (fleet-wide), which is how
+// an agency arms one rule across all client agents. Evaluated by the
+// alerts-eval cron, which fires through notify() and respects cooldownMinutes.
+export const alertRules = pgTable(
+  "AlertRule",
+  {
+    id: cuid().primaryKey(),
+    teamId: text()
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    // NULL = all agents in the team. Otherwise scoped to one agent.
+    instanceId: text().references(() => instances.id, { onDelete: "cascade" }),
+    // down | latency_ms | uptime_ratio | cost_usd_period | error_rate
+    metric: text().notNull(),
+    comparator: text().notNull(), // "gt" | "lt"
+    threshold: doublePrecision().notNull(),
+    windowMinutes: integer().default(60).notNull(),
+    cooldownMinutes: integer().default(60).notNull(),
+    enabled: boolean().default(true).notNull(),
+    lastFiredAt: timestamp({ mode: "date", withTimezone: false }),
+    createdBy: text()
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: now(),
+    updatedAt: timestamp({ mode: "date", withTimezone: false })
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index("AlertRule_teamId_idx").on(t.teamId),
+    index("AlertRule_instanceId_idx").on(t.instanceId),
+  ],
 )
 
 // OrphanEvent — one row per reconciler decision: "VM exists in provider but no

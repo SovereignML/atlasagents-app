@@ -93,6 +93,8 @@ type InstanceLite = {
   byosPort: number | null
   byosUser: string | null
   byosLlmMode: string | null
+  costUsd: number
+  lastEventAt: string | null
 }
 
 const AGENT_CATEGORIES = [
@@ -157,6 +159,7 @@ type AccessControl = {
 
 const TABS = [
   { id: "overview", label: "Overview" },
+  { id: "monitoring", label: "Monitoring" },
   { id: "controls", label: "Controls" },
   { id: "interfaces", label: "Interfaces" },
   { id: "backup", label: "Backup" },
@@ -279,7 +282,7 @@ export function InstanceTabs({
   // (Overview/Logs); Operator+ unlocks the operational tabs; only the
   // creator/team-owner sees Danger (delete); managers see Access.
   const baseTabs = TABS.filter((t) => {
-    if (t.id === "overview" || t.id === "logs") return true
+    if (t.id === "overview" || t.id === "logs" || t.id === "monitoring") return true
     if (t.id === "danger") return access.isOwnerLike
     return access.canOperate
   })
@@ -316,6 +319,9 @@ export function InstanceTabs({
 
       <TabsContent value="overview" className="mt-0">
         <OverviewTab instance={instance} logs={logs} kuma={kuma} />
+      </TabsContent>
+      <TabsContent value="monitoring" className="mt-0">
+        <MonitoringTab instance={instance} kuma={kuma} />
       </TabsContent>
       <TabsContent value="controls" className="mt-0">
         <ControlsTab instance={instance} cloudflare={cloudflare} />
@@ -1231,6 +1237,106 @@ function OverviewTab({
         )}
       </SectionCard>
     </div>
+  )
+}
+
+/* ───────────── MONITORING ───────────── */
+type AgentEventLite = {
+  id: string
+  type: string
+  status: string | null
+  model: string | null
+  tokensIn: number | null
+  tokensOut: number | null
+  costUsd: number | null
+  latencyMs: number | null
+  runId: string | null
+  occurredAt: string | null
+  createdAt: string
+}
+
+function MonitoringTab({ instance, kuma }: { instance: InstanceLite; kuma: KumaInfo }) {
+  return (
+    <div className="w-full space-y-4">
+      <SectionCard title="Spend">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          <Stat label="Total LLM cost" value={`$${(instance.costUsd ?? 0).toFixed(2)}`} />
+          <Stat
+            label="Last event"
+            value={instance.lastEventAt ? new Date(instance.lastEventAt).toLocaleString() : "—"}
+          />
+        </div>
+      </SectionCard>
+
+      {instance.status === "running" && <UptimeCard kuma={kuma} />}
+
+      <AgentEventsPanel instanceId={instance.id} />
+    </div>
+  )
+}
+
+function AgentEventsPanel({ instanceId }: { instanceId: string }) {
+  const [events, setEvents] = useState<AgentEventLite[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await fetch(`/api/instances/${instanceId}/events`, { cache: "no-store" })
+        const j = (await r.json()) as { events?: AgentEventLite[] }
+        if (!cancelled) setEvents(j.events ?? [])
+      } catch {
+        /* ignore — empty state covers it */
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [instanceId])
+
+  return (
+    <SectionCard
+      title="Recent activity"
+      description="Runs, tool calls, and errors emitted by the agent."
+    >
+      {loading ? (
+        <p className="text-xs text-muted-foreground">Loading…</p>
+      ) : events.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          No agent events yet. Activity appears here once the agent&apos;s event pipeline is live.
+        </p>
+      ) : (
+        <div className="space-y-1.5 font-mono text-xs">
+          {events.map((e) => (
+            <div key={e.id} className="flex flex-wrap items-center gap-2">
+              <span
+                className={
+                  e.status === "error"
+                    ? "text-destructive"
+                    : e.type === "error"
+                      ? "text-destructive"
+                      : "text-primary"
+                }
+              >
+                {e.type}
+              </span>
+              <span className="text-muted-foreground/70">
+                {(e.occurredAt ?? e.createdAt).slice(0, 19)}
+              </span>
+              {e.model && <span className="text-muted-foreground">{e.model}</span>}
+              {e.latencyMs != null && <span className="text-muted-foreground">{e.latencyMs}ms</span>}
+              {e.costUsd != null && (
+                <span className="text-muted-foreground">${e.costUsd.toFixed(4)}</span>
+              )}
+              {e.status && <span className="text-foreground">{e.status}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </SectionCard>
   )
 }
 

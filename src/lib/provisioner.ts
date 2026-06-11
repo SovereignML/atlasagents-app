@@ -1431,6 +1431,9 @@ async function configureRuntimeOverSsh(
       : generateAdminPassword())
     : ""
   const gatewayToken = generateGatewayToken()
+  // Per-instance observability ingest token (least-privilege, separate from the
+  // gateway token) — injected into the env and persisted encrypted at commit.
+  const eventIngestToken = generateGatewayToken()
   const webuiSecretKey = webuiEnabled ? generateGatewayToken() : ""
   const tier = (instance.modelTier ?? "mid") as BudgetTier
   const route = routeModel(tier, llmProvider)
@@ -1467,6 +1470,10 @@ async function configureRuntimeOverSsh(
     gatewayToken,
     openRouterApiKey,
   })
+  // Observability ingest wiring — runtime-agnostic, so both OpenClaw and Hermes
+  // emit to the same endpoint with the same token contract.
+  env.PLATFORM_EVENT_INGEST_URL = `${NEXT_PUBLIC_GATEWAY_BASE_URL()}/api/instances/${instance.id}/events`
+  env.PLATFORM_EVENT_INGEST_TOKEN = eventIngestToken
 
   const envContent = renderEnvFile(env)
   const envB64 = Buffer.from(envContent, "utf8").toString("base64")
@@ -1794,6 +1801,7 @@ async function configureRuntimeOverSsh(
       containerPort: runtime.gatewayPort,
       ...adminFields,
       gatewayTokenEnc: encryptSecret(gatewayToken),
+      eventIngestTokenEnc: encryptSecret(eventIngestToken),
       dnsStatus: instance.domain ? "pending" : null,
       tlsStatus: instance.domain ? "pending" : null,
       provisionStage: "commit",
@@ -2370,6 +2378,12 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
       ? decryptSecret(instance.gatewayTokenEnc)
       : generateGatewayToken()
 
+    // Reuse the existing ingest token; mint one for legacy instances that
+    // predate the column (persisted below so the on-disk token matches the DB).
+    const eventIngestToken = instance.eventIngestTokenEnc
+      ? decryptSecret(instance.eventIngestTokenEnc)
+      : generateGatewayToken()
+
     const initModel =
       runtime.id === "hermes" && llmProvider === "openrouter"
         ? hermesModel(tier)
@@ -2388,6 +2402,17 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
       gatewayToken,
       openRouterApiKey,
     })
+    env.PLATFORM_EVENT_INGEST_URL = `${NEXT_PUBLIC_GATEWAY_BASE_URL()}/api/instances/${instance.id}/events`
+    env.PLATFORM_EVENT_INGEST_TOKEN = eventIngestToken
+
+    // Persist a freshly-minted ingest token (legacy instance) so the on-disk
+    // value the agent will send matches what the ingest endpoint expects.
+    if (!instance.eventIngestTokenEnc) {
+      await db
+        .update(instances)
+        .set({ eventIngestTokenEnc: encryptSecret(eventIngestToken) })
+        .where(eq(instances.id, instance.id))
+    }
 
     const { sshWriteFile } = await import("@/lib/ssh")
 

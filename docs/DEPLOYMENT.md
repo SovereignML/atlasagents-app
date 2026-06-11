@@ -2,6 +2,8 @@
 
 End-to-end: from fresh VPS → public HTTPS URL → one-click OpenClaw deploys working.
 
+> **⚠️ Docker files not yet in the repo.** Steps 4, 7–9 below describe a `docker compose` flow, but the repo currently ships no `Dockerfile`/`docker-compose.yml`. The supported deploy path today is the **bare-metal pm2/systemd setup in [`deploy/README.md`](../deploy/README.md)** — use that, and treat the env-var/cron/Stripe sections of this guide as the reference for configuration.
+
 ---
 
 ## 0. What you need before you start
@@ -177,16 +179,15 @@ You want to see:
 ## 8. Create your admin user
 
 ```bash
-docker compose exec app npx tsx scripts/make-admin.ts you@example.com
+npm run make-admin -- admin@sovereignml.com
 ```
 
-Then register via the app's sign-up page — the user with that email will be promoted to `admin`.
+The script prompts (hidden input, typed twice) for the password you want — or set `ADMIN_PASSWORD` in the env to skip the prompt. It creates the user with `role=admin` and a pre-verified email, or — if the account already exists (e.g. you registered via the sign-up page first) — promotes it to admin, keeping the existing password unless you type a new one.
 
-*(If no `make-admin.ts` script exists yet, run it manually:)*
-```bash
-docker compose exec postgres psql -U sovereignml -d sovereignml \
-  -c "UPDATE \"User\" SET role='admin' WHERE email='you@example.com';"
-```
+Notes:
+- Email defaults to `ADMIN_EMAIL` (or `admin@sovereignml.com`) when no argument is given.
+- The db seed also creates this admin from `ADMIN_EMAIL`/`ADMIN_PASSWORD`, but **in production it refuses to run with the weak dev default** — it skips the admin and tells you to run `make-admin` instead.
+- In the Docker flow, prefix with `docker compose exec app`.
 
 ---
 
@@ -318,6 +319,9 @@ Several subsystems are driven by cron hitting authenticated endpoints with a `Au
 | `POST /api/billing/usage-sync` | `USAGE_SYNC_CRON_TOKEN` | ~every 10 min | Poll OpenRouter spend, charge wallets, enforce caps ([BILLING.md](BILLING.md)). |
 | `POST /api/billing/daily` | `BILLING_CRON_TOKEN` | daily | Daily compute billing (accrues provider usage). |
 | `POST /api/audit-log/prune` | `AUDIT_RETENTION_CRON_TOKEN` | daily | Delete audit-log rows older than 7 days. |
+| `POST /api/admin/notifications/prune` | `ADMIN_NOTIFICATION_RETENTION_CRON_TOKEN` | daily | Delete **resolved** admin notifications older than 30 days. |
+| `POST /api/internal/alerts-eval` | `ALERTS_EVAL_CRON_TOKEN` | ~every 5–10 min | Evaluate team alert rules against recent agent events and fire notifications. Without this cron, alert rules never trigger. |
+| `POST /api/internal/events-prune` | `EVENTS_RETENTION_CRON_TOKEN` | daily | Delete `AgentEvent` rows older than `EVENTS_RETENTION_DAYS` (default 30). Without this cron, the events table grows unbounded. |
 | `POST /api/admin/reconcile` | `RECONCILE_CRON_TOKEN` | daily | Orphan/state reconciliation; **also** runs provider health probes + budget/burn-rate sync so the router scores on fresh data ([PROVIDERS.md](PROVIDERS.md)). Allow ≥60s timeout. |
 | `POST /api/admin/backups/cron` | `BACKUP_CRON_TOKEN` | nightly | Full `pg_dump` of the database, streamed to Cloudflare R2, with retention pruning. Requires R2 creds configured in `/admin/backups` and a `postgresql-client` on the app host. Allow ≥120s timeout. |
 

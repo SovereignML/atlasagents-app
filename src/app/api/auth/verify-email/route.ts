@@ -4,6 +4,7 @@ import {
   emailVerifyIdentifier,
   hashVerificationToken,
 } from "@/lib/email-verification"
+import { rateLimit } from "@/lib/rate-limit"
 
 export async function POST(request: Request) {
   try {
@@ -11,6 +12,15 @@ export async function POST(request: Request) {
 
     if (!token || !email) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
+    }
+
+    // Throttle token guessing before any DB work: per-email and per-IP.
+    const ip = request.headers.get("x-forwarded-for") || "unknown"
+    if (
+      !(await rateLimit(`verify-email:${email.toLowerCase()}`, 10, 15 * 60 * 1000)) ||
+      !(await rateLimit(`verify-email-ip:${ip}`, 30, 15 * 60 * 1000))
+    ) {
+      return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 })
     }
 
     const identifier = emailVerifyIdentifier(email)

@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
         await handleChargeDisputeClosed(event.data.object)
         break
       default:
-        console.log(`[stripe webhook] Unhandled event type: ${event.type}`)
+        console.warn(`[stripe-webhook] Unhandled event type: ${event.type}`)
     }
   } catch (err) {
     // Roll back the claim so Stripe's retry can re-attempt.

@@ -8,6 +8,13 @@ import { headers } from "next/headers"
  */
 export const AUDIT_RETENTION_DAYS = 7
 
+/**
+ * How long *resolved* admin notifications are kept. Unresolved notifications
+ * are never auto-pruned (they're actionable). Deleted by the prune cron
+ * (`/api/admin/notifications/prune`).
+ */
+export const ADMIN_NOTIFICATION_RETENTION_DAYS = 30
+
 export type AuditAction =
   | "instance.deploy"
   | "instance.restart"
