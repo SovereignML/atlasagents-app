@@ -29,18 +29,28 @@ async function main() {
   const adminEmail = process.env.ADMIN_EMAIL || "admin@sovereignml.com"
   const adminPassword = process.env.ADMIN_PASSWORD || "admin123456"
 
-  await db
-    .insert(users)
-    .values({
-      email: adminEmail,
-      name: "Admin",
-      hashedPassword: hashSync(adminPassword, 10),
-      role: "admin",
-      // Pre-verified so the seeded admin never sees the verify-email banner.
-      // (Existing DBs: UPDATE "User" SET "emailVerified" = now() WHERE email = ...)
-      emailVerified: new Date(),
-    })
-    .onConflictDoNothing({ target: users.email })
+  // Never seed the well-known dev default password into a production DB.
+  // Set ADMIN_PASSWORD explicitly, or create the admin afterwards with
+  // `npm run make-admin` (interactive password prompt).
+  if (process.env.NODE_ENV === "production" && !process.env.ADMIN_PASSWORD) {
+    console.warn(
+      "[seed] NODE_ENV=production and ADMIN_PASSWORD is unset — skipping admin " +
+        "user seed. Run `npm run make-admin` to create the first admin.",
+    )
+  } else {
+    await db
+      .insert(users)
+      .values({
+        email: adminEmail,
+        name: "Admin",
+        hashedPassword: hashSync(adminPassword, 10),
+        role: "admin",
+        // Pre-verified so the seeded admin never sees the verify-email banner.
+        // (Existing DBs: UPDATE "User" SET "emailVerified" = now() WHERE email = ...)
+        emailVerified: new Date(),
+      })
+      .onConflictDoNothing({ target: users.email })
+  }
 
   // 2. Regions
   for (const region of REGIONS) {

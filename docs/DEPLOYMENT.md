@@ -179,16 +179,15 @@ You want to see:
 ## 8. Create your admin user
 
 ```bash
-docker compose exec app npx tsx scripts/make-admin.ts you@example.com
+npm run make-admin -- admin@sovereignml.com
 ```
 
-Then register via the app's sign-up page — the user with that email will be promoted to `admin`.
+The script prompts (hidden input, typed twice) for the password you want — or set `ADMIN_PASSWORD` in the env to skip the prompt. It creates the user with `role=admin` and a pre-verified email, or — if the account already exists (e.g. you registered via the sign-up page first) — promotes it to admin, keeping the existing password unless you type a new one.
 
-*(If no `make-admin.ts` script exists yet, run it manually:)*
-```bash
-docker compose exec postgres psql -U sovereignml -d sovereignml \
-  -c "UPDATE \"User\" SET role='admin' WHERE email='you@example.com';"
-```
+Notes:
+- Email defaults to `ADMIN_EMAIL` (or `admin@sovereignml.com`) when no argument is given.
+- The db seed also creates this admin from `ADMIN_EMAIL`/`ADMIN_PASSWORD`, but **in production it refuses to run with the weak dev default** — it skips the admin and tells you to run `make-admin` instead.
+- In the Docker flow, prefix with `docker compose exec app`.
 
 ---
 

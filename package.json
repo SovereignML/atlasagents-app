@@ -18,6 +18,7 @@
     "db:generate": "node --env-file=.env node_modules/drizzle-kit/bin.cjs generate",
     "db:migrate": "node --env-file=.env node_modules/drizzle-kit/bin.cjs migrate",
     "db:seed": "node --env-file=.env --import tsx src/db/seed.ts",
+    "make-admin": "node --env-file=.env --import tsx scripts/make-admin.ts",
     "db:studio": "node --env-file=.env node_modules/drizzle-kit/bin.cjs studio",
     "test:vps-router": "tsx scripts/test-vps-router.ts",
     "test:white-label": "tsx scripts/test-white-label.ts",
