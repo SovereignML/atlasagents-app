@@ -2,6 +2,8 @@
 
 End-to-end: from fresh VPS → public HTTPS URL → one-click OpenClaw deploys working.
 
+> **⚠️ Docker files not yet in the repo.** Steps 4, 7–9 below describe a `docker compose` flow, but the repo currently ships no `Dockerfile`/`docker-compose.yml`. The supported deploy path today is the **bare-metal pm2/systemd setup in [`deploy/README.md`](../deploy/README.md)** — use that, and treat the env-var/cron/Stripe sections of this guide as the reference for configuration.
+
 ---
 
 ## 0. What you need before you start
@@ -318,6 +320,9 @@ Several subsystems are driven by cron hitting authenticated endpoints with a `Au
 | `POST /api/billing/usage-sync` | `USAGE_SYNC_CRON_TOKEN` | ~every 10 min | Poll OpenRouter spend, charge wallets, enforce caps ([BILLING.md](BILLING.md)). |
 | `POST /api/billing/daily` | `BILLING_CRON_TOKEN` | daily | Daily compute billing (accrues provider usage). |
 | `POST /api/audit-log/prune` | `AUDIT_RETENTION_CRON_TOKEN` | daily | Delete audit-log rows older than 7 days. |
+| `POST /api/admin/notifications/prune` | `ADMIN_NOTIFICATION_RETENTION_CRON_TOKEN` | daily | Delete **resolved** admin notifications older than 30 days. |
+| `POST /api/internal/alerts-eval` | `ALERTS_EVAL_CRON_TOKEN` | ~every 5–10 min | Evaluate team alert rules against recent agent events and fire notifications. Without this cron, alert rules never trigger. |
+| `POST /api/internal/events-prune` | `EVENTS_RETENTION_CRON_TOKEN` | daily | Delete `AgentEvent` rows older than `EVENTS_RETENTION_DAYS` (default 30). Without this cron, the events table grows unbounded. |
 | `POST /api/admin/reconcile` | `RECONCILE_CRON_TOKEN` | daily | Orphan/state reconciliation; **also** runs provider health probes + budget/burn-rate sync so the router scores on fresh data ([PROVIDERS.md](PROVIDERS.md)). Allow ≥60s timeout. |
 | `POST /api/admin/backups/cron` | `BACKUP_CRON_TOKEN` | nightly | Full `pg_dump` of the database, streamed to Cloudflare R2, with retention pruning. Requires R2 creds configured in `/admin/backups` and a `postgresql-client` on the app host. Allow ≥120s timeout. |
 

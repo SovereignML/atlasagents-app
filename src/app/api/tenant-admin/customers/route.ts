@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
-import { db, eq, and, inArray, sql, users, teams, memberships, instances, notInArray } from "@/db"
+import { db, eq, and, inArray, sql, users, memberships, instances, notInArray } from "@/db"
 import { requireTenantAdmin, isTenantGuardError } from "@/lib/tenant-admin-access"
 import { createChildTeam, getTenantConfig, listChildTeams } from "@/lib/tenant"
 import { logAuditEvent } from "@/lib/audit"

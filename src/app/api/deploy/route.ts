@@ -17,6 +17,7 @@ import { describeVmError } from "@/lib/vm-provider"
 import { depositToWallet } from "@/lib/wallet"
 import { getUserTeam } from "@/lib/team"
 import { createInstanceFromAgentFields } from "@/lib/agent-create"
+import { deploySchema } from "@/lib/validations"
 
 export async function POST(req: NextRequest) {
   try {
@@ -36,28 +37,20 @@ async function handleDeploy(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const body = await req.json()
+  const body = await req.json().catch(() => null)
+  const parsed = deploySchema.safeParse(body)
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 })
+  }
   const {
     name,
-    planSlug = "builder",
+    planSlug,
     regionSlug,
-    billingInterval = "month",
+    billingInterval,
     rootPassword,
     sshPublicKey,
     agentConfig: agentConfigInput,
-  } = body as {
-    name: string
-    planSlug?: string
-    regionSlug?: string
-    billingInterval?: "month" | "year"
-    rootPassword?: string
-    sshPublicKey?: string
-    agentConfig?: unknown
-  }
-
-  if (!name) {
-    return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
-  }
+  } = parsed.data
 
   // ── Resolve plan ──────────────────────────────────────────────────
   const planConfig = findPlanBySlug(planSlug)

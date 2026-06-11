@@ -204,6 +204,8 @@ export default async function InstanceDetailPage({
           byosPort: instance.byosPort ?? null,
           byosUser: instance.byosUser ?? null,
           byosLlmMode: instance.byosLlmMode ?? null,
+          costUsd: instance.openRouterUsageUsd ?? 0,
+          lastEventAt: instance.lastEventAt ? instance.lastEventAt.toISOString() : null,
         }}
         logs={instance.logs.map((l) => ({
           id: l.id,

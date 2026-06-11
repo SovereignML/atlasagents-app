@@ -1,22 +1,29 @@
 // Shared, dependency-free notification vocabulary. Safe to import from both
 // server (dispatch, channels) and client (preferences UI).
 
-export type NotificationCategory = "billing" | "provisioning" | "security"
+export type NotificationCategory = "billing" | "provisioning" | "security" | "monitoring"
 export type NotificationChannel = "inApp" | "email" | "telegram" | "discord" | "slack"
 
-export const CATEGORIES: NotificationCategory[] = ["billing", "provisioning", "security"]
+export const CATEGORIES: NotificationCategory[] = [
+  "billing",
+  "provisioning",
+  "security",
+  "monitoring",
+]
 export const CHANNELS: NotificationChannel[] = ["inApp", "email", "telegram", "discord", "slack"]
 
 export const CATEGORY_LABELS: Record<NotificationCategory, string> = {
   billing: "Billing",
   provisioning: "Provisioning",
   security: "Security",
+  monitoring: "Monitoring",
 }
 
 export const CATEGORY_DESCRIPTIONS: Record<NotificationCategory, string> = {
   billing: "Payments, credits, and subscription changes",
   provisioning: "Agent deployments — success and failure",
   security: "Password and two-factor changes",
+  monitoring: "Agent health, latency, and spend alerts",
 }
 
 export const CHANNEL_LABELS: Record<NotificationChannel, string> = {
@@ -35,6 +42,7 @@ export const DEFAULT_MATRIX: NotificationMatrix = {
   billing: { inApp: true, email: true, telegram: false, discord: false, slack: false },
   provisioning: { inApp: true, email: false, telegram: false, discord: false, slack: false },
   security: { inApp: true, email: true, telegram: false, discord: false, slack: false },
+  monitoring: { inApp: true, email: true, telegram: false, discord: false, slack: false },
 }
 
 // Merge a stored (possibly partial / legacy) matrix over the defaults so a
@@ -46,6 +54,7 @@ export function resolveMatrix(
     billing: { ...DEFAULT_MATRIX.billing },
     provisioning: { ...DEFAULT_MATRIX.provisioning },
     security: { ...DEFAULT_MATRIX.security },
+    monitoring: { ...DEFAULT_MATRIX.monitoring },
   }
   if (!stored) return out
   for (const cat of CATEGORIES) {

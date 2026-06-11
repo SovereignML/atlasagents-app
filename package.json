@@ -10,6 +10,8 @@
     "start": "next start",
     "start:standalone": "node --env-file=.env .next/standalone/server.js",
     "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "bootstrap:pg": "bash scripts/bootstrap-pg.sh",
     "bootstrap:host": "tsx scripts/bootstrap-shared-host.ts",
     "db:push": "node --env-file=.env node_modules/drizzle-kit/bin.cjs push",
@@ -25,7 +27,8 @@
     "test:billing-hardening": "node --env-file=.env --import tsx scripts/test-billing-hardening.ts",
     "openrouter:backfill-usage": "node --env-file=.env --import tsx scripts/backfill-openrouter-usage.ts",
     "wallets:migrate": "node --env-file=.env --import tsx scripts/migrate-wallets-to-credits.ts",
-    "whitelabel:backfill-hostnames": "node --env-file=.env --import tsx scripts/backfill-custom-hostnames.ts"
+    "whitelabel:backfill-hostnames": "node --env-file=.env --import tsx scripts/backfill-custom-hostnames.ts",
+    "seed:agent-events": "node --env-file=.env --import tsx scripts/seed-agent-events.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.10.0",
@@ -67,6 +70,7 @@
     "@types/pg": "^8.11.10",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitest/ui": "^4.1.8",
     "dotenv": "^16.4.7",
     "drizzle-kit": "^0.31.5",
     "eslint": "^9",
@@ -74,6 +78,7 @@
     "shadcn": "^4.1.0",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.8"
   }
 }

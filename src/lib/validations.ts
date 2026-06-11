@@ -11,14 +11,50 @@ export const registerSchema = z.object({
   password: z.string().min(6, "Password must be at least 6 characters"),
 })
 
+// Mirrors the request body accepted by POST /api/deploy. `agentConfig` stays
+// loosely typed here — its full shape is validated downstream by
+// parseAgentConfig (src/lib/agent-config.ts).
 export const deploySchema = z.object({
-  name: z.string().min(2).max(60),
-  regionSlug: z.string().min(1),
-  serverConfigSlug: z.string().min(1),
+  name: z.string().min(1, "Agent name is required").max(60),
+  planSlug: z.string().min(1).default("builder"),
+  regionSlug: z.string().min(1).optional(),
   billingInterval: z.enum(["month", "year"]).default("month"),
-  extraStorageGb: z.number().int().min(0).max(1000).default(0),
   rootPassword: z.string().min(8).max(128).optional(),
   sshPublicKey: z.string().optional(),
+  agentConfig: z.unknown().optional(),
+})
+
+// Agent observability events POSTed to /api/instances/<id>/events. The agent
+// (or its forwarder/poller) supplies a stable `id` per event so retries dedupe
+// on the AgentEvent primary key — see the ingest route. `detail` is free-form.
+export const agentEventSchema = z.object({
+  id: z.string().min(1).max(128),
+  type: z.enum(["run.started", "run.finished", "tool.called", "message", "error", "heartbeat"]),
+  occurredAt: z.string().max(40).optional(),
+  runId: z.string().max(128).optional(),
+  sessionId: z.string().max(128).optional(),
+  model: z.string().max(200).optional(),
+  tokensIn: z.number().int().nonnegative().optional(),
+  tokensOut: z.number().int().nonnegative().optional(),
+  costUsd: z.number().nonnegative().optional(),
+  latencyMs: z.number().int().nonnegative().optional(),
+  status: z.enum(["ok", "error"]).optional(),
+  detail: z.unknown().optional(),
+})
+
+export const agentEventsBatchSchema = z.object({
+  events: z.array(agentEventSchema).min(1).max(500),
+})
+
+// Create/update an alert rule. instanceId omitted = fleet-wide (all team agents).
+export const alertRuleSchema = z.object({
+  instanceId: z.string().min(1).optional(),
+  metric: z.enum(["down", "latency_ms", "uptime_ratio", "cost_usd_period", "error_rate"]),
+  comparator: z.enum(["gt", "lt"]),
+  threshold: z.number().finite(),
+  windowMinutes: z.number().int().min(1).max(10080).default(60),
+  cooldownMinutes: z.number().int().min(1).max(10080).default(60),
+  enabled: z.boolean().default(true),
 })
 
 export const userUpdateSchema = z.object({
