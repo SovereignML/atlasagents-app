@@ -12,7 +12,8 @@ import { createInstanceFromAgentFields } from "@/lib/agent-create"
 import { reprovisionBotEnv, provisionBot } from "@/lib/provisioner"
 import { describeVmError } from "@/lib/vm-provider"
 import { findPlanBySlug } from "@/configs/plans"
-import { depositToWallet } from "@/lib/wallet"
+import { depositPlanCredits } from "@/lib/wallet"
+import { planPeriodEnd } from "@/lib/plan-period"
 
 const BodySchema = z.object({
   mode: z.enum(["new", "in_place"]),
@@ -250,10 +251,10 @@ export async function POST(
   }
   if (createdPlan.creditsPerPeriod > 0) {
     try {
-      await depositToWallet(
+      await depositPlanCredits(
         ownerId,
         createdPlan.creditsPerPeriod,
-        "plan_deposit",
+        planPeriodEnd("month"),
         `Restore grant — ${createdPlan.name}`,
         newId,
       )

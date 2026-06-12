@@ -697,12 +697,25 @@ export const wallets = pgTable(
     // src/lib/openrouter-billing.ts. Integer credits in a float column, same
     // legacy convention as `balance`.
     lifetimeFundedCredits: doublePrecision().default(0).notNull(),
+    // Use-it-or-lose-it bucket: the unspent portion of the CURRENT period's
+    // `plan_deposit`. A sub-portion of `balance` (persistent credits =
+    // balance − planCredits). Deductions drain this first (see deductWithinTx),
+    // a new plan deposit expires-then-replaces it, and an expiry sweep zeroes
+    // it once `planCreditsExpireAt` passes (cancelled/lapsed subs). Purchased
+    // top-ups / admin grants / refunds are NOT plan credits and never expire.
+    // Integer credits in a float column, same legacy convention as `balance`.
+    planCredits: doublePrecision().default(0).notNull(),
+    // When the current plan bucket expires (= subscription.currentPeriodEnd at
+    // deposit time). Null when there are no live plan credits.
+    planCreditsExpireAt: timestamp({ mode: "date", withTimezone: false }),
     // Bigint migration — Commit 1 of 3 (additive). Backfill via
     // scripts/migrate-wallet-bigint.ts. Once dual-write is live and a few
     // days of drift checks come back clean, flip reads in Commit 3 and
     // drop the float columns. See plan-and-fix-these-hazy-riddle.md §3.1.
     balanceCents: bigint({ mode: "number" }),
     minimumBalanceCents: bigint({ mode: "number" }),
+    // Cents shadow for planCredits (1 credit = 1 cent), same dual-write pattern.
+    planCreditsCents: bigint({ mode: "number" }),
     createdAt: now(),
     updatedAt: timestamp({ mode: "date", withTimezone: false })
       .defaultNow()
@@ -714,6 +727,8 @@ export const wallets = pgTable(
     // Belt-and-suspenders: DB refuses negative balances even if a future code
     // path bypasses `deductFromWallet`. See src/lib/wallet.ts.
     check("Wallet_balance_nonneg", sql`${t.balance} >= 0`),
+    // The plan bucket is a sub-portion of the balance and never negative.
+    check("Wallet_planCredits_nonneg", sql`${t.planCredits} >= 0`),
   ],
 )
 
@@ -1799,6 +1814,26 @@ export const instanceAccessRelations = relations(instanceAccess, ({ one }) => ({
     relationName: "accessGrantor",
   }),
 }))
+
+// AllowedModel — admin-managed mirror of the OpenRouter ACCOUNT model
+// allowlist. Per-instance runtime keys are minted under the platform account,
+// so bots can only reach models enabled there; this table is what the admin
+// dashboard edits when that account allowlist changes (the code constant
+// ALLOWED_OPENROUTER_MODELS only seeds the first run). `enabled=false` keeps
+// the row (and its metadata) while hiding the model from agent selection.
+export const allowedModels = pgTable("AllowedModel", {
+  // OpenRouter slug, e.g. "minimax/minimax-m2.5" or "google/gemma-4-31b-it:free".
+  slug: text().primaryKey(),
+  label: text().notNull(),
+  // chat | image | moderation — only chat models are usable as agent brains.
+  kind: text().default("chat").notNull(),
+  enabled: boolean().default(true).notNull(),
+  createdAt: now(),
+  updatedAt: timestamp({ mode: "date", withTimezone: false })
+    .defaultNow()
+    .notNull()
+    .$onUpdate(() => new Date()),
+})
 
 // Re-export sql for convenience in call sites.
 export { sql }

@@ -66,7 +66,8 @@ export async function PUT(req: Request) {
   // Verify-on-save: list inboxes to confirm base URL + token + account are valid.
   try {
     const res = await fetch(`${normalizedBase}/api/v1/accounts/${accountId}/inboxes`, {
-      headers: { api_access_token: effectiveToken },
+      // Hyphenated: nginx drops underscore headers by default (see cwFetch).
+      headers: { "api-access-token": effectiveToken },
       signal: AbortSignal.timeout(8000),
     })
     if (!res.ok) {

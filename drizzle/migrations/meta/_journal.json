@@ -120,6 +120,20 @@
       "when": 1781091573708,
       "tag": "0016_cultured_chronomancer",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1781249153044,
+      "tag": "0017_puzzling_masked_marvel",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1781274772709,
+      "tag": "0018_tricky_aaron_stack",
+      "breakpoints": true
     }
   ]
 }

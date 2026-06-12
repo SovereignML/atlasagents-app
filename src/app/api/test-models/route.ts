@@ -1,22 +1,31 @@
 import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
+import type { BudgetTier } from "@/lib/agent-config"
+import { allowedModelSlugs } from "@/lib/allowed-models"
 import {
-  NVIDIA_BASE_URL,
-  NVIDIA_FALLBACK_MODELS,
-  nvidiaKeyForSlot,
+  OPENROUTER_BASE_URL,
+  hermesModel,
+  isValidOpenRouterSlug,
+  routeModel,
 } from "@/lib/model-router"
 
 /**
- * Admin-only NVIDIA fallback debug endpoint, backing the admin "Models" panel.
+ * Admin-only OpenRouter debug endpoint, backing the admin "Models" panel.
  *
- *   GET  — liveness-probe each curated NVIDIA_FALLBACK_MODELS entry (1-token
- *          completion) using its per-slot key.
- *   POST {modelId, prompt?} — run a small completion against a configured model.
+ *   GET  — returns the full OpenRouter model catalog (public endpoint, no key)
+ *          plus a liveness probe (1-token completion) of each model the
+ *          platform routes by default, using the platform OPENROUTER_API_KEY.
+ *   POST {model, prompt?} — run a small completion against any OpenRouter slug.
  *
- * Keys come from env (NVIDIA_API_KEY_PRIMARY/_SECONDARY, legacy NVIDIA_API_KEY);
- * never hardcode.
+ * The platform key comes from env (OPENROUTER_API_KEY); never hardcode.
  */
+
+const TIERS: BudgetTier[] = ["low", "mid", "high"]
+
+function platformKey(): string {
+  return (process.env.OPENROUTER_API_KEY || "").trim()
+}
 
 async function isAdmin(): Promise<boolean> {
   const session = await auth()
@@ -24,106 +33,167 @@ async function isAdmin(): Promise<boolean> {
   return (session.user as { role?: string }).role === "admin"
 }
 
-export async function GET() {
-  if (!(await isAdmin())) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
-
-  const results = await Promise.all(
-    NVIDIA_FALLBACK_MODELS.map(async (m) => {
-      const started = Date.now()
-      try {
-        const res = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${nvidiaKeyForSlot(m.keySlot)}`,
-          },
-          body: JSON.stringify({
-            model: m.model,
-            messages: [{ role: "user", content: "ping" }],
-            max_tokens: 1,
-          }),
-        })
-        return {
-          id: m.id,
-          label: m.label,
-          model: m.model,
-          keySlot: m.keySlot,
-          ok: res.ok,
-          status: res.status,
-          ms: Date.now() - started,
-        }
-      } catch (e) {
-        return {
-          id: m.id,
-          label: m.label,
-          model: m.model,
-          keySlot: m.keySlot,
-          ok: false,
-          error: String(e),
-          ms: Date.now() - started,
-        }
-      }
-    }),
-  )
-
-  return NextResponse.json({ results })
+type CatalogModel = {
+  id: string
+  name: string
+  contextLength: number | null
+  promptPrice: string | null
+  completionPrice: string | null
+  /** On the OpenRouter ACCOUNT allowlist — bots can only reach these. */
+  allowed: boolean
 }
 
-export async function POST(req: Request) {
-  if (!(await isAdmin())) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+async function fetchCatalog(allowed: Set<string>): Promise<CatalogModel[]> {
+  const res = await fetch(`${OPENROUTER_BASE_URL}/models`, {
+    // The catalog changes as providers list/delist models; don't cache stale lists.
+    cache: "no-store",
+  })
+  if (!res.ok) throw new Error(`OpenRouter /models ${res.status}`)
+  const json = (await res.json()) as {
+    data?: {
+      id: string
+      name?: string
+      context_length?: number
+      pricing?: { prompt?: string; completion?: string }
+    }[]
   }
+  return (json.data ?? []).map((m) => ({
+    id: m.id,
+    name: m.name ?? m.id,
+    contextLength: m.context_length ?? null,
+    promptPrice: m.pricing?.prompt ?? null,
+    completionPrice: m.pricing?.completion ?? null,
+    allowed: allowed.has(m.id),
+  }))
+}
 
-  let body: { modelId?: string; prompt?: string }
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
+/** The model slugs the platform routes by default, with where each is used. */
+function configuredModels(): { model: string; role: string }[] {
+  const route = routeModel("mid")
+  const entries: { model: string; role: string }[] = [
+    { model: route.model, role: "OpenClaw primary" },
+    { model: route.fallback, role: "OpenClaw fallback" },
+    ...TIERS.map((tier) => ({
+      model: hermesModel(tier),
+      role: `Hermes ${tier} tier`,
+    })),
+  ]
+  // Dedupe by slug, merging roles, so shared slugs probe (and bill) once.
+  const byModel = new Map<string, string[]>()
+  for (const e of entries) {
+    byModel.set(e.model, [...(byModel.get(e.model) ?? []), e.role])
   }
+  return [...byModel.entries()].map(([model, roles]) => ({
+    model,
+    role: roles.join(", "),
+  }))
+}
 
-  const target = NVIDIA_FALLBACK_MODELS.find((m) => m.id === body.modelId)
-  if (!target) {
-    return NextResponse.json({ error: "Unknown modelId" }, { status: 400 })
-  }
-  const prompt = body.prompt?.trim() || "Reply with exactly: PONG"
-
+async function probeCompletion(
+  model: string,
+  prompt: string,
+  maxTokens: number,
+): Promise<{ ok: boolean; status?: number; ms: number; content?: string; error?: string }> {
   const started = Date.now()
   try {
-    const res = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
+    const res = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${nvidiaKeyForSlot(target.keySlot)}`,
+        Authorization: `Bearer ${platformKey()}`,
       },
       body: JSON.stringify({
-        model: target.model,
+        model,
         messages: [{ role: "user", content: prompt }],
-        max_tokens: 32,
+        max_tokens: maxTokens,
         temperature: 0,
       }),
     })
     const ms = Date.now() - started
     if (!res.ok) {
       const text = await res.text()
-      return NextResponse.json({
-        ok: false,
-        status: res.status,
-        ms,
-        error: text.slice(0, 500),
-      })
+      return { ok: false, status: res.status, ms, error: text.slice(0, 500) }
     }
     const json = (await res.json()) as {
       choices?: { message?: { content?: string } }[]
     }
-    const content = json.choices?.[0]?.message?.content ?? ""
-    return NextResponse.json({ ok: true, status: res.status, ms, content })
+    return {
+      ok: true,
+      status: res.status,
+      ms,
+      content: json.choices?.[0]?.message?.content ?? "",
+    }
   } catch (e) {
-    return NextResponse.json({
-      ok: false,
-      ms: Date.now() - started,
-      error: String(e),
-    })
+    return { ok: false, ms: Date.now() - started, error: String(e) }
   }
+}
+
+export async function GET() {
+  if (!(await isAdmin())) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+  if (!platformKey()) {
+    return NextResponse.json(
+      { error: "OPENROUTER_API_KEY is not set" },
+      { status: 503 },
+    )
+  }
+
+  const allowed = await allowedModelSlugs()
+  let catalog: CatalogModel[]
+  try {
+    catalog = await fetchCatalog(allowed)
+  } catch (e) {
+    return NextResponse.json({ error: String(e) }, { status: 502 })
+  }
+  const catalogIds = new Set(catalog.map((m) => m.id))
+
+  const configured = await Promise.all(
+    configuredModels().map(async ({ model, role }) => {
+      const probe = await probeCompletion(model, "ping", 1)
+      return {
+        model,
+        role,
+        listed: catalogIds.has(model),
+        allowed: allowed.has(model),
+        ok: probe.ok,
+        status: probe.status,
+        ms: probe.ms,
+        error: probe.error,
+      }
+    }),
+  )
+
+  return NextResponse.json({ configured, catalog })
+}
+
+export async function POST(req: Request) {
+  if (!(await isAdmin())) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+  if (!platformKey()) {
+    return NextResponse.json(
+      { error: "OPENROUTER_API_KEY is not set" },
+      { status: 503 },
+    )
+  }
+
+  let body: { model?: string; prompt?: string }
+  try {
+    body = await req.json()
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
+  }
+
+  const model = body.model?.trim() ?? ""
+  if (!isValidOpenRouterSlug(model)) {
+    return NextResponse.json(
+      { error: "model must be a valid OpenRouter <author>/<slug>" },
+      { status: 400 },
+    )
+  }
+  const prompt = body.prompt?.trim() || "Reply with exactly: PONG"
+
+  const result = await probeCompletion(model, prompt, 32)
+  return NextResponse.json(result)
 }

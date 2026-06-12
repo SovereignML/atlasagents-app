@@ -169,7 +169,7 @@ export default function Plan({
   }
 
   return (
-    <div className="bg-background text-foreground overflow-auto">
+    <div className="text-foreground overflow-auto">
       <LayoutGroup>
         <div className="overflow-hidden">
           <ul className="space-y-1 overflow-hidden">
@@ -196,7 +196,7 @@ export default function Plan({
                       onClick={() => toggleTaskExpansion(task.id)}
                     >
                       <div className="mr-2 flex-1 truncate">
-                        <span className={isCompleted ? "text-muted-foreground line-through" : ""}>
+                        <span className={isCompleted ? "text-muted-foreground" : ""}>
                           {task.title}
                         </span>
                       </div>
@@ -253,7 +253,7 @@ export default function Plan({
                                     <StatusIcon status={subtask.status} size="sm" />
                                   </div>
                                   <span
-                                    className={`cursor-pointer text-sm ${subtask.status === "completed" ? "text-muted-foreground line-through" : ""}`}
+                                    className={`cursor-pointer text-sm ${subtask.status === "completed" ? "text-muted-foreground" : ""}`}
                                   >
                                     {subtask.title}
                                   </span>

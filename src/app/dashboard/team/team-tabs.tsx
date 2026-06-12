@@ -62,7 +62,7 @@ export function TeamTabs(props: TeamTabsProps) {
 
   return (
     <Tabs value={active} onValueChange={goTab} className="space-y-8">
-      <TabsList className="w-fit">
+      <TabsList variant="pills" className="w-fit">
         {tabs.map((t) => (
           <TabsTrigger key={t.id} value={t.id}>
             {t.label}

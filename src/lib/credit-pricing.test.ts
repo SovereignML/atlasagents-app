@@ -50,4 +50,26 @@ describe("credit-pricing", () => {
     // If the key spends the whole cap, the wallet charge equals what was funded.
     expect(openRouterUsdToCredits(capUsd)).toBe(fundedCredits)
   })
+
+  describe("balance-based key cap (computeKeyLimitUsd formula)", () => {
+    // The runtime cap is `thisKeyUsageUsd + keyLimitUsdFromCredits(currentBalance)`.
+    // These tests pin the two properties that change (B in the plan) relies on.
+    const funded = 1000 // $10 funded
+    const realSpendUsd = 4.5 // $4.50 of real OpenRouter spend on this key
+    const chargedCredits = openRouterUsdToCredits(realSpendUsd) // 500 credits
+    const balanceAfter = funded - chargedCredits // 500 credits left
+
+    it("equals the old lifetime cap for a single long-lived key (no regression)", () => {
+      // usage + (funded − spent)×margin ≡ funded×margin
+      const longLivedCap = realSpendUsd + keyLimitUsdFromCredits(balanceAfter)
+      expect(longLivedCap).toBeCloseTo(keyLimitUsdFromCredits(funded), 10) // $9
+    })
+
+    it("tightens a reprovisioned (fresh, usage 0) key to the remaining balance", () => {
+      const freshKeyCap = 0 + keyLimitUsdFromCredits(balanceAfter)
+      // $5 balance × 0.9 = $4.50, strictly below the old full $9 lifetime ceiling.
+      expect(freshKeyCap).toBeCloseTo(4.5, 10)
+      expect(freshKeyCap).toBeLessThan(keyLimitUsdFromCredits(funded))
+    })
+  })
 })

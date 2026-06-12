@@ -30,6 +30,8 @@ const tabsListVariants = cva(
       variant: {
         default: "bg-muted",
         line: "gap-1 bg-transparent",
+        pills:
+          "h-auto flex-wrap gap-2 rounded-none bg-transparent p-0 text-foreground group-data-horizontal/tabs:h-auto",
       },
     },
     defaultVariants: {
@@ -62,6 +64,9 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
         "group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-active:bg-transparent dark:group-data-[variant=line]/tabs-list:data-active:border-transparent dark:group-data-[variant=line]/tabs-list:data-active:bg-transparent",
         "data-active:bg-background data-active:text-foreground dark:data-active:border-input dark:data-active:bg-input/30 dark:data-active:text-foreground",
         "after:absolute after:bg-foreground after:opacity-0 after:transition-opacity group-data-horizontal/tabs:after:inset-x-0 group-data-horizontal/tabs:after:bottom-[-5px] group-data-horizontal/tabs:after:h-0.5 group-data-vertical/tabs:after:inset-y-0 group-data-vertical/tabs:after:-right-1 group-data-vertical/tabs:after:w-0.5 group-data-[variant=line]/tabs-list:data-active:after:opacity-100",
+        // pills — mirrors Button size="sm" variant="outline", active = variant="default"
+        "group-data-[variant=pills]/tabs-list:h-8 group-data-[variant=pills]/tabs-list:flex-none group-data-[variant=pills]/tabs-list:rounded-xl group-data-[variant=pills]/tabs-list:border-border group-data-[variant=pills]/tabs-list:bg-background group-data-[variant=pills]/tabs-list:px-3 group-data-[variant=pills]/tabs-list:text-[0.8rem] group-data-[variant=pills]/tabs-list:text-foreground group-data-[variant=pills]/tabs-list:hover:bg-muted dark:group-data-[variant=pills]/tabs-list:border-input dark:group-data-[variant=pills]/tabs-list:bg-input/30 dark:group-data-[variant=pills]/tabs-list:text-foreground dark:group-data-[variant=pills]/tabs-list:hover:bg-input/50",
+        "group-data-[variant=pills]/tabs-list:data-active:border-transparent group-data-[variant=pills]/tabs-list:data-active:bg-primary group-data-[variant=pills]/tabs-list:data-active:text-primary-foreground dark:group-data-[variant=pills]/tabs-list:data-active:border-transparent dark:group-data-[variant=pills]/tabs-list:data-active:bg-primary dark:group-data-[variant=pills]/tabs-list:data-active:text-primary-foreground",
         className
       )}
       {...props}

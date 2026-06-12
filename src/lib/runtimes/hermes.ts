@@ -472,10 +472,6 @@ export const hermesRuntime: RuntimeEngine = {
       env.API_SERVER_CORS_ORIGINS = corsOrigins.join(",")
     }
 
-    // Always expose the NVIDIA key for the best-effort cross-provider fallback.
-    const nvidiaKey = nvidiaKeyForSlot("primary")
-    if (nvidiaKey) env.NVIDIA_API_KEY = nvidiaKey
-
     return env
   },
 

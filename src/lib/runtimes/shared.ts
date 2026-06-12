@@ -1,7 +1,5 @@
 import crypto from "node:crypto"
 import { buildGatewayAllowedOrigins } from "@/lib/instance-gateway-access"
-import { routeModel, resolveLlmProvider, nvidiaKeyForSlot } from "@/lib/model-router"
-import type { BudgetTier } from "@/lib/agent-config"
 import type {
   BootstrapRenderArgs,
   BuildEnvArgs,
@@ -85,40 +83,19 @@ export function createRuntime(spec: RuntimeSpec): RuntimeEngine {
   const envPath = `${spec.installDir}/.env`
 
   function buildEnv(args: BuildEnvArgs): RuntimeEnv {
-    const tier = (args.instance.modelTier ?? "mid") as BudgetTier
-    const provider = resolveLlmProvider(args.instance)
-    const route = routeModel(tier, provider)
     const p = spec.envPrefix
 
-    // The runtime reads a single LLM key (OPENROUTER_API_KEY) paired with
-    // `${p}_LLM_BASE_URL`. For the NVIDIA-primary switch we point that pair at
-    // NVIDIA and feed it the NVIDIA key, so the bot has zero OpenRouter
-    // dependency. NOTE: the package's accepted `${p}_LLM_PROVIDER` values aren't
-    // documented — "nvidia" is set verbatim and should be verified on a real VPS.
-    const primaryKey =
-      provider === "nvidia" ? nvidiaKeyForSlot("primary") : args.openRouterApiKey
-
+    // OPENROUTER_API_KEY is the only LLM key the gateway gets: the package maps
+    // its built-in `openrouter` provider to that env var (verified against the
+    // published dist). Model selection lives in the rendered config file, not
+    // env — the package reads no `${p}_MODEL`/`${p}_LLM_*` vars.
     const env: RuntimeEnv = {
       PORT: String(spec.gatewayPort),
       DOMAIN: args.instance.domain ?? "",
-      OPENROUTER_API_KEY: primaryKey,
+      OPENROUTER_API_KEY: args.openRouterApiKey,
       [`${p}_ADMIN_EMAIL`]: args.adminEmail,
       [`${p}_ADMIN_PASSWORD`]: args.adminPassword,
-      [`${p}_MODEL`]: route.model,
-      [`${p}_FALLBACK_MODEL`]: route.fallback,
-      [`${p}_LLM_PROVIDER`]: provider,
-      [`${p}_LLM_BASE_URL`]: route.baseUrl,
       INSTANCE_ID: args.instance.id,
-    }
-
-    // Always expose the NVIDIA key so the best-effort cross-provider fallback can
-    // authenticate even on the OpenRouter-primary path.
-    const nvidiaKey = nvidiaKeyForSlot("primary")
-    if (nvidiaKey) env.NVIDIA_API_KEY = nvidiaKey
-
-    if (route.fallbackProvider) {
-      env[`${p}_FALLBACK_BASE_URL`] = route.fallbackProvider.baseUrl
-      env[`${p}_FALLBACK_MODEL`] = route.fallbackProvider.model
     }
 
     return env
@@ -129,6 +106,12 @@ export function createRuntime(spec: RuntimeSpec): RuntimeEngine {
    * all external traffic to 127.0.0.1); trustedProxies is 127.0.0.1 so the
    * gateway honours headers from Caddy. The OpenRouter key is passed via env
    * (in .env), not in this config.
+   *
+   * Model refs are `<gateway-provider>/<model-id>`: the segment before the
+   * FIRST slash selects the gateway's provider (and thus which API key env var
+   * it authenticates with). A bare OpenRouter slug like `minimax/minimax-m2.5`
+   * would select a `minimax` provider with no key and the agent fails on every
+   * turn — so the OpenRouter slug must be prefixed with `openrouter/`.
    */
   function renderConfig(args: RenderConfigArgs): string {
     let allowedOrigins = buildGatewayAllowedOrigins({
@@ -156,8 +139,8 @@ export function createRuntime(spec: RuntimeSpec): RuntimeEngine {
       agents: {
         defaults: {
           model: {
-            primary: args.model,
-            fallbacks: [args.fallbackModel],
+            primary: `openrouter/${args.model}`,
+            fallbacks: [`openrouter/${args.fallbackModel}`],
           },
         },
         list: [{ id: "main" }],

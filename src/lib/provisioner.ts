@@ -30,6 +30,7 @@ import {
 import { decryptSecret, encryptSecret } from "@/lib/crypto-secret"
 import { mintRuntimeKey, revokeRuntimeKey } from "@/lib/openrouter-provisioning"
 import { computeKeyLimitUsd } from "@/lib/openrouter-billing"
+import { refundProratedDailyCompute } from "@/lib/daily-billing"
 import { getTenantOpenRouterKey } from "@/lib/tenant"
 import {
   generateAdminPassword,
@@ -110,9 +111,12 @@ export async function getOrMintInstanceOpenRouterKey(
   // the platform wallet (the tenant's OpenRouter account governs spend) and are
   // excluded from the platform usage-sync poller (see src/lib/openrouter-usage.ts).
   const tenantKey = await getTenantOpenRouterKey(instance.teamId)
-  // Otherwise cap the key at the owner's funded credits × margin (USD) — the
-  // hard floor on our cost, enforced server-side by OpenRouter even if the
-  // usage poller stalls. See src/lib/openrouter-billing.ts.
+  // Otherwise cap the fresh key at the owner's CURRENT spendable balance ×
+  // margin (USD) — usage starts at 0, so computeKeyLimitUsd returns exactly the
+  // remaining headroom. This is the hard floor on our cost, enforced
+  // server-side by OpenRouter even if the usage poller stalls, and (unlike the
+  // old lifetime-funded cap) it doesn't hand a reprovisioned key a fresh full
+  // ceiling. See src/lib/openrouter-billing.ts.
   const limitUsd = tenantKey ? undefined : await computeKeyLimitUsd(instance.userId)
   const { keyId, key } = await mintFn(
     { label: `sovereign-${instance.id}`, limitUsd },
@@ -600,9 +604,6 @@ function buildBotEnv(instance: Instance, extras: BotEnv = {}): BotEnv {
     INSTANCE_ID: instance.id,
     PORT: "3000",
   }
-
-  const nvidiaKey = nvidiaKeyForSlot("primary")
-  if (nvidiaKey) env.NVIDIA_API_KEY = nvidiaKey
 
   if (instance.telegramBotTokenEnc) {
     try {
@@ -2173,6 +2174,33 @@ export async function deleteBot(instance: Instance): Promise<DeleteResult> {
         }`,
       })
     }
+  }
+
+  // Refund the unused slice of today's daily-compute charge (best-effort,
+  // idempotent per instance — see refundProratedDailyCompute). No-op for BYOS
+  // and for instances not billed today. The credits land back in the owner's
+  // wallet for reuse by a future agent.
+  try {
+    const refunded = await refundProratedDailyCompute(instance)
+    if (refunded > 0) {
+      await logInstanceEvent({
+        instanceId: instance.id,
+        stage: "delete",
+        action: "compute_refund",
+        message: `Refunded ${refunded} prorated compute credits on delete.`,
+      })
+    }
+  } catch (err) {
+    await logInstanceEvent({
+      instanceId: instance.id,
+      level: "warn",
+      stage: "delete",
+      action: "compute_refund",
+      result: "error",
+      message: `Prorated compute refund failed (non-blocking): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    })
   }
 
   // Revoke the per-instance OpenRouter runtime key (if any) before any path
