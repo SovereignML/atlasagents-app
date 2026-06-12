@@ -2212,6 +2212,8 @@ function BackupTab({
     if (status === "connected") toast.success("Google Drive connected.")
     else if (status === "norefresh")
       toast.error("Google didn't return a refresh token. Please try connecting again.")
+    else if (status === "noscope")
+      toast.error("Google Drive permission was not granted. Reconnect and keep the Drive checkbox checked.")
     else toast.error("Could not connect Google Drive. Please try again.")
     router.replace(`${pathname}?tab=backup`)
     if (status === "connected") router.refresh()
@@ -2225,9 +2227,9 @@ function BackupTab({
         `/api/instances/${instance.id}/backups${fromDrive ? "?source=drive" : ""}`,
         { cache: "no-store" },
       )
-      const j = (await r.json()) as { backups?: BackupLite[]; error?: string }
+      const j = (await r.json()) as { backups?: BackupLite[]; error?: string; detail?: string }
       if (!r.ok) {
-        toast.error(j.error || "Could not load backups.")
+        toast.error(j.detail || j.error || "Could not load backups.")
         return
       }
       setBackups(j.backups ?? [])
@@ -2267,10 +2269,15 @@ function BackupTab({
     setBackingUp(true)
     try {
       const r = await fetch(`/api/instances/${instance.id}/backup`, { method: "POST" })
-      const j = (await r.json()) as { backup?: BackupLite; error?: string; code?: string }
+      const j = (await r.json()) as {
+        backup?: BackupLite
+        error?: string
+        code?: string
+        detail?: string
+      }
       if (!r.ok) {
         if (j.code === "drive_reauth") toast.error("Drive access expired — reconnect to continue.")
-        else toast.error(j.error || "Backup failed.")
+        else toast.error(j.detail || j.error || "Backup failed.")
         return
       }
       if (j.backup) setBackups((prev) => [j.backup as BackupLite, ...prev])

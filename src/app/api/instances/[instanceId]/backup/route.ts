@@ -108,7 +108,16 @@ export async function POST(
   } catch (err) {
     const mapped = driveErrorResponse(err)
     if (mapped) return mapped
-    console.error(`[backup] failed for ${instanceId}:`, err instanceof Error ? err.message : err)
-    return NextResponse.json({ error: "Backup failed. Please try again." }, { status: 500 })
+    console.error(`[backup] failed for ${instanceId}:`, err)
+    // Drive REST errors carry a readable, actionable message (e.g. "Google
+    // Drive upload 403: Google Drive API has not been used in project …").
+    // Surface it so the operator can act without server-log access — these are
+    // safe to show since the backup goes to the user's own Drive.
+    const detail =
+      err instanceof Error && err.message.startsWith("Google Drive ") ? err.message : undefined
+    return NextResponse.json(
+      { error: "Backup failed. Please try again.", ...(detail ? { detail } : {}) },
+      { status: 500 },
+    )
   }
 }
