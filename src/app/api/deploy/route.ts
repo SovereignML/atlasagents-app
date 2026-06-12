@@ -14,7 +14,8 @@ import { BRANDING } from "@/configs/branding"
 import { parseAgentConfig } from "@/lib/agent-config"
 import { provisionBot } from "@/lib/provisioner"
 import { describeVmError } from "@/lib/vm-provider"
-import { depositToWallet } from "@/lib/wallet"
+import { depositPlanCredits } from "@/lib/wallet"
+import { planPeriodEnd } from "@/lib/plan-period"
 import { getUserTeam } from "@/lib/team"
 import { createInstanceFromAgentFields } from "@/lib/agent-create"
 import { deploySchema } from "@/lib/validations"
@@ -175,10 +176,11 @@ async function handleDeploy(req: NextRequest) {
 
     if (planConfig.creditsPerPeriod > 0) {
       try {
-        await depositToWallet(
+        // Use-it-or-lose-it plan credits — expire at the (derived) period end.
+        await depositPlanCredits(
           userId,
           planConfig.creditsPerPeriod,
-          "plan_deposit",
+          planPeriodEnd(billingInterval),
           `Free tier grant — ${planConfig.name}`,
           instanceId,
         )
@@ -293,10 +295,10 @@ async function handleDeploy(req: NextRequest) {
   // actually sees credits arrive when they deploy a paid plan.
   if (planConfig.creditsPerPeriod > 0) {
     try {
-      await depositToWallet(
+      await depositPlanCredits(
         userId,
         planConfig.creditsPerPeriod,
-        "plan_deposit",
+        planPeriodEnd(billingInterval),
         `Dev mode grant — ${planConfig.name} (${billingInterval})`,
         instanceId,
       )

@@ -50,12 +50,16 @@ export function creditsToUsd(credits: number): number {
 }
 
 /**
- * The USD spend cap to set on a user's OpenRouter key(s), given the lifetime
- * credits they've funded. Cumulative (matches OpenRouter's lifetime
- * `usage`/`limit` semantics) — raised on every funding event, never lowered.
+ * Map a number of SPENDABLE credits to the real-USD headroom they buy on
+ * OpenRouter (`credits → USD × margin`). The per-key cap is then
+ * `thisKeyUsageUsd + keyLimitUsdFromCredits(currentBalance)`: a key may spend,
+ * on top of what it already has, exactly the user's remaining balance. See
+ * `computeKeyLimitUsd` in src/lib/openrouter-billing.ts. (Was previously fed
+ * lifetime-funded credits; now fed the current balance so the cap tracks
+ * spendable funds and tightens on spend, expiry, and key reprovision.)
  */
-export function keyLimitUsdFromCredits(fundedCredits: number): number {
-  return creditsToUsd(fundedCredits) * OPENROUTER_MARGIN
+export function keyLimitUsdFromCredits(spendableCredits: number): number {
+  return creditsToUsd(spendableCredits) * OPENROUTER_MARGIN
 }
 
 /**

@@ -1,9 +1,11 @@
-import { db, instances, sql } from "@/db"
-import { deductWithinTx } from "@/lib/wallet"
+import { db, instances, walletTransactions, and, eq, gt, desc, sql } from "@/db"
+import { deductWithinTx, depositWithinTx } from "@/lib/wallet"
+import type { InferSelectModel } from "drizzle-orm"
 import { accrueProviderUsage } from "@/lib/provider-billing"
 import { createAdminNotification } from "@/lib/admin-notify"
 import { notify } from "@/lib/notifications/dispatch"
 import { usdToCredits, formatCredits } from "@/lib/credit-pricing"
+import { proratedRefundCredits, DAY_MS } from "@/lib/compute-proration"
 import { claimEventOn } from "@/lib/idempotency"
 import { maybeWarnLowBalance } from "@/lib/low-balance"
 
@@ -167,4 +169,78 @@ export async function runDailyBilling(): Promise<DailyBillingReport> {
   }
 
   return report
+}
+
+
+/**
+ * Refund the unused portion of today's daily-compute charge when an agent is
+ * deleted mid-day. Daily compute is billed a full day up-front (see
+ * `runDailyBilling`), so deleting partway through should return the slice not
+ * consumed: `dailyCost × (1 − elapsedSinceCharge / 24h)`.
+ *
+ * Best-effort and idempotent: a per-instance claim (`daily_refund:<instanceId>`)
+ * commits in the same transaction as the deposit, so deleteBot retries (the
+ * reconciler re-runs deletions) never double-refund. The refund tops up the
+ * persistent balance (skipLifetimeFunded — it was never new funding) and does
+ * not touch the plan bucket. Never throws — a refund miss must not block
+ * teardown. Returns the credits refunded (0 if nothing to refund).
+ */
+export async function refundProratedDailyCompute(
+  instance: Pick<
+    InferSelectModel<typeof instances>,
+    "id" | "userId" | "name" | "deploymentTarget"
+  >,
+): Promise<number> {
+  // BYOS instances carry no platform compute charge (see runDailyBilling).
+  if (instance.deploymentTarget === "byos") return 0
+
+  try {
+    const now = Date.now()
+    const since = new Date(now - DAY_MS)
+    // Most recent daily_compute charge for this instance within the last day.
+    const charge = await db.query.walletTransactions.findFirst({
+      where: and(
+        eq(walletTransactions.instanceId, instance.id),
+        eq(walletTransactions.type, "daily_compute"),
+        gt(walletTransactions.createdAt, since),
+      ),
+      orderBy: desc(walletTransactions.createdAt),
+      columns: { amount: true, createdAt: true },
+    })
+    if (!charge) return 0
+
+    // The ledger stores the charge as a negative amount.
+    const dailyCostCredits = Math.abs(Math.round(charge.amount))
+    if (dailyCostCredits <= 0) return 0
+
+    const elapsedMs = now - new Date(charge.createdAt).getTime()
+    const refundCredits = proratedRefundCredits(dailyCostCredits, elapsedMs)
+    if (refundCredits <= 0) return 0
+
+    return await db.transaction(async (tx) => {
+      // One refund per instance, ever — robust to multi-day deleteBot retries.
+      const claimed = await claimEventOn(tx, "daily_refund", instance.id, {
+        instanceId: instance.id,
+        refundCredits,
+      })
+      if (!claimed) return 0
+      await depositWithinTx(
+        tx,
+        instance.userId,
+        refundCredits,
+        "compute_refund",
+        `Prorated compute refund on delete: ${instance.name}`,
+        instance.id,
+        { skipLifetimeFunded: true },
+      )
+      return refundCredits
+    })
+  } catch (err) {
+    console.warn(
+      `[daily-billing] prorated refund failed for ${instance.id}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    )
+    return 0
+  }
 }

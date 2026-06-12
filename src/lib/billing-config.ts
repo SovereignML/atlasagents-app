@@ -15,6 +15,7 @@ const CRON_TOKEN_VARS = [
   "RECONCILE_CRON_TOKEN",
   "USAGE_SYNC_CRON_TOKEN",
   "BACKUP_CRON_TOKEN",
+  "CREDIT_EXPIRY_CRON_TOKEN",
 ] as const
 
 /** Stripe price IDs read by src/configs/plans.ts. */

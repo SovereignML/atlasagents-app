@@ -286,9 +286,14 @@ export function InstanceTabs({
     if (t.id === "danger") return access.isOwnerLike
     return access.canOperate
   })
-  const tabs = access.canManageAccess
-    ? [...baseTabs, { id: "access", label: "Access" } as const]
-    : baseTabs
+  const accessTab = { id: "access", label: "Access" } as const
+  const tabs: { id: string; label: string }[] = !access.canManageAccess
+    ? baseTabs
+    : baseTabs.some((t) => t.id === "danger")
+      ? baseTabs.flatMap((t): { id: string; label: string }[] =>
+          t.id === "danger" ? [accessTab, t] : [t],
+        )
+      : [...baseTabs, accessTab]
 
   // If the requested tab isn't permitted (e.g. a deep link), fall back to
   // Overview so the corresponding panel doesn't render.
@@ -309,7 +314,7 @@ export function InstanceTabs({
 
   return (
     <Tabs value={effectiveActive} onValueChange={goTab} className="space-y-6">
-      <TabsList className="w-fit">
+      <TabsList variant="pills" className="w-fit">
         {tabs.map((t) => (
           <TabsTrigger key={t.id} value={t.id}>
             {t.label}
@@ -932,7 +937,8 @@ function DeploymentProgress({
                     <AlertDialogTitle>Delete {instance.name}?</AlertDialogTitle>
                     <AlertDialogDescription>
                       This permanently deletes the agent and tears down any resources
-                      created so far. This action cannot be undone.
+                      created so far. This action cannot be undone. Your remaining
+                      credits stay in your account and can be used by a new agent.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
@@ -2020,21 +2026,18 @@ function LogsTab({ instanceId, logs: polledLogs }: { instanceId: string; logs: L
 
   return (
     <div className="space-y-4">
-      <ToggleGroup
-        value={[level]}
-        onValueChange={(v) => {
-          const next = v[0]
-          if (next) setLevel(next as typeof level)
-        }}
-        variant="outline"
-        size="sm"
-      >
+      <div className="flex flex-wrap gap-2">
         {(["all", "info", "warn", "error"] as const).map((l) => (
-          <ToggleGroupItem key={l} value={l} className="font-mono text-[10px]">
-            {l}
-          </ToggleGroupItem>
+          <Button
+            key={l}
+            size="sm"
+            variant={level === l ? "default" : "outline"}
+            onClick={() => setLevel(l)}
+          >
+            {l === "all" ? "All" : l.charAt(0).toUpperCase() + l.slice(1)}
+          </Button>
         ))}
-      </ToggleGroup>
+      </div>
       <Card className="max-h-[36rem] overflow-y-auto bg-zinc-950 p-4">
         <div className="space-y-1 font-mono text-xs">
           {filtered.length === 0 && !loading ? (
@@ -2140,6 +2143,7 @@ function DangerTab({ instance }: { instance: InstanceLite }) {
                 <AlertDialogTitle>Delete {instance.name}?</AlertDialogTitle>
                 <AlertDialogDescription>
                   This cannot be undone. Type <span className="font-mono text-destructive">{instance.name}</span> to confirm.
+                  Your remaining credits stay in your account and can be used by a new agent.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <FieldGroup>

@@ -7,16 +7,21 @@
 // anomalously, it disables the key + pauses the bot + notifies.
 //
 // This REPLACES the synthetic per-request/token metering that used to live in
-// /api/usage/ingest. The per-key OpenRouter cap (= funded × margin, set at mint
-// and on every top-up) is the hard floor on our cost; this poller is how that
-// real spend gets reflected back into the credit wallet.
+// /api/usage/ingest. The per-key OpenRouter cap (= this key's usage + the
+// user's current balance × margin) is the hard floor on our cost; this poller
+// is how that real spend gets reflected back into the credit wallet, and it
+// also ratchets the cap down to the falling balance between funding events.
 
 import type { InferSelectModel } from "drizzle-orm"
 import { db, instances, eq, and, isNotNull, sql } from "@/db"
 import { getRuntimeKey, updateRuntimeKey } from "@/lib/openrouter-provisioning"
-import { deductWithinTx, isAboveMinimum } from "@/lib/wallet"
+import { deductWithinTx, isAboveMinimum, getWalletCredits } from "@/lib/wallet"
 import { maybeWarnLowBalance } from "@/lib/low-balance"
-import { OPENROUTER_MARGIN, openRouterUsdToCredits } from "@/lib/credit-pricing"
+import {
+  OPENROUTER_MARGIN,
+  openRouterUsdToCredits,
+  keyLimitUsdFromCredits,
+} from "@/lib/credit-pricing"
 import { pauseBot } from "@/lib/provisioner"
 import { logInstanceEvent } from "@/lib/instance-state"
 import { notify } from "@/lib/notifications/dispatch"
@@ -30,6 +35,14 @@ const ANOMALY_USD_PER_INTERVAL = ((): number => {
   const raw = parseFloat(process.env.ANOMALY_USD_PER_INTERVAL ?? "")
   return Number.isFinite(raw) && raw > 0 ? raw : 50
 })()
+
+/** Don't PATCH the cap for sub-microdollar drift (matches the reconciler). */
+const LIMIT_EPSILON = 1e-6
+
+/** Round to micro-precision to avoid float noise on the wire. */
+function roundUsd(usd: number): number {
+  return Math.round(usd * 1e6) / 1e6
+}
 
 export type UsageSyncReport = {
   scanned: number
@@ -169,6 +182,28 @@ export async function runOpenRouterUsageSync(): Promise<UsageSyncReport> {
       } catch (err) {
         report.errors.push(
           `enforce ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
+        )
+      }
+    } else {
+      // ── Ratchet the cap to current spendable balance ─────────────────────
+      // cap = this key's cumulative usage + the real-USD headroom the user's
+      // CURRENT balance still buys. Funding-time sync only ever RAISES the cap;
+      // this is what tightens it back DOWN as the balance falls (api_usage,
+      // daily compute, plan-credit expiry) between funding events. Skip when we
+      // just enforced (the key is disabled; no point re-capping it).
+      try {
+        const balance = await getWalletCredits(row.userId)
+        const intended = roundUsd(state.usageUsd + keyLimitUsdFromCredits(balance))
+        if (state.limitUsd == null || Math.abs(state.limitUsd - intended) > LIMIT_EPSILON) {
+          await updateRuntimeKey(row.openRouterKeyId, { limit: intended })
+          await db
+            .update(instances)
+            .set({ openRouterLimitUsd: intended })
+            .where(eq(instances.id, row.id))
+        }
+      } catch (err) {
+        report.errors.push(
+          `cap ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
         )
       }
     }

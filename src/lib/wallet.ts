@@ -30,6 +30,10 @@ export type WalletTransactionType =
   | "api_usage"
   | "admin_grant"
   | "refund"
+  // Use-it-or-lose-it sweep: unused plan credits removed at period end.
+  | "plan_expiry"
+  // Prorated daily-compute returned when an agent is deleted mid-day.
+  | "compute_refund"
 
 /** A Drizzle transaction handle, as passed to `db.transaction(async (tx) => …)`. */
 export type WalletTx = Parameters<Parameters<typeof db.transaction>[0]>[0]
@@ -52,6 +56,8 @@ export async function getOrCreateWallet(userId: string) {
       // new wallets never need backfilling (1 credit = 1 cent).
       balanceCents: 0,
       minimumBalanceCents: DEFAULT_MIN_CREDITS,
+      planCredits: 0,
+      planCreditsCents: 0,
     })
     .onConflictDoNothing()
     .returning()
@@ -72,8 +78,13 @@ export async function getOrCreateWallet(userId: string) {
 
 /**
  * Deposit credits, inside an existing transaction. Always succeeds (no minimum
- * check). Increments `balance` and the monotonic `lifetimeFundedCredits`
- * counter, and appends a ledger row. Returns the new credit balance.
+ * check). Increments `balance` and (unless `opts.skipLifetimeFunded`) the
+ * monotonic `lifetimeFundedCredits` counter, and appends a ledger row. Returns
+ * the new credit balance.
+ *
+ * `opts.skipLifetimeFunded` is for credits that are returned rather than
+ * purchased (e.g. a prorated `compute_refund` on delete): they top the balance
+ * back up but were never "new funding", so the funded counter must not move.
  */
 export async function depositWithinTx(
   tx: WalletTx,
@@ -82,6 +93,7 @@ export async function depositWithinTx(
   type: WalletTransactionType,
   description?: string,
   instanceId?: string,
+  opts: { skipLifetimeFunded?: boolean } = {},
 ): Promise<number> {
   const amount = Math.round(credits)
   if (amount <= 0) {
@@ -99,12 +111,12 @@ export async function depositWithinTx(
       // bigint once a drift check (see billing-reconcile) confirms they track.
       // COALESCE backfills null rows from the float on their first write.
       balanceCents: sql`COALESCE(${wallets.balanceCents}, ROUND(${wallets.balance})::bigint) + ${amount}`,
-      // Monotonic lifetime-funded counter — drives the OpenRouter key cap.
-      // Every deposit is "funding" (topup, plan_deposit, admin_grant,
-      // refund), so all deposit types accrue here. The only thing that
-      // lowers it is a payment reversal (see deductWithinTx's
-      // `reduceLifetimeFunded` opt), so the cap reflects NET funding.
-      lifetimeFundedCredits: sql`${wallets.lifetimeFundedCredits} + ${amount}`,
+      // Monotonic lifetime-funded counter. Every PURCHASED deposit is "funding"
+      // (topup, plan_deposit, admin_grant, refund), so those accrue here; a
+      // returned credit (compute_refund) passes skipLifetimeFunded.
+      ...(opts.skipLifetimeFunded
+        ? {}
+        : { lifetimeFundedCredits: sql`${wallets.lifetimeFundedCredits} + ${amount}` }),
     })
     .where(eq(wallets.id, wallet.id))
     .returning({ balance: wallets.balance })
@@ -121,6 +133,131 @@ export async function depositWithinTx(
   })
 
   return Math.round(updated.balance)
+}
+
+/**
+ * Remove a locked wallet's leftover plan bucket from the balance and append a
+ * `plan_expiry` ledger row. Returns the credits expired (0 if the bucket was
+ * already empty). Shared by the renewal path (expire-then-replace) and the
+ * period-end sweep. Caller is responsible for `planCreditsExpireAt`.
+ */
+async function expireBucketWithinTx(
+  tx: WalletTx,
+  wallet: { id: string; planCredits: number },
+  instanceId?: string,
+): Promise<number> {
+  const leftover = Math.round(wallet.planCredits ?? 0)
+  if (leftover <= 0) return 0
+
+  const [updated] = await tx
+    .update(wallets)
+    .set({
+      balance: sql`GREATEST(0, ${wallets.balance} - ${leftover})`,
+      balanceCents: sql`GREATEST(0, COALESCE(${wallets.balanceCents}, ROUND(${wallets.balance})::bigint) - ${leftover})`,
+      planCredits: 0,
+      planCreditsCents: 0,
+    })
+    .where(eq(wallets.id, wallet.id))
+    .returning({ balance: wallets.balance })
+
+  if (!updated) throw new Error(`expireBucketWithinTx: wallet ${wallet.id} not found`)
+
+  await tx.insert(walletTransactions).values({
+    walletId: wallet.id,
+    amount: -leftover,
+    type: "plan_expiry",
+    description: "Expired unused plan credits",
+    instanceId: instanceId ?? null,
+    balanceAfter: updated.balance,
+  })
+  return leftover
+}
+
+/**
+ * Deposit a monthly plan allotment as EXPIRING credits, inside an existing
+ * transaction. Use-it-or-lose-it: any unspent plan credits from the prior
+ * period are expired first (a `plan_expiry` ledger row), then the new allotment
+ * is added and becomes the current bucket with the given expiry. Persistent
+ * top-ups are untouched. Returns the new total balance.
+ */
+export async function depositPlanCreditsWithinTx(
+  tx: WalletTx,
+  userId: string,
+  credits: number,
+  expireAt: Date | null,
+  description?: string,
+  instanceId?: string,
+): Promise<number> {
+  const amount = Math.round(credits)
+  if (amount <= 0) {
+    throw new Error(`depositPlanCredits requires a positive credit amount, got ${credits}`)
+  }
+
+  const wallet = await getOrCreateWalletTx(tx, userId, { forUpdate: true })
+
+  // 1. Expire last period's leftover plan credits (no-op if none).
+  await expireBucketWithinTx(tx, wallet, instanceId)
+
+  // 2. Add the new allotment and make it the current bucket. `lifetimeFunded`
+  //    still accrues (reporting; no longer drives the OpenRouter cap).
+  const [updated] = await tx
+    .update(wallets)
+    .set({
+      balance: sql`${wallets.balance} + ${amount}`,
+      balanceCents: sql`COALESCE(${wallets.balanceCents}, ROUND(${wallets.balance})::bigint) + ${amount}`,
+      lifetimeFundedCredits: sql`${wallets.lifetimeFundedCredits} + ${amount}`,
+      planCredits: amount,
+      planCreditsCents: amount,
+      planCreditsExpireAt: expireAt,
+    })
+    .where(eq(wallets.id, wallet.id))
+    .returning({ balance: wallets.balance })
+
+  if (!updated) throw new Error(`depositPlanCredits: wallet not found for user ${userId}`)
+
+  await tx.insert(walletTransactions).values({
+    walletId: wallet.id,
+    amount,
+    type: "plan_deposit",
+    description: description ?? null,
+    instanceId: instanceId ?? null,
+    balanceAfter: updated.balance,
+  })
+
+  return Math.round(updated.balance)
+}
+
+/** Standalone wrapper for {@link depositPlanCreditsWithinTx}. */
+export async function depositPlanCredits(
+  userId: string,
+  credits: number,
+  expireAt: Date | null,
+  description?: string,
+  instanceId?: string,
+): Promise<number> {
+  return db.transaction((tx) =>
+    depositPlanCreditsWithinTx(tx, userId, credits, expireAt, description, instanceId),
+  )
+}
+
+/**
+ * Expire a user's plan bucket NOW (period-end sweep for cancelled/lapsed subs
+ * that get no renewal deposit). Locks the wallet, removes the unspent plan
+ * credits, clears `planCreditsExpireAt`, and returns the credits expired.
+ */
+export async function expirePlanCreditsWithinTx(
+  tx: WalletTx,
+  userId: string,
+): Promise<number> {
+  const wallet = await getOrCreateWalletTx(tx, userId, { forUpdate: true })
+  const expired = await expireBucketWithinTx(tx, wallet)
+  if (wallet.planCreditsExpireAt) {
+    await tx
+      .update(wallets)
+      .set({ planCreditsExpireAt: null })
+      .where(eq(wallets.id, wallet.id))
+  }
+  return expired
 }
 
 /**
@@ -190,6 +327,12 @@ export async function deductWithinTx(
               // Dual-write (see depositWithinTx). GREATEST(0, …) mirrors the
               // non-negative invariant the float column's CHECK enforces.
               balanceCents: sql`GREATEST(0, COALESCE(${wallets.balanceCents}, ROUND(${wallets.balance})::bigint) - ${charge})`,
+              // Use-it-or-lose-it: drain the expiring plan bucket FIRST, so a
+              // spend protects the user's persistent top-ups. GREATEST(0, …)
+              // takes min(charge, planCredits) — once the plan bucket is empty
+              // the rest comes out of persistent credits implicitly.
+              planCredits: sql`GREATEST(0, ${wallets.planCredits} - ${charge})`,
+              planCreditsCents: sql`GREATEST(0, COALESCE(${wallets.planCreditsCents}, ROUND(${wallets.planCredits})::bigint) - ${charge})`,
             }
           : {}),
         ...(reduceFunded
@@ -242,9 +385,10 @@ export async function depositToWallet(
   type: WalletTransactionType,
   description?: string,
   instanceId?: string,
+  opts: { skipLifetimeFunded?: boolean } = {},
 ): Promise<number> {
   return db.transaction((tx) =>
-    depositWithinTx(tx, userId, credits, type, description, instanceId),
+    depositWithinTx(tx, userId, credits, type, description, instanceId, opts),
   )
 }
 
@@ -339,6 +483,8 @@ async function getOrCreateWalletTx(
       // new wallets never need backfilling (1 credit = 1 cent).
       balanceCents: 0,
       minimumBalanceCents: DEFAULT_MIN_CREDITS,
+      planCredits: 0,
+      planCreditsCents: 0,
     })
     .onConflictDoNothing()
     .returning()

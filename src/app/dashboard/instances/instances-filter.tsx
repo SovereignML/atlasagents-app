@@ -20,7 +20,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { runtimeLabel } from "@/lib/runtimes/labels"
 
 type InstanceStatus =
@@ -65,15 +64,15 @@ type Item = {
 }
 
 const FILTERS = [
-  "all",
-  "running",
-  "provisioning",
-  "pending",
-  "stopped",
-  "failed_provisioning",
-  "deleting",
+  { label: "All", value: "all" },
+  { label: "Running", value: "running" },
+  { label: "Provisioning", value: "provisioning" },
+  { label: "Pending", value: "pending" },
+  { label: "Stopped", value: "stopped" },
+  { label: "Failed", value: "failed_provisioning" },
+  { label: "Deleting", value: "deleting" },
 ] as const
-type Filter = (typeof FILTERS)[number]
+type Filter = (typeof FILTERS)[number]["value"]
 
 function mapRowsToItems(
   rows: Array<{
@@ -201,7 +200,7 @@ export function InstancesFilter({ items: initialItems }: { items: Item[] }) {
   return (
     <>
       <div className="flex flex-wrap items-center gap-3">
-        <InputGroup className="min-w-64 flex-1">
+        <InputGroup className="w-full max-w-xs">
           <InputGroupAddon align="inline-start">
             <Search />
           </InputGroupAddon>
@@ -211,21 +210,18 @@ export function InstancesFilter({ items: initialItems }: { items: Item[] }) {
             placeholder="Search by name or slug..."
           />
         </InputGroup>
-        <ToggleGroup
-          value={[status]}
-          onValueChange={(v) => {
-            const next = v[0]
-            if (next) setStatus(next as Filter)
-          }}
-          variant="outline"
-          size="sm"
-        >
+        <div className="flex flex-wrap gap-2">
           {FILTERS.map((f) => (
-            <ToggleGroupItem key={f} value={f} className="font-mono text-[10px]">
-              {f}
-            </ToggleGroupItem>
+            <Button
+              key={f.value}
+              size="sm"
+              variant={status === f.value ? "default" : "outline"}
+              onClick={() => setStatus(f.value)}
+            >
+              {f.label}
+            </Button>
           ))}
-        </ToggleGroup>
+        </div>
         <p className="ml-auto font-mono text-[10px] text-muted-foreground">
           {filtered.length} / {items.length}
         </p>

@@ -17,15 +17,6 @@ export type ModelRoute = {
   baseUrl: string
   /** Env var name holding the API key for `baseUrl`. */
   apiKeyEnv: string
-  /**
-   * Optional cross-provider fallback. Best-effort: only honored if the runtime
-   * package reads the `*_FALLBACK_BASE_URL` / `*_FALLBACK_MODEL` env contract.
-   */
-  fallbackProvider?: {
-    baseUrl: string
-    apiKeyEnv: string
-    model: string
-  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -101,14 +92,17 @@ export function resolveLlmProvider(
 /**
  * Per-tier model routing.
  *
- * - `provider="openrouter"` (default): primary OpenRouter model with a `:free`
- *   same-provider fallback, plus a best-effort NVIDIA cross-provider fallback on
- *   **every** tier (previously mid-only).
- * - `provider="nvidia"`: deterministic NVIDIA-primary route (no OpenRouter
- *   dependency) — Mistral primary, GLM as the same-provider fallback.
+ * - `provider="openrouter"` (default): OpenRouter primary with a same-provider
+ *   fallback. OpenRouter is the only LLM key shipped to bots — there is no
+ *   cross-provider fallback.
+ * - `provider="nvidia"`: dormant NVIDIA-primary route, retained for the
+ *   explicit `LLM_DEFAULT_PROVIDER=nvidia` switch. Not used by default.
  *
  * `tier` is currently uniform but kept in the signature so per-tier models can
  * diverge later without touching callers.
+ *
+ * Slugs verified live against https://openrouter.ai/api/v1/models on
+ * 2026-06-12 (the previous `moonshotai/kimi-k2.6:free` variant was delisted).
  */
 export function routeModel(
   tier: BudgetTier,
@@ -126,15 +120,61 @@ export function routeModel(
   return {
     provider: "openrouter",
     model: "minimax/minimax-m2.5",
-    fallback: "moonshotai/kimi-k2.6:free",
+    fallback: "moonshotai/kimi-k2.6",
     baseUrl: OPENROUTER_BASE_URL,
     apiKeyEnv: "OPENROUTER_API_KEY",
-    fallbackProvider: {
-      baseUrl: NVIDIA_BASE_URL,
-      apiKeyEnv: "NVIDIA_API_KEY",
-      model: NVIDIA_PRIMARY_MODEL,
-    },
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* OpenRouter account allowlist                                        */
+/* ------------------------------------------------------------------ */
+
+export type AllowedModelKind = "chat" | "image" | "moderation"
+
+export type AllowedOpenRouterModel = {
+  /** Live OpenRouter slug (verified against /api/v1/models on 2026-06-12). */
+  slug: string
+  label: string
+  /** Only `chat` models are usable as agent brains for OpenClaw/Hermes. */
+  kind: AllowedModelKind
+}
+
+/**
+ * The models enabled on the platform's OpenRouter account (account-level
+ * provider/model allowlist). Per-instance runtime keys are minted under this
+ * account, so bots can ONLY reach these — any other slug fails at request
+ * time even though it exists in the public catalog. Keep this in sync with
+ * the OpenRouter account settings whenever the allowlist changes there.
+ */
+export const ALLOWED_OPENROUTER_MODELS: AllowedOpenRouterModel[] = [
+  { slug: "anthropic/claude-sonnet-4.6", label: "Claude Sonnet 4.6", kind: "chat" },
+  { slug: "deepseek/deepseek-v4-flash", label: "DeepSeek V4 Flash", kind: "chat" },
+  { slug: "deepseek/deepseek-v4-pro", label: "DeepSeek V4 Pro", kind: "chat" },
+  { slug: "google/gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite", kind: "chat" },
+  { slug: "google/gemini-3.5-flash", label: "Gemini 3.5 Flash", kind: "chat" },
+  { slug: "google/gemma-4-26b-a4b-it:free", label: "Gemma 4 26B A4B (free)", kind: "chat" },
+  { slug: "google/gemma-4-31b-it:free", label: "Gemma 4 31B (free)", kind: "chat" },
+  { slug: "minimax/minimax-m2.5", label: "MiniMax M2.5", kind: "chat" },
+  { slug: "mistralai/mistral-medium-3-5", label: "Mistral Medium 3.5", kind: "chat" },
+  { slug: "mistralai/mistral-small-2603", label: "Mistral Small 4", kind: "chat" },
+  { slug: "moonshotai/kimi-k2.6", label: "Kimi K2.6", kind: "chat" },
+  { slug: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", label: "Nemotron 3 Nano Omni (free)", kind: "chat" },
+  { slug: "nvidia/nemotron-3-ultra-550b-a55b:free", label: "Nemotron 3 Ultra (free)", kind: "chat" },
+  { slug: "openai/gpt-5.4-mini", label: "GPT-5.4 Mini", kind: "chat" },
+  { slug: "openai/gpt-5.4-nano", label: "GPT-5.4 Nano", kind: "chat" },
+  { slug: "openai/gpt-5.5", label: "GPT-5.5", kind: "chat" },
+  { slug: "qwen/qwen3.6-flash", label: "Qwen3.6 Flash", kind: "chat" },
+  { slug: "z-ai/glm-5.1", label: "GLM 5.1", kind: "chat" },
+  { slug: "google/gemini-3.1-flash-image-preview", label: "Nano Banana 2 (Gemini 3.1 Flash Image)", kind: "image" },
+  { slug: "openai/gpt-5.4-image-2", label: "GPT-5.4 Image 2", kind: "image" },
+  { slug: "nvidia/nemotron-3.5-content-safety:free", label: "Nemotron 3.5 Content Safety (free)", kind: "moderation" },
+]
+
+const ALLOWED_SLUGS = new Set(ALLOWED_OPENROUTER_MODELS.map((m) => m.slug))
+
+export function isAllowedOpenRouterModel(slug: string): boolean {
+  return ALLOWED_SLUGS.has(slug.trim())
 }
 
 /* ------------------------------------------------------------------ */
@@ -147,14 +187,16 @@ export function routeModel(
  * `:free` slugs above are unusable here. Slugs must be live OpenRouter `<author>/<slug>`
  * with ≥64k context.
  *
- * Cost-efficient OSS ladder (slugs + pricing verified live against
- * https://openrouter.ai/api/v1/models on 2026-06-07). `low` matches the
+ * Cost-efficient ladder (slugs + pricing verified live against
+ * https://openrouter.ai/api/v1/models on 2026-06-12). `low` matches the
  * `routeModel` OpenRouter primary so platform behavior stays consistent.
+ * Every tier model must be in ALLOWED_OPENROUTER_MODELS — the account-level
+ * allowlist rejects anything else at request time.
  */
 const HERMES_MODELS: Record<BudgetTier, string> = {
-  low: "minimax/minimax-m2.5", // 204k ctx — $0.15/$1.15 per M
-  mid: "z-ai/glm-4.7", // 202k ctx — $0.40/$1.75 per M
-  high: "moonshotai/kimi-k2.6", // 262k ctx — $0.68/$3.42 per M
+  low: "minimax/minimax-m2.5", // 204k ctx — $0.15/$0.90 per M
+  mid: "deepseek/deepseek-v4-pro", // 1048k ctx — $0.43/$0.87 per M
+  high: "moonshotai/kimi-k2.6", // 262k ctx — $0.68/$3.41 per M
 }
 
 /**

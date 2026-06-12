@@ -332,7 +332,10 @@ export async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> 
     .where(eq(subscriptions.id, local.id))
 
   // Deposit the plan's monthly credit allotment. ONE deposit per invoice —
-  // no more dual writes to User.credits + Wallet.balance.
+  // no more dual writes to User.credits + Wallet.balance. Plan credits are
+  // use-it-or-lose-it: they expire at the subscription's current period end
+  // (fundWallet routes plan_deposit through the expiring bucket). The renewal
+  // deposit itself expires the prior period's unspent plan credits.
   const credits = local.plan?.creditsPerPeriod ?? 0
   if (credits > 0) {
     const periodLabel = new Date().toISOString().slice(0, 7) // yyyy-mm
@@ -343,6 +346,7 @@ export async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> 
         "plan_deposit",
         `Plan renewal: ${local.plan?.name ?? "unknown"} (${periodLabel})`,
         (local.instance as { id?: string } | null)?.id,
+        { planExpiry: local.currentPeriodEnd ?? null },
       )
       console.log(
         `[stripe] Granted ${credits.toLocaleString()} credits to user ${local.userId} (invoice ${invoice.id})`,

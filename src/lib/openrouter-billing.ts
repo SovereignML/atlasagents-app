@@ -1,11 +1,18 @@
 // Margin-protected OpenRouter spend caps.
 //
-// Each per-instance OpenRouter runtime key is capped at the USD a user has
-// funded times the margin (`keyLimitUsdFromCredits`). The cap is cumulative —
-// it tracks LIFETIME funded credits, matching OpenRouter's cumulative
-// `usage`/`limit` semantics — so it's only ever raised, on every funding
-// event. This guarantees OpenRouter can never bill us more than the margin
-// fraction of revenue, regardless of how the usage poller behaves.
+// Each per-instance OpenRouter runtime key is capped at
+//   thisKeyUsageUsd + creditsToUsd(currentBalance) × margin
+// i.e. whatever it has already spent PLUS the real-USD headroom the user's
+// current wallet balance still buys. Because OpenRouter enforces cumulative
+// `usage ≤ limit` server-side, this is a hard floor on our cost regardless of
+// how the usage poller behaves. Deriving the cap from the CURRENT balance (not
+// monotonic lifetime-funded) means it tightens automatically when the user
+// spends, when plan credits expire, and — crucially — when a key is revoked
+// and reprovisioned (the fresh key starts at usage 0, so its cap is exactly the
+// remaining balance instead of the full lifetime ceiling). For a single
+// long-lived key this equals the old `lifetimeFunded × margin` behavior
+// (`usage + (funded − spent)×margin ≡ funded×margin`), so it's a tightening,
+// not a regression.
 //
 // `fundWallet` is the funding entry point: deposit credits, then re-sync the
 // caps (raising them and re-enabling any key we'd disabled for low balance).
@@ -13,7 +20,12 @@
 // top-up) should route through it.
 
 import { db, instances, eq, and, isNotNull, sql } from "@/db"
-import { depositToWallet, getLifetimeFundedCredits, type WalletTransactionType } from "@/lib/wallet"
+import {
+  depositToWallet,
+  depositPlanCredits,
+  getWalletCredits,
+  type WalletTransactionType,
+} from "@/lib/wallet"
 import { keyLimitUsdFromCredits } from "@/lib/credit-pricing"
 import { updateRuntimeKey } from "@/lib/openrouter-provisioning"
 
@@ -23,12 +35,17 @@ function roundUsd(usd: number): number {
 }
 
 /**
- * The USD spend cap for a user's OpenRouter key(s), from their lifetime
- * funded credits. Cumulative — never lowered.
+ * The USD spend cap for one of a user's OpenRouter keys: the key's existing
+ * cumulative usage plus the real-USD headroom their CURRENT balance buys.
+ * `keyUsageUsd` defaults to 0 — the correct value for a freshly minted key
+ * (reprovision), which then gets capped at exactly the remaining balance.
  */
-export async function computeKeyLimitUsd(userId: string): Promise<number> {
-  const funded = await getLifetimeFundedCredits(userId)
-  return roundUsd(keyLimitUsdFromCredits(funded))
+export async function computeKeyLimitUsd(
+  userId: string,
+  keyUsageUsd = 0,
+): Promise<number> {
+  const balance = await getWalletCredits(userId)
+  return roundUsd((keyUsageUsd ?? 0) + keyLimitUsdFromCredits(balance))
 }
 
 /**
@@ -43,7 +60,12 @@ async function managedKeyInstances(userId: string) {
       isNotNull(instances.openRouterKeyId),
       sql`${instances.status} != 'deleted'`,
     ),
-    columns: { id: true, openRouterKeyId: true, byosLlmMode: true },
+    columns: {
+      id: true,
+      openRouterKeyId: true,
+      byosLlmMode: true,
+      openRouterUsageUsd: true,
+    },
   })
   return rows.filter((r) => r.byosLlmMode !== "own_key" && r.openRouterKeyId)
 }
@@ -58,10 +80,13 @@ async function managedKeyInstances(userId: string) {
 export async function syncOpenRouterLimitsForUser(userId: string): Promise<void> {
   if (!process.env.OPENROUTER_PROVISIONING_KEY) return
 
-  const limitUsd = await computeKeyLimitUsd(userId)
+  // Read the balance once; each key's cap = its own usage + that headroom.
+  const balance = await getWalletCredits(userId)
+  const headroomUsd = keyLimitUsdFromCredits(balance)
   const rows = await managedKeyInstances(userId)
 
   for (const row of rows) {
+    const limitUsd = roundUsd((row.openRouterUsageUsd ?? 0) + headroomUsd)
     try {
       await updateRuntimeKey(row.openRouterKeyId!, { limit: limitUsd, disabled: false })
       await db
@@ -83,6 +108,11 @@ export async function syncOpenRouterLimitsForUser(userId: string): Promise<void>
  * authoritative, transactional part; cap sync is best-effort (the deposit
  * succeeds even if OpenRouter is unreachable — the reconciler self-heals).
  * Returns the new credit balance.
+ *
+ * `plan_deposit` is routed through the use-it-or-lose-it bucket: any unspent
+ * plan credits from the prior period are expired and the new allotment expires
+ * at `opts.planExpiry` (the subscription's current period end). All other
+ * funding types are persistent.
  */
 export async function fundWallet(
   userId: string,
@@ -90,8 +120,12 @@ export async function fundWallet(
   type: WalletTransactionType,
   description?: string,
   instanceId?: string,
+  opts: { planExpiry?: Date | null } = {},
 ): Promise<number> {
-  const balance = await depositToWallet(userId, credits, type, description, instanceId)
+  const balance =
+    type === "plan_deposit"
+      ? await depositPlanCredits(userId, credits, opts.planExpiry ?? null, description, instanceId)
+      : await depositToWallet(userId, credits, type, description, instanceId)
   try {
     await syncOpenRouterLimitsForUser(userId)
   } catch (err) {

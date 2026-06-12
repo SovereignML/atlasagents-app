@@ -128,7 +128,10 @@ async function cwFetch(cfg: ChatwootConfig, path: string, init: RequestInit): Pr
     signal: AbortSignal.timeout(10_000),
     headers: {
       "Content-Type": "application/json",
-      api_access_token: cfg.apiToken,
+      // Hyphenated on purpose: nginx drops underscore headers by default
+      // (underscores_in_headers off), and Rails normalizes both spellings
+      // to the same key — so this reaches Chatwoot through any proxy.
+      "api-access-token": cfg.apiToken,
       ...(init.headers ?? {}),
     },
   })
