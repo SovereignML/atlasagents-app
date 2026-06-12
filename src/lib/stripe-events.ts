@@ -22,6 +22,7 @@ import { notify } from "@/lib/notifications/dispatch"
 import { createAdminNotification } from "@/lib/admin-notify"
 import { claimEvent } from "@/lib/idempotency"
 import { posthogServer } from "@/lib/posthog-server"
+import { adsConversions } from "@/lib/ads"
 
 // ---------- checkout.session.completed ----------
 // Triggered when the user finishes paying. Flips Instance to "running",
@@ -149,6 +150,39 @@ export async function handleCheckoutSessionCompleted(
       instanceId,
     },
   })
+
+  // Ad-conversion: report the purchase to Meta/Google. This webhook has NO
+  // browser context, so attribution relies on the click IDs + consent we stored
+  // on the user at signup. Best-effort, gated on marketing consent; no-op when
+  // ads aren't configured.
+  try {
+    const buyer = await db.query.users.findFirst({
+      where: eq(users.id, instance.userId),
+      columns: {
+        email: true,
+        fbclid: true,
+        gclid: true,
+        adClickCapturedAt: true,
+        marketingConsent: true,
+      },
+    })
+    if (buyer && buyer.marketingConsent === true && (session.amount_total ?? 0) > 0) {
+      adsConversions.trackPurchase({
+        eventKey: session.id,
+        email: buyer.email,
+        consent: true,
+        value: (session.amount_total ?? 0) / 100,
+        currency: (session.currency ?? "usd").toUpperCase(),
+        clickIds: {
+          fbclid: buyer.fbclid,
+          gclid: buyer.gclid,
+          capturedAtMs: buyer.adClickCapturedAt?.getTime(),
+        },
+      })
+    }
+  } catch (err) {
+    console.error("[stripe] ad-conversion tracking failed:", err)
+  }
 }
 
 // ---------- customer.subscription.updated ----------
