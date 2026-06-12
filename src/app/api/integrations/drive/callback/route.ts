@@ -60,7 +60,15 @@ export async function GET(req: NextRequest) {
   if (!canManageTeam(role)) return dest("error")
 
   try {
-    const { refreshToken, accessToken } = await exchangeDriveCode(code)
+    const { refreshToken, accessToken, scope } = await exchangeDriveCode(code)
+
+    // Google's granular consent lets the user grant `email`/`openid` but untick
+    // the Drive permission — a token is still issued, so the connection would
+    // look "Connected" yet every upload would 403. Reject up front instead.
+    const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+    if (!scope?.split(" ").includes(DRIVE_FILE_SCOPE)) {
+      return dest("noscope")
+    }
 
     // Without a refresh token we can't mint future access tokens. prompt=consent
     // should always yield one; if it doesn't (and we have no prior connection),
@@ -80,6 +88,7 @@ export async function GET(req: NextRequest) {
         .set({
           ...(refreshToken ? { refreshTokenEnc: encryptSecret(refreshToken) } : {}),
           googleEmail: googleEmail ?? existing.googleEmail,
+          scope,
           userId: state.userId,
         })
         .where(eq(driveConnections.teamId, teamId))
@@ -89,7 +98,7 @@ export async function GET(req: NextRequest) {
         userId: state.userId,
         refreshTokenEnc: encryptSecret(refreshToken as string),
         googleEmail,
-        scope: "https://www.googleapis.com/auth/drive.file",
+        scope,
       })
     }
 
