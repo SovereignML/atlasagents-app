@@ -29,7 +29,8 @@
     "openrouter:backfill-usage": "node --env-file=.env --import tsx scripts/backfill-openrouter-usage.ts",
     "wallets:migrate": "node --env-file=.env --import tsx scripts/migrate-wallets-to-credits.ts",
     "whitelabel:backfill-hostnames": "node --env-file=.env --import tsx scripts/backfill-custom-hostnames.ts",
-    "seed:agent-events": "node --env-file=.env --import tsx scripts/seed-agent-events.ts"
+    "seed:agent-events": "node --env-file=.env --import tsx scripts/seed-agent-events.ts",
+    "support:backfill-chatwoot": "node --env-file=.env --import tsx scripts/backfill-chatwoot-messages.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.10.0",

@@ -218,7 +218,12 @@ export async function createSupportConversation(
     }
     if (!sourceId) throw new Error("no source_id for inbox")
 
-    // 4. Open the conversation.
+    const content = `**${args.subject}**\n\n${args.message}`
+
+    // 4. Open the conversation AND seed its first (incoming) message in one
+    //    atomic call. Posting the message separately (the previous approach)
+    //    could leave an empty conversation shell in the inbox if that second
+    //    call failed — `message` inline avoids that entirely.
     const conversation = (await cwFetch(cfg, `/conversations`, {
       method: "POST",
       body: JSON.stringify({
@@ -226,19 +231,24 @@ export async function createSupportConversation(
         inbox_id: inbox,
         contact_id: contactId,
         additional_attributes: { priority: args.priority, subject: args.subject },
+        message: { content },
       }),
     })) as { id?: number }
     const conversationId = conversation.id
     if (!conversationId) throw new Error("no conversation id returned")
 
-    // 5. Post the ticket body as the first (incoming) message.
-    await cwFetch(cfg, `/conversations/${conversationId}/messages`, {
-      method: "POST",
-      body: JSON.stringify({
-        content: `**${args.subject}**\n\n${args.message}`,
-        message_type: "incoming",
-      }),
-    })
+    // 5. Belt-and-suspenders: confirm the message actually landed. Chatwoot
+    //    creates the inline message synchronously, so this GET reliably sees
+    //    it and the fallback POST only fires if the seed genuinely failed —
+    //    no duplicate in the normal path.
+    const seeded = await getConversationMessages(cfg, conversationId)
+    const hasBody = seeded.some((m) => m.content.trim().length > 0)
+    if (!hasBody) {
+      await cwFetch(cfg, `/conversations/${conversationId}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ content, message_type: "incoming" }),
+      })
+    }
 
     return { status: "created", conversationId, contactId }
   } catch (err) {
