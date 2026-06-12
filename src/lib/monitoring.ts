@@ -10,6 +10,7 @@
 
 import { db, instanceLogs, agentEvents, and, eq, gte, inArray, sql } from "@/db"
 import { whereUserInstancesVisible } from "@/lib/instance-queries"
+import type { HeartbeatSample } from "@/components/dashboard/heartbeat-bar"
 
 export type MonitoringAgent = {
   id: string
@@ -26,7 +27,12 @@ export type MonitoringAgent = {
   costUsd: number
   runs24h: number
   lastEventAt: string | null
+  /** Recent Kuma heartbeat history (oldest→newest), for the bar strip. */
+  samples: HeartbeatSample[]
 }
+
+/** Most recent heartbeat samples to render per agent row. */
+const LIST_SAMPLE_COUNT = 30
 
 export type MonitoringSummary = {
   fleet: {
@@ -67,6 +73,7 @@ export async function getMonitoringSummary(userId: string): Promise<MonitoringSu
   // (inArray([]) is an error in SQL).
   let incidents24h = 0
   const runs = new Map<string, number>()
+  const samplesByInstance = new Map<string, HeartbeatSample[]>()
   if (ids.length > 0) {
     const [incidentRow] = await db
       .select({ c: sql<number>`count(*)::int` })
@@ -92,6 +99,33 @@ export async function getMonitoringSummary(userId: string): Promise<MonitoringSu
       )
       .groupBy(agentEvents.instanceId)
     for (const r of runRows) runs.set(r.instanceId, r.c)
+
+    // Heartbeat history: the most recent N samples per agent, in ONE windowed
+    // query (row_number per instance), then grouped in JS.
+    const sampleRows = await db.execute(sql`
+      SELECT "instanceId", status, "responseTimeMs", "checkedAt"
+      FROM (
+        SELECT "instanceId", status, "responseTimeMs", "checkedAt",
+               row_number() OVER (PARTITION BY "instanceId" ORDER BY "checkedAt" DESC) AS rn
+        FROM "InstanceUptimeSample"
+        WHERE "instanceId" = ANY(${ids})
+      ) t
+      WHERE rn <= ${LIST_SAMPLE_COUNT}
+    `)
+    for (const r of sampleRows.rows as Array<{
+      instanceId: string
+      status: string | null
+      responseTimeMs: number | null
+      checkedAt: Date
+    }>) {
+      const list = samplesByInstance.get(r.instanceId) ?? []
+      list.push({
+        status: r.status,
+        responseTimeMs: r.responseTimeMs,
+        checkedAt: new Date(r.checkedAt).toISOString(),
+      })
+      samplesByInstance.set(r.instanceId, list)
+    }
   }
 
   // Avg latency across running agents that have a Kuma reading.
@@ -125,6 +159,7 @@ export async function getMonitoringSummary(userId: string): Promise<MonitoringSu
       costUsd: r.openRouterUsageUsd ?? 0,
       runs24h: runs.get(r.id) ?? 0,
       lastEventAt: r.lastEventAt ? r.lastEventAt.toISOString() : null,
+      samples: samplesByInstance.get(r.id) ?? [],
     })),
   }
 }

@@ -2,9 +2,18 @@ import Link from "next/link"
 import { notFound, redirect } from "next/navigation"
 
 import { auth } from "@/auth"
-import { db, eq, desc, driveConnections, cloudflareConnections, backupRecords } from "@/db"
+import {
+  db,
+  eq,
+  desc,
+  driveConnections,
+  cloudflareConnections,
+  backupRecords,
+  instanceUptimeSamples,
+} from "@/db"
 import { isDriveConfigured } from "@/lib/google-drive"
 import { isKumaConfigured } from "@/lib/uptime-kuma"
+import { maybeRunUptimeSync } from "@/lib/uptime-monitoring"
 import { Badge } from "@/components/ui/badge"
 import {
   Breadcrumb,
@@ -53,6 +62,10 @@ export default async function InstanceDetailPage({
   const { id } = await params
   const { tab } = await searchParams
 
+  // Best-effort: freshen the Kuma snapshot/history before we read it (no-op when
+  // Kuma is unconfigured or synced recently). Never throws.
+  await maybeRunUptimeSync()
+
   const instance = await db.query.instances.findFirst({
     where: whereUserInstanceVisible(session.user.id, id),
     with: {
@@ -78,6 +91,22 @@ export default async function InstanceDetailPage({
     where: eq(backupRecords.instanceId, instance.id),
     orderBy: desc(backupRecords.createdAt),
   })
+
+  // Most recent Kuma heartbeat samples for this agent (oldest→newest for the bar
+  // strip). Cheap, indexed read; empty until the first sync writes one.
+  const uptimeSampleRows = await db.query.instanceUptimeSamples.findMany({
+    where: eq(instanceUptimeSamples.instanceId, instance.id),
+    orderBy: desc(instanceUptimeSamples.checkedAt),
+    limit: 50,
+    columns: { status: true, responseTimeMs: true, checkedAt: true },
+  })
+  const uptimeSamples = uptimeSampleRows
+    .map((s) => ({
+      status: s.status,
+      responseTimeMs: s.responseTimeMs,
+      checkedAt: s.checkedAt.toISOString(),
+    }))
+    .reverse()
 
   // The viewer's effective access level drives which controls/tabs render.
   const myAccess = await getInstanceAccessLevel(session.user.id, instance.id)
@@ -228,6 +257,7 @@ export default async function InstanceDetailPage({
           uptimeRatio: instance.kumaUptimeRatio,
           certDaysRemaining: instance.kumaCertDaysRemaining,
           checkedAt: instance.kumaCheckedAt ? instance.kumaCheckedAt.toISOString() : null,
+          samples: uptimeSamples,
         }}
         backups={backupRows.map((b) => ({
           id: b.id,

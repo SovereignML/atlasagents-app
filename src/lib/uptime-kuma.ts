@@ -225,6 +225,9 @@ export async function fetchKumaMetrics(env: KumaEnv): Promise<string> {
     headers: { Authorization: `Basic ${auth}` },
     // Don't cache — we want live values every poll.
     cache: "no-store",
+    // Bound the request so a wedged Kuma can't stall a page render (the
+    // self-driving sync awaits this inline). 8s is well above a healthy scrape.
+    signal: AbortSignal.timeout(8000),
   })
   if (!res.ok) {
     throw new Error(`Uptime Kuma /metrics returned ${res.status} ${res.statusText}`)

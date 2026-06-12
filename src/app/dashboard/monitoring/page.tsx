@@ -15,7 +15,10 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { AlertRules } from "@/components/dashboard/alert-rules"
+import { AutoRefresh } from "@/components/dashboard/auto-refresh"
+import { HeartbeatBar } from "@/components/dashboard/heartbeat-bar"
 import { getMonitoringSummary } from "@/lib/monitoring"
+import { maybeRunUptimeSync } from "@/lib/uptime-monitoring"
 import { formatUsd } from "@/lib/pricing"
 import { runtimeLabel } from "@/lib/runtimes/labels"
 import { getUserTeam } from "@/lib/team"
@@ -54,6 +57,10 @@ export default async function MonitoringPage() {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
 
+  // Best-effort: freshen the Kuma snapshot/history so the dashboard works even
+  // with no cron wired. Throttled + bounded; never throws.
+  await maybeRunUptimeSync()
+
   const [{ fleet, agents }, team] = await Promise.all([
     getMonitoringSummary(session.user.id),
     getUserTeam(session.user.id),
@@ -72,6 +79,7 @@ export default async function MonitoringPage() {
 
   return (
     <PageContainer>
+      <AutoRefresh />
       <PageHeader
         title="Monitoring"
         description="Live uptime, health, latency, and spend across all your agents."
@@ -144,10 +152,17 @@ export default async function MonitoringPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      {a.kumaStatus ? (
-                        <Badge variant={KUMA_VARIANT[a.kumaStatus] ?? "outline"}>
-                          {a.kumaStatus}
-                        </Badge>
+                      {a.kumaStatus || a.samples.length > 0 ? (
+                        <div className="flex flex-col gap-1.5">
+                          {a.kumaStatus && (
+                            <Badge variant={KUMA_VARIANT[a.kumaStatus] ?? "outline"}>
+                              {a.kumaStatus}
+                            </Badge>
+                          )}
+                          {a.samples.length > 0 && (
+                            <HeartbeatBar samples={a.samples} size="sm" count={30} />
+                          )}
+                        </div>
                       ) : (
                         <span className="text-xs text-muted-foreground">not monitored</span>
                       )}

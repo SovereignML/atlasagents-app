@@ -937,6 +937,26 @@ export const agentEvents = pgTable(
   ],
 )
 
+// InstanceUptimeSample — a rolling per-agent history of Uptime Kuma status
+// readings, appended by the uptime-sync poller (one row per agent per run when a
+// /metrics snapshot is present). This is what powers the Kuma-style heartbeat
+// bars; the latest-snapshot columns on `instances` remain the source for the
+// current badge. High churn, bounded by a retention prune inside runUptimeSync.
+export const instanceUptimeSamples = pgTable(
+  "InstanceUptimeSample",
+  {
+    id: cuid().primaryKey(),
+    instanceId: text()
+      .notNull()
+      .references(() => instances.id, { onDelete: "cascade" }),
+    // "up" | "down" | "pending" | "maintenance" — null when Kuma reports none.
+    status: text(),
+    responseTimeMs: integer(),
+    checkedAt: now(),
+  },
+  (t) => [index("InstanceUptimeSample_instanceId_checkedAt_idx").on(t.instanceId, t.checkedAt)],
+)
+
 // AlertRule — user-defined threshold on a monitoring metric. `instanceId` NULL
 // means the rule applies to EVERY agent in the team (fleet-wide), which is how
 // an agency arms one rule across all client agents. Evaluated by the
