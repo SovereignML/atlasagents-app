@@ -62,6 +62,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
 import Plan from "@/components/ui/agent-plan"
 import { buildDeploymentTasks } from "@/lib/deployment-stages"
+import { AutoRefresh } from "@/components/dashboard/auto-refresh"
+import { HeartbeatBar, type HeartbeatSample } from "@/components/dashboard/heartbeat-bar"
 import { AccessTab } from "./instance-access-tab"
 
 type InstanceLite = {
@@ -146,6 +148,8 @@ type KumaInfo = {
   uptimeRatio: number | null
   certDaysRemaining: number | null
   checkedAt: string | null
+  /** Recent heartbeat history (oldest→newest) for the Kuma-style bar strip. */
+  samples: HeartbeatSample[]
 }
 
 type CfZone = { id: string; name: string; status: string }
@@ -1057,44 +1061,54 @@ function UptimeCard({ kuma }: { kuma: KumaInfo }) {
     )
   }
 
-  const statusDot =
-    kuma.status === "up"
-      ? "bg-emerald-500"
-      : kuma.status === "down"
-        ? "bg-destructive"
-        : "bg-amber-500"
+  const isUp = kuma.status === "up"
+  const isDown = kuma.status === "down"
+  const pillTone = isUp
+    ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+    : isDown
+      ? "bg-destructive/15 text-destructive"
+      : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+  const dotTone = isUp ? "bg-emerald-500" : isDown ? "bg-destructive" : "bg-amber-500"
   const statusLabel = kuma.status
     ? kuma.status.charAt(0).toUpperCase() + kuma.status.slice(1)
     : "Unknown"
 
   return (
     <SectionCard title="Uptime">
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <div>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <span
+          className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${pillTone}`}
+        >
+          <span className={`inline-block h-2 w-2 rounded-full ${dotTone}`} />
+          {statusLabel}
+        </span>
+        <div className="text-right">
           <p className="font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">
-            Status
+            Uptime (24h)
           </p>
-          <p className="mt-1 flex items-center gap-2 text-sm text-foreground">
-            <span className={`inline-block h-2 w-2 rounded-full ${statusDot}`} />
-            {statusLabel}
+          <p className="text-2xl font-bold text-foreground">
+            {kuma.uptimeRatio != null ? `${(kuma.uptimeRatio * 100).toFixed(2)}%` : "—"}
           </p>
         </div>
+      </div>
+
+      {kuma.samples.length > 0 && (
+        <div className="mt-4">
+          <HeartbeatBar samples={kuma.samples} count={50} />
+        </div>
+      )}
+
+      <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-3">
         <Stat
           label="Response"
           value={kuma.responseTimeMs != null ? `${kuma.responseTimeMs} ms` : "—"}
         />
         <Stat
-          label="Uptime (24h)"
-          value={kuma.uptimeRatio != null ? `${(kuma.uptimeRatio * 100).toFixed(2)}%` : "—"}
-        />
-        <Stat
           label="Cert expiry"
           value={kuma.certDaysRemaining != null ? `${kuma.certDaysRemaining} days` : "—"}
         />
+        <Stat label="Last checked" value={new Date(kuma.checkedAt).toLocaleTimeString()} />
       </div>
-      <p className="mt-3 text-xs text-muted-foreground">
-        Last checked {new Date(kuma.checkedAt).toLocaleString()}.
-      </p>
     </SectionCard>
   )
 }
@@ -1264,6 +1278,8 @@ type AgentEventLite = {
 function MonitoringTab({ instance, kuma }: { instance: InstanceLite; kuma: KumaInfo }) {
   return (
     <div className="w-full space-y-4">
+      {/* Keep the Kuma badge + heartbeat bars live while this tab is open. */}
+      {kuma.configured && instance.status === "running" && <AutoRefresh />}
       <SectionCard title="Spend">
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <Stat label="Total LLM cost" value={`$${(instance.costUsd ?? 0).toFixed(2)}`} />
@@ -2216,6 +2232,8 @@ function BackupTab({
     if (status === "connected") toast.success("Google Drive connected.")
     else if (status === "norefresh")
       toast.error("Google didn't return a refresh token. Please try connecting again.")
+    else if (status === "noscope")
+      toast.error("Google Drive permission was not granted. Reconnect and keep the Drive checkbox checked.")
     else toast.error("Could not connect Google Drive. Please try again.")
     router.replace(`${pathname}?tab=backup`)
     if (status === "connected") router.refresh()
@@ -2229,9 +2247,9 @@ function BackupTab({
         `/api/instances/${instance.id}/backups${fromDrive ? "?source=drive" : ""}`,
         { cache: "no-store" },
       )
-      const j = (await r.json()) as { backups?: BackupLite[]; error?: string }
+      const j = (await r.json()) as { backups?: BackupLite[]; error?: string; detail?: string }
       if (!r.ok) {
-        toast.error(j.error || "Could not load backups.")
+        toast.error(j.detail || j.error || "Could not load backups.")
         return
       }
       setBackups(j.backups ?? [])
@@ -2271,10 +2289,15 @@ function BackupTab({
     setBackingUp(true)
     try {
       const r = await fetch(`/api/instances/${instance.id}/backup`, { method: "POST" })
-      const j = (await r.json()) as { backup?: BackupLite; error?: string; code?: string }
+      const j = (await r.json()) as {
+        backup?: BackupLite
+        error?: string
+        code?: string
+        detail?: string
+      }
       if (!r.ok) {
         if (j.code === "drive_reauth") toast.error("Drive access expired — reconnect to continue.")
-        else toast.error(j.error || "Backup failed.")
+        else toast.error(j.detail || j.error || "Backup failed.")
         return
       }
       if (j.backup) setBackups((prev) => [j.backup as BackupLite, ...prev])

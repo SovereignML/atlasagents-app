@@ -15,7 +15,7 @@
 // Mirrors the shape of src/lib/provider-health.ts (a sweep + a report).
 
 import type { InferSelectModel } from "drizzle-orm"
-import { db, instances, eq, and, isNotNull, sql } from "@/db"
+import { db, instances, instanceUptimeSamples, eq, and, isNotNull, lt, sql } from "@/db"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
 import { getRuntime, type RuntimeEngine } from "@/lib/runtimes"
 import { logInstanceEvent } from "@/lib/instance-state"
@@ -185,6 +185,8 @@ export async function runUptimeSync(): Promise<UptimeSyncReport> {
   })
 
   const checkedAt = new Date()
+  // Collected for the heartbeat-bar history; inserted in one batch after the loop.
+  const samples: { instanceId: string; status: string | null; responseTimeMs: number | null; checkedAt: Date }[] = []
   for (const row of rows) {
     report.scanned++
     const snap = snapshots.get(String(row.kumaMonitorId))
@@ -200,11 +202,67 @@ export async function runUptimeSync(): Promise<UptimeSyncReport> {
           kumaCheckedAt: checkedAt,
         })
         .where(eq(instances.id, row.id))
+      samples.push({
+        instanceId: row.id,
+        status: snap.status,
+        responseTimeMs: snap.responseTimeMs,
+        checkedAt,
+      })
       report.matched++
     } catch (err) {
       report.errors.push(`${row.id}: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
+  // Append the heartbeat history, then prune anything past the retention window.
+  // Best-effort: a failure here must not fail the snapshot sync above.
+  if (samples.length > 0) {
+    try {
+      await db.insert(instanceUptimeSamples).values(samples)
+      const cutoff = new Date(checkedAt.getTime() - SAMPLE_RETENTION_DAYS * 24 * 60 * 60 * 1000)
+      await db.delete(instanceUptimeSamples).where(lt(instanceUptimeSamples.checkedAt, cutoff))
+    } catch (err) {
+      report.errors.push(`samples: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
   return report
+}
+
+/** Heartbeat-history retention. Bars only ever render the most recent ~50; this
+ *  just bounds table growth. */
+const SAMPLE_RETENTION_DAYS = 7
+
+// ──────────────────────────────────────────────────────────────────────
+// Self-driving sync — so the dashboard works with zero operator cron wiring.
+// ──────────────────────────────────────────────────────────────────────
+
+let lastSelfSyncAt = 0
+let selfSyncInFlight: Promise<unknown> | null = null
+const SELF_SYNC_MIN_INTERVAL_MS = 60_000
+
+/**
+ * Best-effort: kick a /metrics sync if Kuma is configured and we haven't synced
+ * in ~60s. Safe to await on every monitoring page render — it never throws, is
+ * de-duped across concurrent requests (single in-flight promise), and is bounded
+ * by the fetch timeout in fetchKumaMetrics so it can't wedge a render. The app
+ * runs as a single pm2 fork, so this module-level throttle holds process-wide.
+ *
+ * A real cron (scripts/cron-tick.sh) is still recommended for fresh badges when
+ * nobody is viewing the dashboard — this just removes the hard dependency on it.
+ */
+export async function maybeRunUptimeSync(): Promise<void> {
+  if (!getKumaEnv()) return
+  if (selfSyncInFlight) {
+    await selfSyncInFlight.catch(() => {})
+    return
+  }
+  if (Date.now() - lastSelfSyncAt < SELF_SYNC_MIN_INTERVAL_MS) return
+  lastSelfSyncAt = Date.now()
+  selfSyncInFlight = runUptimeSync()
+    .catch(() => {})
+    .finally(() => {
+      selfSyncInFlight = null
+    })
+  await selfSyncInFlight
 }
