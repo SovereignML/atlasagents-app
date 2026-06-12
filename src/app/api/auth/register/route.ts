@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { cookies } from "next/headers"
 import { db, users, eq } from "@/db"
 import { hashPassword } from "@/lib/password"
 import { registerSchema } from "@/lib/validations"
@@ -8,6 +9,9 @@ import { getTenantConfig, createChildTeam } from "@/lib/tenant"
 import { verifyTurnstileToken } from "@/lib/turnstile"
 import { issueAndSendVerification } from "@/lib/email-verification"
 import { posthogServer } from "@/lib/posthog-server"
+import { adsConversions } from "@/lib/ads"
+import { AD_CLICK_COOKIE, parseAdClickCookie } from "@/lib/ads/click-ids"
+import { CONSENT_COOKIE, parseConsentCookie } from "@/lib/consent"
 
 export async function POST(req: Request) {
   try {
@@ -68,6 +72,46 @@ export async function POST(req: Request) {
         event: "user_signed_up",
         properties: { method: "credentials" },
       })
+
+      // Ad-conversion attribution. Persist the click IDs captured on landing and
+      // the consent decision onto the user (so the later purchase webhook can
+      // read them), then fire the signup conversion. All best-effort and gated
+      // on marketing consent — no-op when ads/consent aren't configured/granted.
+      try {
+        const jar = await cookies()
+        const clickIds = parseAdClickCookie(jar.get(AD_CLICK_COOKIE)?.value)
+        const consent = parseConsentCookie(jar.get(CONSENT_COOKIE)?.value)
+        const marketingConsent = consent?.marketing ?? null
+
+        if (clickIds || marketingConsent !== null) {
+          await db
+            .update(users)
+            .set({
+              fbclid: clickIds?.fbclid ?? null,
+              gclid: clickIds?.gclid ?? null,
+              adClickCapturedAt: clickIds?.ts ? new Date(clickIds.ts) : null,
+              marketingConsent,
+              consentUpdatedAt: consent ? new Date() : null,
+            })
+            .where(eq(users.id, newUser.id))
+        }
+
+        adsConversions.trackSignup({
+          userId: newUser.id,
+          email,
+          consent: marketingConsent === true,
+          clickIds: {
+            fbclid: clickIds?.fbclid,
+            gclid: clickIds?.gclid,
+            capturedAtMs: clickIds?.ts,
+          },
+          clientIp: ip === "unknown" ? null : ip,
+          clientUserAgent: req.headers.get("user-agent"),
+          sourceUrl: req.headers.get("referer"),
+        })
+      } catch (err) {
+        console.error("[register] ad-conversion tracking failed:", err)
+      }
     }
 
     // Self-serve white-label signup: if this registration happened on a tenant's

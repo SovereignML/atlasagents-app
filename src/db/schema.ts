@@ -70,6 +70,17 @@ export const users = pgTable(
     twoFactorEnabled: boolean().default(false).notNull(),
     twoFactorBackupCodes: jsonb().$type<string[]>(),
     twoFactorEnrolledAt: timestamp({ mode: "date", withTimezone: false }),
+    // Ad-conversion tracking. Click IDs are captured first-party on landing and
+    // read at conversion time by the server-side Meta CAPI + Google Data Manager
+    // senders — the Stripe purchase webhook has no browser, so these stored IDs
+    // are what make a paid conversion attributable. See src/lib/ads.
+    fbclid: text(),
+    gclid: text(),
+    adClickCapturedAt: timestamp({ mode: "date", withTimezone: false }),
+    // Cookie-consent decision (GDPR). null = undecided. Gates whether any
+    // ad-conversion data is transmitted to Meta/Google. See src/lib/consent.
+    marketingConsent: boolean(),
+    consentUpdatedAt: timestamp({ mode: "date", withTimezone: false }),
   },
   (t) => [
     uniqueIndex("User_email_key").on(t.email),
