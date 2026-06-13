@@ -8,7 +8,7 @@
 // error-level InstanceLog rows; run counts come from AgentEvent once the agent
 // emit pipeline is live (0 until then — never synthesized).
 
-import { db, instanceLogs, agentEvents, and, eq, gte, inArray, sql } from "@/db"
+import { db, instanceLogs, agentEvents, instanceUptimeSamples, and, eq, gte, inArray, sql } from "@/db"
 import { whereUserInstancesVisible } from "@/lib/instance-queries"
 import type { HeartbeatSample } from "@/components/dashboard/heartbeat-bar"
 
@@ -101,30 +101,37 @@ export async function getMonitoringSummary(userId: string): Promise<MonitoringSu
     for (const r of runRows) runs.set(r.instanceId, r.c)
 
     // Heartbeat history: the most recent N samples per agent, in ONE windowed
-    // query (row_number per instance), then grouped in JS.
-    const sampleRows = await db.execute(sql`
-      SELECT "instanceId", status, "responseTimeMs", "checkedAt"
-      FROM (
-        SELECT "instanceId", status, "responseTimeMs", "checkedAt",
-               row_number() OVER (PARTITION BY "instanceId" ORDER BY "checkedAt" DESC) AS rn
-        FROM "InstanceUptimeSample"
-        WHERE "instanceId" = ANY(${ids})
-      ) t
-      WHERE rn <= ${LIST_SAMPLE_COUNT}
-    `)
-    for (const r of sampleRows.rows as Array<{
-      instanceId: string
-      status: string | null
-      responseTimeMs: number | null
-      checkedAt: Date
-    }>) {
-      const list = samplesByInstance.get(r.instanceId) ?? []
-      list.push({
-        status: r.status,
-        responseTimeMs: r.responseTimeMs,
-        checkedAt: new Date(r.checkedAt).toISOString(),
-      })
-      samplesByInstance.set(r.instanceId, list)
+    // query (row_number per instance), then grouped in JS. Best-effort — the bars
+    // are an enhancement; never let a missing table / query error 500 the page.
+    // `inArray` is composed in (not a raw `ANY(${ids})`, which drizzle expands to
+    // an invalid tuple).
+    try {
+      const sampleRows = await db.execute(sql`
+        SELECT "instanceId", status, "responseTimeMs", "checkedAt"
+        FROM (
+          SELECT "instanceId", status, "responseTimeMs", "checkedAt",
+                 row_number() OVER (PARTITION BY "instanceId" ORDER BY "checkedAt" DESC) AS rn
+          FROM "InstanceUptimeSample"
+          WHERE ${inArray(instanceUptimeSamples.instanceId, ids)}
+        ) t
+        WHERE rn <= ${LIST_SAMPLE_COUNT}
+      `)
+      for (const r of sampleRows.rows as Array<{
+        instanceId: string
+        status: string | null
+        responseTimeMs: number | null
+        checkedAt: Date
+      }>) {
+        const list = samplesByInstance.get(r.instanceId) ?? []
+        list.push({
+          status: r.status,
+          responseTimeMs: r.responseTimeMs,
+          checkedAt: new Date(r.checkedAt).toISOString(),
+        })
+        samplesByInstance.set(r.instanceId, list)
+      }
+    } catch {
+      /* heartbeat history unavailable — render without bars */
     }
   }
 

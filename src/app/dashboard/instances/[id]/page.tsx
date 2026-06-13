@@ -93,20 +93,26 @@ export default async function InstanceDetailPage({
   })
 
   // Most recent Kuma heartbeat samples for this agent (oldest→newest for the bar
-  // strip). Cheap, indexed read; empty until the first sync writes one.
-  const uptimeSampleRows = await db.query.instanceUptimeSamples.findMany({
-    where: eq(instanceUptimeSamples.instanceId, instance.id),
-    orderBy: desc(instanceUptimeSamples.checkedAt),
-    limit: 50,
-    columns: { status: true, responseTimeMs: true, checkedAt: true },
-  })
-  const uptimeSamples = uptimeSampleRows
-    .map((s) => ({
-      status: s.status,
-      responseTimeMs: s.responseTimeMs,
-      checkedAt: s.checkedAt.toISOString(),
-    }))
-    .reverse()
+  // strip). Cheap, indexed read; empty until the first sync writes one. Best-effort
+  // — the bars are an enhancement, so a missing table / error must not 500 the page.
+  let uptimeSamples: { status: string | null; responseTimeMs: number | null; checkedAt: string }[] = []
+  try {
+    const uptimeSampleRows = await db.query.instanceUptimeSamples.findMany({
+      where: eq(instanceUptimeSamples.instanceId, instance.id),
+      orderBy: desc(instanceUptimeSamples.checkedAt),
+      limit: 50,
+      columns: { status: true, responseTimeMs: true, checkedAt: true },
+    })
+    uptimeSamples = uptimeSampleRows
+      .map((s) => ({
+        status: s.status,
+        responseTimeMs: s.responseTimeMs,
+        checkedAt: s.checkedAt.toISOString(),
+      }))
+      .reverse()
+  } catch {
+    /* heartbeat history unavailable — render without bars */
+  }
 
   // The viewer's effective access level drives which controls/tabs render.
   const myAccess = await getInstanceAccessLevel(session.user.id, instance.id)
