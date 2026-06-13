@@ -15,7 +15,7 @@
 // Mirrors the shape of src/lib/provider-health.ts (a sweep + a report).
 
 import type { InferSelectModel } from "drizzle-orm"
-import { db, instances, instanceUptimeSamples, eq, and, isNotNull, lt, sql } from "@/db"
+import { db, instances, instanceUptimeSamples, eq, and, isNotNull, isNull, lt, sql } from "@/db"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
 import { getRuntime, type RuntimeEngine } from "@/lib/runtimes"
 import { logInstanceEvent } from "@/lib/instance-state"
@@ -234,6 +234,63 @@ export async function runUptimeSync(): Promise<UptimeSyncReport> {
 const SAMPLE_RETENTION_DAYS = 7
 
 // ──────────────────────────────────────────────────────────────────────
+// Backfill — create monitors for already-running agents that never got one.
+// ──────────────────────────────────────────────────────────────────────
+//
+// syncUptimeMonitor only fires once, at deploy time (provisioner.ts). So any
+// agent that was already running before this feature shipped — or that was
+// deployed while Kuma was unconfigured — has kumaMonitorId = null and would
+// never appear on the dashboard. This sweep heals that: it's what makes uptime
+// work for users who *already had* agents, not just freshly deployed ones.
+
+/** Max monitors to create per run, so a large fleet can't cause a socket storm
+ *  (each create opens a short-lived socket). Remaining agents are picked up on
+ *  subsequent runs. */
+const BACKFILL_LIMIT = 25
+
+export type UptimeBackfillReport = {
+  /** Running agents found without a monitor this run (capped at BACKFILL_LIMIT). */
+  pending: number
+  /** How many we ran syncUptimeMonitor against (it no-ops if not yet reachable). */
+  attempted: number
+  errors: string[]
+}
+
+/**
+ * Find running agents with no Kuma monitor and create one for each. Idempotent:
+ * syncUptimeMonitor persists the new monitor id, and no-ops for agents that
+ * aren't publicly reachable yet (retried next run). Bounded per run, best-effort
+ * — never throws into the caller.
+ */
+export async function ensureUptimeMonitors(): Promise<UptimeBackfillReport> {
+  const report: UptimeBackfillReport = { pending: 0, attempted: 0, errors: [] }
+  if (!getKumaEnv()) return report
+
+  let rows: { id: string }[]
+  try {
+    rows = await db.query.instances.findMany({
+      where: and(eq(instances.status, "running"), isNull(instances.kumaMonitorId)),
+      columns: { id: true },
+      limit: BACKFILL_LIMIT,
+    })
+  } catch (err) {
+    report.errors.push(`backfill query: ${err instanceof Error ? err.message : String(err)}`)
+    return report
+  }
+
+  report.pending = rows.length
+  for (const row of rows) {
+    try {
+      await syncUptimeMonitor(row.id)
+      report.attempted++
+    } catch (err) {
+      report.errors.push(`${row.id}: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+  return report
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // Self-driving sync — so the dashboard works with zero operator cron wiring.
 // ──────────────────────────────────────────────────────────────────────
 
@@ -259,6 +316,10 @@ export async function maybeRunUptimeSync(): Promise<void> {
   }
   if (Date.now() - lastSelfSyncAt < SELF_SYNC_MIN_INTERVAL_MS) return
   lastSelfSyncAt = Date.now()
+  // Backfill missing monitors in the background — socket writes are slow, and a
+  // freshly created monitor has no metrics for ~60s anyway, so there's nothing to
+  // block the render on. Newly created monitors surface on a later sync.
+  void ensureUptimeMonitors().catch(() => {})
   selfSyncInFlight = runUptimeSync()
     .catch(() => {})
     .finally(() => {

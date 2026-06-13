@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
-import { runUptimeSync } from "@/lib/uptime-monitoring"
+import { ensureUptimeMonitors, runUptimeSync } from "@/lib/uptime-monitoring"
 import { isValidCronBearer } from "@/lib/cron-auth"
 
 /**
@@ -30,6 +30,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Backfill first so agents that predate the feature (or predate Kuma being
+  // configured) get a monitor, then mirror the latest /metrics snapshot.
+  const backfill = await ensureUptimeMonitors()
   const report = await runUptimeSync()
-  return NextResponse.json(report)
+  return NextResponse.json({ ...report, backfill })
 }
