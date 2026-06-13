@@ -26,6 +26,7 @@ import {
   deleteMonitor,
   fetchKumaMetrics,
   parseKumaMetrics,
+  type KumaMonitorSnapshot,
 } from "@/lib/uptime-kuma"
 
 type Instance = InferSelectModel<typeof instances>
@@ -184,12 +185,23 @@ export async function runUptimeSync(): Promise<UptimeSyncReport> {
     columns: { id: true, kumaMonitorId: true },
   })
 
+  // Some Kuma versions label /metrics by numeric monitor_id; others (seen in the
+  // wild) only emit monitor_name. We name every monitor "<agent name> (<instance
+  // id>)", so index snapshots by the trailing "(id)" pulled out of the name-keyed
+  // entries. The numeric-id lookup below is tried first; this is the fallback that
+  // makes name-only Kuma installs work, and it's rename-proof (matches on id).
+  const byInstanceId = new Map<string, KumaMonitorSnapshot>()
+  for (const [key, snap] of snapshots) {
+    const m = key.match(/\(([^()]+)\)\s*$/)
+    if (m) byInstanceId.set(m[1], snap)
+  }
+
   const checkedAt = new Date()
   // Collected for the heartbeat-bar history; inserted in one batch after the loop.
   const samples: { instanceId: string; status: string | null; responseTimeMs: number | null; checkedAt: Date }[] = []
   for (const row of rows) {
     report.scanned++
-    const snap = snapshots.get(String(row.kumaMonitorId))
+    const snap = snapshots.get(String(row.kumaMonitorId)) ?? byInstanceId.get(row.id)
     if (!snap) continue // monitor exists but no metric line yet (just created)
     try {
       await db
