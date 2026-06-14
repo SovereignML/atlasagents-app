@@ -37,6 +37,30 @@ function shellEscape(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
+/**
+ * Install a headless browser for the browser tool. Spliced into a runtime's
+ * `runtimeInstallSteps`, so it runs inside the framing where `step` and
+ * `APT_OPTS` are defined.
+ *
+ * We install **Google Chrome stable** (a real .deb) rather than Ubuntu 24.04's
+ * `chromium-browser`, which is a *snap* shim: snap-confined Chromium refuses to
+ * launch from inside a systemd service ("not a snap cgroup for tag
+ * snap.chromium.chromium"), so the browser plugin can't drive it. Chrome ships
+ * a genuine /usr/bin/google-chrome binary and is auto-detected first by the
+ * runtimes. `fonts-liberation` covers common web fonts. Idempotent (apt no-ops
+ * when present; the repo/key writes are overwrite-safe).
+ */
+export function browserInstallStep(): string {
+  return `
+step "install_chrome"
+install -d -m 0755 /usr/share/keyrings
+curl -fsSL --retry 5 --retry-delay 3 https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
+apt-get $APT_OPTS update -y
+apt-get $APT_OPTS install -y google-chrome-stable fonts-liberation
+`
+}
+
 export function buildBootstrapFraming(
   opts: BootstrapFramingOpts,
   runtimeInstallSteps: string,

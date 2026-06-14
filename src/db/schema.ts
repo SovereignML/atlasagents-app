@@ -317,6 +317,15 @@ export const instances = pgTable(
     agentConfig: jsonb(),
     soulMd: text(),
     skills: jsonb(),
+    /**
+     * Catalog tool ids enabled on this agent (e.g. ["browser"]). Drives the
+     * runtime config render (browser/tools sections) + system-dep installs.
+     * See src/configs/agent-tools.ts. Readers coerce `?? []` defensively.
+     */
+    enabledTools: jsonb()
+      .$type<string[]>()
+      .default(sql`'[]'::jsonb`)
+      .notNull(),
     modelTier: text(),
     botToken: text(),
     // SSH host key fingerprint pinned on first successful connect (TOFU).

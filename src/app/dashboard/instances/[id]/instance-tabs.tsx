@@ -65,6 +65,7 @@ import { buildDeploymentTasks } from "@/lib/deployment-stages"
 import { AutoRefresh } from "@/components/dashboard/auto-refresh"
 import { HeartbeatBar, type HeartbeatSample } from "@/components/dashboard/heartbeat-bar"
 import { AccessTab } from "./instance-access-tab"
+import { ToolsTab } from "./instance-tools-tab"
 
 type InstanceLite = {
   id: string
@@ -165,6 +166,7 @@ const TABS = [
   { id: "overview", label: "Overview" },
   { id: "monitoring", label: "Monitoring" },
   { id: "controls", label: "Controls" },
+  { id: "tools", label: "Tools" },
   { id: "interfaces", label: "Interfaces" },
   { id: "backup", label: "Backup" },
   { id: "logs", label: "Logs" },
@@ -334,6 +336,13 @@ export function InstanceTabs({
       </TabsContent>
       <TabsContent value="controls" className="mt-0">
         <ControlsTab instance={instance} cloudflare={cloudflare} />
+      </TabsContent>
+      <TabsContent value="tools" className="mt-0">
+        <ToolsTab
+          instanceId={instance.id}
+          runtime={instance.runtime}
+          status={instance.status}
+        />
       </TabsContent>
       <TabsContent value="interfaces" className="mt-0">
         <InterfacesTab instance={instance} />

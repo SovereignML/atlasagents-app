@@ -21,6 +21,7 @@ export type AuditAction =
   | "instance.stop"
   | "instance.delete"
   | "instance.agent_type_change"
+  | "instance.tools_change"
   | "instance.backup.create"
   | "instance.backup.restore"
   | "instance.backup.delete"

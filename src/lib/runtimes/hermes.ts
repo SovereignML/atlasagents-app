@@ -1,4 +1,4 @@
-import { buildBootstrapFraming } from "./bootstrap"
+import { buildBootstrapFraming, browserInstallStep } from "./bootstrap"
 import type {
   BootstrapRenderArgs,
   BuildEnvArgs,
@@ -11,6 +11,7 @@ import type {
 } from "./types"
 import { buildGatewayAllowedOrigins } from "@/lib/instance-gateway-access"
 import { resolveLlmProvider, nvidiaKeyForSlot } from "@/lib/model-router"
+import { enabledToolsForRuntime } from "@/configs/agent-tools"
 
 /**
  * Real Hermes runtime — Python package `hermes-agent` installed into a venv,
@@ -167,6 +168,20 @@ ${cors}    reverse_proxy localhost:${HERMES_GATEWAY_PORT} {
   }`
 }
 
+/**
+ * Browser tool system deps for Hermes: a headless Chromium plus the
+ * `agent-browser` npm global the local browser provider drives. Spliced into
+ * Hermes' install steps (inside the framing, so `step`/`APT_OPTS`/Node exist).
+ * Pre-baked on every Hermes box so enabling the browser tool later is a
+ * config-only restart. Idempotent.
+ */
+function buildBrowserDepsSteps(): string {
+  return `${browserInstallStep()}
+step "install_agent_browser"
+npm ls -g agent-browser >/dev/null 2>&1 || npm install -g --no-audit --no-fund agent-browser
+`
+}
+
 function buildHermesInstallSteps(): string {
   return `
 RUNTIME_PKG_SPEC=${bashSingleQuote(pipPackageSpec())}
@@ -208,7 +223,7 @@ ${bashSingleQuote(HERMES_CLI)} --version
 step "hermes_config_dir"
 install -d -m 0750 -o ${bashSingleQuote(HERMES_SYSTEM_USER)} -g ${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(`${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}`)}
 install -d -m 0750 -o ${bashSingleQuote(HERMES_SYSTEM_USER)} -g ${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(HERMES_WORKSPACE_DIR)}
-`
+${buildBrowserDepsSteps()}`
 }
 
 /**
@@ -299,7 +314,7 @@ ${bashSingleQuote(OPEN_WEBUI_BIN)} --help >/dev/null
 step "hermes_config_dir"
 install -d -m 0750 -o ${bashSingleQuote(HERMES_SYSTEM_USER)} -g ${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(`${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}`)}
 install -d -m 0750 -o ${bashSingleQuote(HERMES_SYSTEM_USER)} -g ${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(HERMES_WORKSPACE_DIR)}
-`
+${buildBrowserDepsSteps()}`
 }
 
 /**
@@ -621,6 +636,18 @@ WantedBy=multi-user.target
       args.provider !== "openrouter"
         ? `${run(`config set model.base_url ${bashSingleQuote(args.baseUrl)}`)} || echo "warn: could not set model.base_url (provider=${args.provider})" >&2\n`
         : ""
+
+    // Toolsets: always keep the default `hermes-cli` set and ADD the enabled
+    // catalog tools on top. Setting the list is fatal (a bad toolset must fail
+    // the provision, matching the config contract); the browser provider set is
+    // best-effort like base_url since the exact key varies across versions.
+    const toolsets = enabledToolsForRuntime(args.enabledToolIds ?? [], "hermes")
+    const toolsetIds = ["hermes-cli", ...toolsets.map((t) => t.support.hermes!.toolset)]
+    const toolsetsStep = `${run(`config set toolsets ${bashSingleQuote(JSON.stringify(toolsetIds))}`)} || exit 1\n`
+    const browserStep = toolsets.some((t) => t.id === "browser")
+      ? `${run("config set browser.provider local")} || echo "warn: could not set browser.provider" >&2\n`
+      : ""
+
     return `#!/bin/bash
 set -uo pipefail
 
@@ -635,6 +662,8 @@ ${run(`config set model.provider ${bashSingleQuote(args.provider)}`)} || exit 1
 ${run(`config set model.default ${bashSingleQuote(args.model)}`)} || exit 1
 ${baseUrlStep}${run("config set terminal.backend local")} || exit 1
 
+echo "=== provision: hermes_toolsets ==="
+${toolsetsStep}${browserStep}
 echo "=== provision: hermes_config_check ==="
 if ! ${run("config check")}; then
   echo "hermes config check failed" >&2

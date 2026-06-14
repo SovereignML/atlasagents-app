@@ -1,0 +1,1 @@
+ALTER TABLE "Instance" ADD COLUMN "enabledTools" jsonb DEFAULT '[]'::jsonb NOT NULL;

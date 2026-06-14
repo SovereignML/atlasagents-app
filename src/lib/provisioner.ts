@@ -37,7 +37,7 @@ import {
   generateGatewayToken,
   renderEnvFile,
 } from "@/lib/runtimes/shared"
-import { getRuntime, type RuntimeEngine } from "@/lib/runtimes"
+import { getRuntime, type RuntimeEngine, type RuntimeId } from "@/lib/runtimes"
 import { PROVISION_EVENT } from "@/lib/provision-events"
 import { getVmProvider, describeVmError, type VmProvider } from "@/lib/vm-provider"
 import {
@@ -63,6 +63,7 @@ import {
 } from "@/lib/model-router"
 import type { BudgetTier } from "@/lib/agent-config"
 import { generateAgentsMd, generateIdentityMd } from "@/lib/agent-identity"
+import { enabledToolsForRuntime, type AgentTool } from "@/configs/agent-tools"
 
 type Instance = InferSelectModel<typeof instances>
 
@@ -1544,6 +1545,7 @@ async function configureRuntimeOverSsh(
           managedSubdomain,
           ipAddress,
           tlsStatus: instance.domain ? instance.tlsStatus : null,
+          enabledToolIds: instance.enabledTools ?? [],
         }),
         "utf8",
       ).toString("base64")
@@ -1598,6 +1600,7 @@ async function configureRuntimeOverSsh(
       provider: llmProvider,
       model: initModel,
       baseUrl: route.baseUrl,
+      enabledToolIds: instance.enabledTools ?? [],
     })
     if (initScript) {
       const initStep = await sshRunScriptLogged(
@@ -2358,6 +2361,92 @@ export async function deleteBot(instance: Instance): Promise<DeleteResult> {
   return { status: "pending", vmId }
 }
 
+/**
+ * Build the idempotent over-SSH script that installs a tool's system
+ * dependencies on a running box. Derived purely from the catalog flags so the
+ * install set stays in lockstep with `agent-tools.ts`. Returns "" when nothing
+ * needs installing (→ caller skips the SSH round-trip).
+ *
+ * - `requiresChromium` → Google Chrome stable (a real .deb; snap chromium can't
+ *   launch from a systemd service). Self-contained mirror of bootstrap's
+ *   `browserInstallStep()` (which relies on framing-local vars unavailable here).
+ * - `requiresNpmGlobal[runtime]` → `npm install -g <pkg>` (guarded, idempotent).
+ *
+ * Mirrors what bootstrap pre-bakes (browserInstallStep / agent-browser), so a
+ * box provisioned before the tool existed converges to the same state.
+ */
+function buildToolDepsScript(tools: AgentTool[], runtimeId: RuntimeId): string {
+  const steps: string[] = []
+  if (tools.some((t) => t.requiresChromium)) {
+    steps.push(
+      `echo "=== install_chrome ==="
+install -d -m 0755 /usr/share/keyrings
+curl -fsSL --retry 5 --retry-delay 3 https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
+apt-get -o Acquire::Retries=3 update -y
+apt-get -o Acquire::Retries=3 install -y google-chrome-stable fonts-liberation`,
+    )
+  }
+  const npmGlobals = Array.from(
+    new Set(
+      tools
+        .map((t) => t.requiresNpmGlobal?.[runtimeId])
+        .filter((p): p is string => !!p),
+    ),
+  )
+  for (const pkg of npmGlobals) {
+    steps.push(
+      `echo "=== install_npm_global ${pkg} ==="
+npm ls -g ${pkg} >/dev/null 2>&1 || npm install -g --no-audit --no-fund ${pkg}`,
+    )
+  }
+  if (steps.length === 0) return ""
+  return `#!/bin/bash
+set -uo pipefail
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+${steps.join("\n")}
+`
+}
+
+/**
+ * Install the system dependencies (Chromium, npm globals) that the instance's
+ * enabled tools need, over SSH. Install-only — separate from
+ * `reprovisionBotEnv` (which rewrites config + restarts). The caller runs this
+ * BEFORE reprovision so the gateway restarts against a dependency-ready box.
+ * No-op in mock mode, for non-systemd (container) instances, or when no enabled
+ * tool needs a system dependency.
+ */
+export async function installToolDependencies(
+  instance: Instance,
+  toolIds: string[],
+): Promise<void> {
+  if (!isLiveMode() || !instance.ipAddress) return
+  if (!usesSystemd(instance)) return
+
+  const runtime = getRuntime(instance.runtime)
+  const tools = enabledToolsForRuntime(toolIds, runtime.id)
+  const script = buildToolDepsScript(tools, runtime.id)
+  if (!script) return
+
+  const target = sshTargetFor(instance)
+  const step = await sshRunScriptLogged(
+    target,
+    script,
+    "installing_tool_deps",
+    "tools:install dependencies",
+    { timeoutMs: 300_000 }, // Chromium apt can be slow on a cold box
+  )
+  await logSshStep(instance.id, step)
+  if (step.exitCode !== 0 && step.exitCode !== null) {
+    throw new Error(
+      `Tool dependency install failed (exit ${step.exitCode}): ${
+        step.stderr || step.stdout
+      }`,
+    )
+  }
+}
+
 export async function reprovisionBotEnv(instance: Instance): Promise<void> {
   if (!isLiveMode() || !instance.ipAddress) {
     await db.insert(instanceLogs).values({
@@ -2460,6 +2549,7 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
         provider: llmProvider,
         model: initModel,
         baseUrl: route.baseUrl,
+        enabledToolIds: instance.enabledTools ?? [],
       })
       if (initScript) {
         const initStep = await sshRunScriptLogged(
@@ -2492,6 +2582,7 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
           ipAddress: instance.ipAddress,
           tlsStatus: instance.tlsStatus,
           soulMd: instance.soulMd,
+          enabledToolIds: instance.enabledTools ?? [],
         }),
       )
       await sshRun(target, `chown -R ${owner} '${installDir}/${configSubdir}'`)
