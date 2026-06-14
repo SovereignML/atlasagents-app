@@ -1,5 +1,6 @@
 import crypto from "node:crypto"
 import { buildGatewayAllowedOrigins } from "@/lib/instance-gateway-access"
+import { enabledToolsForRuntime } from "@/configs/agent-tools"
 import type {
   BootstrapRenderArgs,
   BuildEnvArgs,
@@ -8,7 +9,7 @@ import type {
   RuntimeEngine,
   RuntimeId,
 } from "./types"
-import { buildBootstrapFraming } from "./bootstrap"
+import { buildBootstrapFraming, browserInstallStep } from "./bootstrap"
 
 const PASSWORD_ALPHABET =
   "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
@@ -124,7 +125,7 @@ export function createRuntime(spec: RuntimeSpec): RuntimeEngine {
       allowedOrigins = [`http://localhost:${spec.gatewayPort}`]
     }
 
-    const config = {
+    const config: Record<string, unknown> = {
       gateway: {
         mode: "local",
         port: spec.gatewayPort,
@@ -145,6 +146,31 @@ export function createRuntime(spec: RuntimeSpec): RuntimeEngine {
         },
         list: [{ id: "main" }],
       },
+    }
+
+    // Tool plugins: additive. With no tools enabled the output is byte-identical
+    // to the gateway/agents-only config, so existing instances see no diff.
+    const tools = enabledToolsForRuntime(args.enabledToolIds ?? [], spec.id)
+    if (tools.some((t) => t.id === "browser")) {
+      // Browser plugin — a dedicated, isolated Chromium profile the agent drives.
+      // Chromium is auto-detected on PATH (installed at bootstrap / on enable).
+      // `color` is REQUIRED by the gateway's browser-profile schema (omitting it
+      // fails config validation → the gateway crash-loops → Caddy 502).
+      // `executablePath` pins the real Google Chrome .deb (the box may also have
+      // a snap chromium that can't launch under systemd). `noSandbox` is required
+      // because the gateway runs headless as a non-login system user with no
+      // user-namespace sandbox available.
+      config.browser = {
+        enabled: true,
+        defaultProfile: "openclaw",
+        executablePath: "/usr/bin/google-chrome",
+        noSandbox: true,
+        profiles: { openclaw: { cdpPort: 18800, color: "#FF4500" } },
+      }
+    }
+    if (tools.length > 0) {
+      // Grant the enabled tools on top of the default profile allowlist.
+      config.tools = { alsoAllow: tools.map((t) => t.support.openclaw!.toolName) }
     }
 
     return JSON.stringify(config, null, 2) + "\n"
@@ -279,7 +305,7 @@ ${spec.cliBinary} --version
 step "compile_cache_dir"
 mkdir -p ${shellEscapeForBash(spec.compileCacheDir)}
 chown ${shellEscapeForBash(spec.systemUser)}:${shellEscapeForBash(spec.systemUser)} ${shellEscapeForBash(spec.compileCacheDir)}
-`
+${browserInstallStep()}`
     return buildBootstrapFraming(
       {
         installDir: spec.installDir,

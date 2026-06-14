@@ -18,6 +18,8 @@ export type RenderConfigArgs = {
   ipAddress?: string | null
   tlsStatus?: string | null
   soulMd?: string | null
+  /** Catalog tool ids enabled on the instance (e.g. ["browser"]); see agent-tools.ts. */
+  enabledToolIds?: string[]
 }
 
 /**
@@ -40,6 +42,8 @@ export type RenderInitScriptArgs = {
   model: string
   /** OpenAI-compatible base URL for the provider (e.g. NVIDIA's endpoint). */
   baseUrl: string
+  /** Catalog tool ids enabled on the instance (e.g. ["browser"]); see agent-tools.ts. */
+  enabledToolIds?: string[]
 }
 
 /** Inputs to the `.env` builder. */

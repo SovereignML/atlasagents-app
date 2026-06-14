@@ -34,7 +34,7 @@ async function main() {
 
   console.log(`[bake] Creating temporary Linode (${BAKE_PLAN} in ${BAKE_REGION})...`)
 
-  // The golden image bakes the OpenClaw runtime (Node + Caddy + openclaw).
+  // The golden image bakes the OpenClaw runtime (Node + Caddy + openclaw + Chromium).
   const bootstrapScript = openclawRuntime.renderBootstrap({
     gatewayPort: openclawRuntime.gatewayPort,
   })
@@ -73,7 +73,7 @@ async function main() {
   await sshPollBootstrap({ host: ipAddress })
 
   console.log(`[bake] Bootstrap complete. Verifying installation...`)
-  const verify = await sshRun({ host: ipAddress }, "openclaw --version && node -v && caddy version")
+  const verify = await sshRun({ host: ipAddress }, "openclaw --version && node -v && caddy version && google-chrome --version")
   console.log(`[bake] ${verify.stdout.trim()}`)
 
   console.log(`[bake] Cleaning up before image capture...`)
@@ -96,7 +96,7 @@ async function main() {
     linodeId: vm.id,
     diskId,
     label: `sovereignml-golden-${new Date().toISOString().slice(0, 10)}`,
-    description: `Node ${openclawRuntime.minNode}+, Caddy, OpenClaw ${openclawRuntime.version()}, Ubuntu 24.04`,
+    description: `Node ${openclawRuntime.minNode}+, Caddy, OpenClaw ${openclawRuntime.version()}, Chromium, Ubuntu 24.04`,
     tags: ["sovereignml", "golden"],
   })
 
