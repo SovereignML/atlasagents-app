@@ -34,6 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { runtimeLabel } from "@/lib/runtimes/labels"
+import { RuntimeLogo } from "@/components/dashboard/runtime-logo"
 
 type InstanceStatus =
   | "pending"
@@ -336,14 +337,7 @@ export function InstancesFilter({ items: initialItems }: { items: Item[] }) {
                         <StatusPill status={instance.status} />
                       )}
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={`/runtimes/${runtimeId}.svg`}
-                          alt=""
-                          width={13}
-                          height={13}
-                          className="size-[13px]"
-                        />
+                        <RuntimeLogo runtime={runtimeId} size={13} className="size-[13px]" />
                         <span className="font-mono text-xs text-muted-foreground">
                           {runtimeLabel(instance.runtime)}
                         </span>

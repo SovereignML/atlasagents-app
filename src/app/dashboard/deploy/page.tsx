@@ -27,6 +27,7 @@ import {
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
+import { RuntimeLogo } from "@/components/dashboard/runtime-logo"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { AGENT_CATEGORIES } from "@/configs/agent-categories"
 import { BRANDING } from "@/configs/branding"
@@ -63,11 +64,6 @@ const RUNTIME_OPTIONS: { value: Runtime; label: string; hint: string; enabled: b
   { value: "openclaw", label: "OpenClaw", hint: "Default agent runtime", enabled: true },
   { value: "hermes", label: "Hermes", hint: "Nous Research Hermes (Python)", enabled: true },
 ]
-
-const RUNTIME_LOGOS: Record<Runtime, string> = {
-  openclaw: "/runtimes/openclaw.svg",
-  hermes: "/runtimes/hermes.svg",
-}
 
 // Map the lucide icon names referenced in agent-categories.ts to their
 // components so the use-case cards can render an icon per category.
@@ -303,13 +299,11 @@ export default function DeployPage() {
                           </span>
                         )}
                         <div className="grid size-[52px] place-items-center rounded-[13px] border border-border bg-muted">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={RUNTIME_LOGOS[r.value]}
+                          <RuntimeLogo
+                            runtime={r.value}
                             alt={`${r.label} logo`}
-                            width={30}
-                            height={30}
-                            className="size-[30px] object-contain"
+                            size={30}
+                            className="size-[30px]"
                           />
                         </div>
                         <div className="flex w-full items-center justify-between gap-2">
@@ -600,13 +594,11 @@ export default function DeployPage() {
                 <CardHeader>
                   <div className="flex items-center gap-4">
                     <div className="grid size-14 shrink-0 place-items-center rounded-[13px] border border-border bg-muted">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={RUNTIME_LOGOS[runtime]}
+                      <RuntimeLogo
+                        runtime={runtime}
                         alt={`${RUNTIME_OPTIONS.find((r) => r.value === runtime)?.label ?? runtime} logo`}
-                        width={32}
-                        height={32}
-                        className="size-8 object-contain"
+                        size={32}
+                        className="size-8"
                       />
                     </div>
                     <div className="min-w-0">

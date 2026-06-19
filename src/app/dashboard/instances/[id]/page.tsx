@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/breadcrumb"
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
 import { PageContainer } from "@/components/layout/page-container"
+import { RuntimeLogo } from "@/components/dashboard/runtime-logo"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { getEffectiveUserId } from "@/lib/effective-user"
@@ -166,14 +167,7 @@ export default async function InstanceDetailPage({
               <Badge variant={statusBadgeVariant(instance.status)}>{instance.status}</Badge>
             )}
             <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={`/runtimes/${instance.runtime ?? "openclaw"}.svg`}
-                alt=""
-                width={13}
-                height={13}
-                className="size-[13px]"
-              />
+              <RuntimeLogo runtime={instance.runtime} size={13} className="size-[13px]" />
               <span className="font-mono text-xs text-muted-foreground">
                 {getRuntime(instance.runtime).displayName}
               </span>
