@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
+import { getEffectiveUserId } from "@/lib/effective-user"
 import { db, instances, subscriptions, eq } from "@/db"
 import { deleteBot } from "@/lib/provisioner"
 import { getInstanceAccessLevel } from "@/lib/instance-access"
@@ -22,6 +23,7 @@ export async function DELETE(
 
   const { instanceId } = await params
   const isAdmin = (session.user as { role?: string }).role === "admin"
+  const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
 
   const instance = await db.query.instances.findFirst({
     where: eq(instances.id, instanceId),
@@ -30,7 +32,7 @@ export async function DELETE(
     return NextResponse.json({ error: "Instance not found" }, { status: 404 })
   }
   // Deleting an agent is restricted to its creator and the team owner.
-  if (!isAdmin && !(await getInstanceAccessLevel(session.user.id, instance.id)).isOwnerLike) {
+  if (!isAdmin && !(await getInstanceAccessLevel(effectiveUserId, instance.id)).isOwnerLike) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
+import { getEffectiveUserId } from "@/lib/effective-user"
 import { db, instances, eq } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { canOperateInstance } from "@/lib/instance-access"
@@ -46,16 +47,17 @@ async function loadInstance(
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
   }
   const isAdmin = (session.user as { role?: string }).role === "admin"
+  const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
   const instance = await db.query.instances.findFirst({
     where: isAdmin
       ? eq(instances.id, instanceId)
-      : whereUserInstanceVisible(session.user.id, instanceId),
+      : whereUserInstanceVisible(effectiveUserId, instanceId),
   })
   if (!instance) {
     return { error: NextResponse.json({ error: "Instance not found" }, { status: 404 }) }
   }
   // Binding/removing a domain is an operation — requires Operator+ on the agent.
-  if (!isAdmin && !(await canOperateInstance(session.user.id, instance.id))) {
+  if (!isAdmin && !(await canOperateInstance(effectiveUserId, instance.id))) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) }
   }
   return { instance, userId: session.user.id }
@@ -235,7 +237,7 @@ export async function POST(
       const mode = await getZoneSslMode(ctx)
       if (mode === "strict") {
         sslWarning =
-          "Your zone's SSL/TLS mode is Full (strict). A self-signed origin can return error 526 — switch it to 'Full', or install a Cloudflare Origin certificate."
+          "Your zone's SSL/TLS mode is Full (strict). A self-signed origin can return error 526. Switch it to 'Full', or install a Cloudflare Origin certificate."
       } else if (mode === null || mode === "off" || mode === "flexible") {
         await patchZoneSetting("ssl", "full", ctx)
       }

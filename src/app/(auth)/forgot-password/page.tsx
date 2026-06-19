@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { useCallback, useState } from "react"
+import { CircleAlert, CircleCheck } from "lucide-react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -66,13 +67,15 @@ export default function ForgotPasswordPage() {
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
           {error && (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
+            <Alert variant="destructive" className="flex items-center justify-center gap-2 text-center">
+              <CircleAlert className="shrink-0" />
+              <AlertDescription className="text-center">{error}</AlertDescription>
             </Alert>
           )}
           {success && (
-            <Alert>
-              <AlertDescription>{success}</AlertDescription>
+            <Alert variant="success" className="flex items-center justify-center gap-2 text-center">
+              <CircleCheck className="shrink-0" />
+              <AlertDescription className="text-center">{success}</AlertDescription>
             </Alert>
           )}
           <FieldGroup>

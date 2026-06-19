@@ -24,7 +24,7 @@ const PRESETS = [
 ] as const
 
 const SELECTED_GLOW =
-  "data-[state=on]:border-ring data-[state=on]:ring-1 data-[state=on]:ring-ring data-[state=on]:bg-ring/15 data-[state=on]:text-foreground"
+  "data-[state=on]:bg-primary/10 data-[state=on]:border-primary/40 data-[state=on]:text-foreground"
 
 export function TopUpCard({ stripeConfigured }: { stripeConfigured: boolean }) {
   const router = useRouter()
@@ -40,7 +40,7 @@ export function TopUpCard({ stripeConfigured }: { stripeConfigured: boolean }) {
     if (confirmedTopup.current) return
     if (searchParams.get("topup") !== "success") return
     confirmedTopup.current = true
-    toast.success("Payment received — credits will appear in a few seconds.")
+    toast.success("Payment received. Credits will appear in a few seconds.")
     router.refresh()
     router.replace("/dashboard/billing")
   }, [searchParams, router])
@@ -81,7 +81,7 @@ export function TopUpCard({ stripeConfigured }: { stripeConfigured: boolean }) {
   return (
     <Card>
       <CardHeader>
-        <CardDescription className="font-mono text-[10px] tracking-[0.1em] uppercase text-primary">
+        <CardDescription className="font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">
           Top up
         </CardDescription>
         <CardTitle className="text-base">Add credits</CardTitle>
@@ -135,7 +135,7 @@ export function TopUpCard({ stripeConfigured }: { stripeConfigured: boolean }) {
 
         {!stripeConfigured && (
           <p className="text-[11px] text-muted-foreground">
-            Stripe is not configured — top-ups are credited instantly for development.
+            Stripe is not configured. Top-ups are credited instantly for development.
           </p>
         )}
       </CardContent>

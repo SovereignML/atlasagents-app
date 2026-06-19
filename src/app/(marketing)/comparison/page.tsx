@@ -23,7 +23,7 @@ const comparisonRows = [
   { feature: "Full root access", us: true, vps: true, diy: true },
   { feature: "Outcome-focused setup", us: true, vps: false, diy: false },
   { feature: "Dedicated success engineer", us: true, vps: false, diy: false },
-  { feature: "SOC2 & audit logs", us: true, vps: false, diy: false },
+  { feature: "Audit logs & monitoring", us: true, vps: false, diy: false },
 ]
 
 const positioningBlocks = [
@@ -33,7 +33,7 @@ const positioningBlocks = [
   },
   {
     title: "We are not just infra",
-    desc: "Infrastructure is a commodity. What matters is what runs on it. We deliver outcomes — agents that automate real work, not empty compute.",
+    desc: "Infrastructure is a commodity. What matters is what runs on it. We deliver outcomes: agents that automate real work, not empty compute.",
   },
   {
     title: "We are an AI operations layer",
@@ -158,7 +158,7 @@ export default function ComparisonPage() {
             </h3>
             <p className="text-[var(--text-secondary)] max-w-lg mx-auto mb-6">
               Book a demo and see how SovereignML deploys production AI agents
-              in minutes — not weeks.
+              in minutes, not weeks.
             </p>
             <a
               href={BRANDING.demoUrl}

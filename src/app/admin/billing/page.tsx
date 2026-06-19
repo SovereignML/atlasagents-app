@@ -178,11 +178,11 @@ export default async function AdminBillingPage() {
                             {user.email}
                           </Link>
                         ) : (
-                          "—"
+                          "-"
                         )}
                       </TableCell>
                       <TableCell className="max-w-xs truncate text-sm text-muted-foreground">
-                        {tx.description || "—"}
+                        {tx.description || "-"}
                       </TableCell>
                       <TableCell
                         className={

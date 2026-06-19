@@ -22,7 +22,7 @@ export default async function AdminProvidersPage() {
     <PageContainer>
       <PageHeader
         title="Admin · Providers"
-        description="Multi-provider VPS router. Toggle providers, set internal budgets, pin regions, and review routing decisions. Provider selection is automatic — these controls override it."
+        description="Multi-provider VPS router. Toggle providers, set internal budgets, pin regions, and review routing decisions. Provider selection is automatic. These controls override it."
       />
       <ProvidersClient
         providers={overview}

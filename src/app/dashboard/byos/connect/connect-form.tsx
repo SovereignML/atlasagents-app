@@ -105,6 +105,7 @@ export function ByosConnectForm({
   }
   function prev() {
     if (stepIdx > 0) setStep(STEPS[stepIdx - 1])
+    else router.back()
   }
 
   async function copyCmd() {
@@ -115,7 +116,7 @@ export function ByosConnectForm({
       toast.success("Command copied")
       setTimeout(() => setCopied(false), 2000)
     } catch {
-      toast.error("Couldn't copy — select and copy manually")
+      toast.error("Couldn't copy. Select and copy manually.")
     }
   }
 
@@ -309,7 +310,7 @@ export function ByosConnectForm({
                       <Wallet className="size-4" /> Use our OpenRouter credits
                     </div>
                     <p className="mt-1.5 text-sm text-muted-foreground">
-                      Pay-as-you-go from your credit wallet. We mint a per-agent key — no
+                      Pay-as-you-go from your credit wallet. We mint a per-agent key, no
                       LLM signup needed.
                     </p>
                   </ToggleGroupItem>
@@ -402,7 +403,7 @@ export function ByosConnectForm({
                     className={cn(name.trim().length >= 2 && "border-ring ring-1 ring-ring")}
                   />
                   {name.trim().length > 0 && (
-                    <FieldDescription className="font-mono">slug: {slugPreview || "—"}</FieldDescription>
+                    <FieldDescription className="font-mono">slug: {slugPreview || "-"}</FieldDescription>
                   )}
                   {name.trim().length > 0 && name.trim().length < 2 && (
                     <FieldDescription className="text-amber-500">
@@ -446,7 +447,7 @@ export function ByosConnectForm({
               <div>
                 <h2 className="text-lg font-semibold text-foreground">Billing &amp; Review</h2>
                 <p className="text-sm text-muted-foreground">
-                  A flat management fee — deploy, monitor, restart, and configure your
+                  A flat management fee: deploy, monitor, restart, and configure your
                   agent. No compute charges (it&apos;s your server).
                 </p>
               </div>
@@ -492,7 +493,7 @@ export function ByosConnectForm({
                       Server
                     </CardDescription>
                     <p className="font-medium text-foreground">
-                      {user.trim() || "root"}@{host.trim() || "—"}
+                      {user.trim() || "root"}@{host.trim() || "-"}
                       {port && port !== "22" ? `:${port}` : ""}
                     </p>
                   </CardHeader>
@@ -515,7 +516,7 @@ export function ByosConnectForm({
                     <CardDescription className="text-xs uppercase tracking-wide">
                       Agent
                     </CardDescription>
-                    <p className="font-medium text-foreground">{selectedCategory?.name ?? "—"}</p>
+                    <p className="font-medium text-foreground">{selectedCategory?.name ?? "-"}</p>
                   </CardHeader>
                   <CardContent>
                     <p className="text-xs text-muted-foreground">Runtime: OpenClaw</p>
@@ -526,11 +527,11 @@ export function ByosConnectForm({
                     <CardDescription className="text-xs uppercase tracking-wide">
                       Project
                     </CardDescription>
-                    <p className="font-medium text-foreground">{name || "—"}</p>
+                    <p className="font-medium text-foreground">{name || "-"}</p>
                   </CardHeader>
                   <CardContent>
                     <p className="font-mono text-xs text-muted-foreground">
-                      slug: {slugPreview || "—"}
+                      slug: {slugPreview || "-"}
                     </p>
                   </CardContent>
                 </Card>
@@ -580,7 +581,7 @@ export function ByosConnectForm({
       </Card>
 
       <div className="flex items-center justify-between">
-        <Button variant="outline" onClick={prev} disabled={stepIdx === 0}>
+        <Button variant="outline" onClick={prev}>
           Back
         </Button>
         <div className="flex items-center gap-3">

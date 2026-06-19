@@ -10,9 +10,25 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        // The brand default IS the glossy primary pill — every implicit-default
+        // button renders the signature CTA. Parameterized on --primary so it
+        // adapts per surface: signal-lime inside the console (app-shell), and
+        // the marketing primary (blue/amber) on the marketing site / shared
+        // chrome like the consent banner. Authors pick outline/ghost/secondary
+        // where a neutral action is intended.
+        default:
+          "rounded-[10px] border-none font-semibold text-primary-foreground bg-[linear-gradient(180deg,color-mix(in_oklch,var(--primary)_82%,white),var(--primary))] shadow-[0_6px_20px_color-mix(in_oklch,var(--primary)_38%,transparent),inset_0_1px_oklch(1_0_0/0.45)] hover:-translate-y-0.5 hover:shadow-[0_8px_26px_color-mix(in_oklch,var(--primary)_50%,transparent),inset_0_1px_oklch(1_0_0/0.45)] active:translate-y-0",
+        // Brand signature: the glossy signal-lime pill with glow + inset
+        // highlight. Built from Tailwind utilities (not the fixed-size
+        // .btn-antimetal class) so it composes with every `size`. `signal`,
+        // `gradient`, and `default` all share this treatment.
+        signal:
+          "rounded-[10px] border-none font-semibold text-primary-foreground bg-[linear-gradient(180deg,color-mix(in_oklch,var(--primary)_82%,white),var(--primary))] shadow-[0_6px_20px_color-mix(in_oklch,var(--primary)_38%,transparent),inset_0_1px_oklch(1_0_0/0.45)] hover:-translate-y-0.5 hover:shadow-[0_8px_26px_color-mix(in_oklch,var(--primary)_50%,transparent),inset_0_1px_oklch(1_0_0/0.45)] active:translate-y-0",
         gradient:
-          "btn-antimetal border-none rounded-full hover:-translate-y-0.5",
+          "rounded-[10px] border-none font-semibold text-primary-foreground bg-[linear-gradient(180deg,color-mix(in_oklch,var(--primary)_82%,white),var(--primary))] shadow-[0_6px_20px_color-mix(in_oklch,var(--primary)_38%,transparent),inset_0_1px_oklch(1_0_0/0.45)] hover:-translate-y-0.5 hover:shadow-[0_8px_26px_color-mix(in_oklch,var(--primary)_50%,transparent),inset_0_1px_oklch(1_0_0/0.45)] active:translate-y-0",
+        // Solid inline action ("Open", "Add rule") — high-contrast neutral.
+        contrast:
+          "rounded-[10px] bg-foreground text-background hover:bg-foreground/90",
         outline:
           "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
@@ -36,6 +52,16 @@ const buttonVariants = cva(
         "icon-lg": "size-10 rounded-xl",
       },
     },
+    // The glossy primary button keeps its dense 10px radius at every size. Size
+    // variants set their own `rounded-*`, which tailwind-merge would otherwise
+    // keep over the variant's radius; this compound re-asserts the shape last.
+    compoundVariants: [
+      {
+        variant: ["default", "signal", "gradient"],
+        size: ["xs", "sm", "lg", "pill"],
+        className: "rounded-[10px]",
+      },
+    ],
     defaultVariants: {
       variant: "default",
       size: "default",

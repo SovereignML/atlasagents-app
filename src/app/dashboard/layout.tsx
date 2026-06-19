@@ -4,6 +4,7 @@ import { cookies, headers } from "next/headers"
 
 import { DashboardSidebar } from "@/components/layout/dashboard-sidebar"
 import { DashboardTopbar } from "@/components/layout/dashboard-topbar"
+import { ConsoleThemePortalSync } from "@/components/layout/console-theme-portal-sync"
 import { ImpersonationBanner } from "@/components/layout/impersonation-banner"
 import { VerifyEmailBanner } from "@/components/dashboard/verify-email-banner"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
@@ -17,6 +18,7 @@ import {
   resolveTeamByHost,
   type ResolvedBranding,
 } from "@/lib/tenant-branding"
+import { getConsoleTheme } from "@/lib/console-theme.server"
 import { db, users, eq } from "@/db"
 
 export const dynamic = "force-dynamic"
@@ -51,17 +53,23 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Honors both platform-admin and tenant-admin impersonation (scope re-checked).
   const impersonatedId = await getHonoredImpersonatedUserId()
 
-  let impersonatedUser: { id: string; email: string; name: string | null } | null = null
+  let impersonatedUser: {
+    id: string
+    email: string
+    name: string | null
+    image: string | null
+  } | null = null
   if (impersonatedId) {
     const u = await db.query.users.findFirst({
       where: eq(users.id, impersonatedId),
-      columns: { id: true, email: true, name: true },
+      columns: { id: true, email: true, name: true, image: true },
     })
     if (u) impersonatedUser = u
   }
 
   const cookieStore = await cookies()
   const defaultOpen = cookieStore.get("sidebar_state")?.value !== "false"
+  const consoleTheme = await getConsoleTheme()
 
   const branding = await resolveBranding()
   const brandingCss = buildBrandingCss(branding)
@@ -95,15 +103,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   return (
-    <div className="app-shell flex min-h-screen flex-col bg-background text-foreground">
+    <div
+      className={`app-shell flex min-h-screen flex-col bg-background text-foreground ${
+        consoleTheme === "dark" ? "console-dark" : "console-light"
+      }`}
+    >
+      <ConsoleThemePortalSync theme={consoleTheme} />
       {brandingCss && <style dangerouslySetInnerHTML={{ __html: brandingCss }} />}
-      {impersonatedUser && (
-        <ImpersonationBanner
-          userId={impersonatedUser.id}
-          email={impersonatedUser.email}
-          name={impersonatedUser.name}
-        />
-      )}
       <SidebarProvider defaultOpen={defaultOpen} className="flex-1">
         <DashboardSidebar
           brandName={branding.brandName}
@@ -113,12 +119,29 @@ export default async function DashboardLayout({ children }: { children: React.Re
           canManageTenant={canManageBranding}
         />
         <SidebarInset>
+          {impersonatedUser && (
+            <ImpersonationBanner
+              userId={impersonatedUser.id}
+              email={impersonatedUser.email}
+              name={impersonatedUser.name}
+            />
+          )}
           <DashboardTopbar
             brandName={branding.brandName}
             teams={teamList}
             activeTeamId={activeTeamId}
+            consoleTheme={consoleTheme}
+            impersonating={
+              impersonatedUser
+                ? {
+                    name: impersonatedUser.name,
+                    email: impersonatedUser.email,
+                    image: impersonatedUser.image,
+                  }
+                : null
+            }
           />
-          <main className="flex-1 overflow-auto bg-background px-6 py-8 lg:px-12 lg:py-10">
+          <main className="flex-1 overflow-auto bg-background px-8 pt-[30px] pb-[60px]">
             {showVerifyBanner && <VerifyEmailBanner />}
             {children}
           </main>

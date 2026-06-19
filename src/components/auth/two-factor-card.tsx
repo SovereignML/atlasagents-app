@@ -164,7 +164,7 @@ export function TwoFactorCard() {
         return
       }
       setBackupCodes(data.backupCodes as string[])
-      setInfo("Two-factor authentication enabled. Save your backup codes below — they will not be shown again.")
+      setInfo("Two-factor authentication enabled. Save your backup codes below. They will not be shown again.")
       setSetup(null)
       setEnrolling(false)
       setEnrollCode("")
@@ -211,7 +211,7 @@ export function TwoFactorCard() {
       }
       setBackupCodes(data.backupCodes as string[])
       setRegenCode("")
-      setInfo("Generated a new set of backup codes. Save them — old codes no longer work.")
+      setInfo("Generated a new set of backup codes. Save them. Old codes no longer work.")
       void refresh()
     } finally {
       setRegenerating(false)
@@ -275,7 +275,7 @@ export function TwoFactorCard() {
             <p className="text-sm font-medium">Your backup codes</p>
             <p className="text-xs text-muted-foreground">
               Each code can be used once if you lose access to your authenticator. Store them in a
-              password manager — they won&apos;t be shown again.
+              password manager. They won&apos;t be shown again.
             </p>
             <div className="grid grid-cols-2 gap-2 font-mono text-xs">
               {backupCodes.map((c) => (
@@ -431,7 +431,7 @@ export function TwoFactorCard() {
                       />
                     </Field>
                     <Field>
-                      <FieldLabel htmlFor="disable-code">— or — 2FA code</FieldLabel>
+                      <FieldLabel htmlFor="disable-code">Or enter a 2FA code</FieldLabel>
                       <Input
                         id="disable-code"
                         autoComplete="one-time-code"

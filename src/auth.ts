@@ -52,6 +52,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           Google({
             clientId: process.env.GOOGLE_CLIENT_ID ?? process.env.AUTH_GOOGLE_ID!,
             clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? process.env.AUTH_GOOGLE_SECRET!,
+            // Lets an email/password user link Google from /dashboard/account:
+            // when the Google email matches an existing User row, the adapter
+            // attaches the Account instead of throwing OAuthAccountNotLinked.
+            // Safe here because Google attests ownership of the email address.
+            allowDangerousEmailAccountLinking: true,
           }),
         ]
       : []),

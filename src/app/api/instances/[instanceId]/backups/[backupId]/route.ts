@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
+import { getEffectiveUserId } from "@/lib/effective-user"
 import { db, instances, backupRecords, eq, and } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { canOperateInstance } from "@/lib/instance-access"
@@ -24,16 +25,17 @@ export async function DELETE(
 
   const { instanceId, backupId } = await params
   const isAdmin = (session.user as { role?: string }).role === "admin"
+  const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
   const instance = await db.query.instances.findFirst({
     where: isAdmin
       ? eq(instances.id, instanceId)
-      : whereUserInstanceVisible(session.user.id, instanceId),
+      : whereUserInstanceVisible(effectiveUserId, instanceId),
   })
   if (!instance) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 })
   }
   // Deleting a backup is an operation — requires Operator+ on this agent.
-  if (!isAdmin && !(await canOperateInstance(session.user.id, instance.id))) {
+  if (!isAdmin && !(await canOperateInstance(effectiveUserId, instance.id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 

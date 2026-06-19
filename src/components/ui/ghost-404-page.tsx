@@ -151,14 +151,14 @@ export function NotFound({ isLoggedIn }: { isLoggedIn: boolean }) {
             className="text-3xl md:text-5xl font-bold text-foreground mb-4 md:mb-6 opacity-90 select-none"
             variants={itemVariants}
           >
-            Boo! Page missing!
+            Page not found
           </motion.h1>
 
           <motion.p
             className="text-lg md:text-xl text-muted-foreground mb-8 md:mb-12 select-none"
             variants={itemVariants}
           >
-            Whoops! This page must be a ghost &mdash; it&apos;s not here!
+            We couldn&apos;t find the page you&apos;re looking for. It may have moved or no longer exists.
           </motion.p>
 
           <motion.div

@@ -24,7 +24,7 @@ function barTitle(s: HeartbeatSample): string {
   const when = new Date(s.checkedAt).toLocaleString()
   const label = s.status ? s.status.charAt(0).toUpperCase() + s.status.slice(1) : "No data"
   const rt = s.responseTimeMs != null ? ` · ${s.responseTimeMs} ms` : ""
-  return `${label}${rt} — ${when}`
+  return `${label}${rt}, ${when}`
 }
 
 /**
@@ -52,17 +52,18 @@ export function HeartbeatBar({
   const barH = size === "sm" ? "h-4" : "h-7"
   const barW = size === "sm" ? "w-[3px]" : "w-1"
   const gap = size === "sm" ? "gap-[2px]" : "gap-[3px]"
+  const radius = size === "sm" ? "rounded-[1px]" : "rounded-full"
 
   return (
     <div className={cn("flex items-end", gap)} aria-hidden="true">
       {Array.from({ length: padding }).map((_, i) => (
-        <span key={`pad-${i}`} className={cn(barW, barH, "rounded-full bg-muted/40")} />
+        <span key={`pad-${i}`} className={cn(barW, barH, radius, "bg-muted/40")} />
       ))}
       {sorted.map((s, i) => (
         <span
           key={`${s.checkedAt}-${i}`}
           title={barTitle(s)}
-          className={cn(barW, barH, "rounded-full", tone(s.status))}
+          className={cn(barW, barH, radius, tone(s.status))}
         />
       ))}
     </div>

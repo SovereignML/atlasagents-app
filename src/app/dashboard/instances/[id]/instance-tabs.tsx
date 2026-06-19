@@ -7,6 +7,7 @@ import {
   Cloud,
   CloudUpload,
   Copy,
+  Eye,
   Link2,
   Loader2,
   RefreshCw,
@@ -379,7 +380,7 @@ function SectionCard({
   return (
     <Card>
       <CardHeader>
-        <CardDescription className="font-mono text-[10px] tracking-[0.1em] uppercase">
+        <CardDescription className="font-mono text-[11px] tracking-[0.14em] uppercase">
           {title}
         </CardDescription>
         {description && <p className="text-sm text-muted-foreground">{description}</p>}
@@ -393,7 +394,7 @@ function SectionCard({
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">
+      <p className="font-mono text-[11px] tracking-[0.14em] uppercase text-muted-foreground">
         {label}
       </p>
       <p className="mt-1 text-sm text-foreground">{value}</p>
@@ -625,7 +626,7 @@ function CredentialsCard({
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
             {webui
-              ? "Log into Open WebUI — the web chat UI for your Hermes agent — with the auto-generated admin account."
+              ? "Log into Open WebUI (the web chat UI for your Hermes agent) with the auto-generated admin account."
               : `Log into your ${runtimeLabel} agent with the auto-generated admin account.`}
           </p>
           <Button size="sm" onClick={reveal} disabled={loading}>
@@ -778,7 +779,7 @@ function GatewayTokenCard({
       await navigator.clipboard.writeText(token)
       toast.success("Token copied to clipboard")
     } catch {
-      toast.error("Copy failed — clipboard access blocked")
+      toast.error("Copy failed. Clipboard access blocked")
     }
   }
 
@@ -787,21 +788,31 @@ function GatewayTokenCard({
       title={isHermes ? "Gateway API Key" : "Gateway Token"}
       description={
         isHermes
-          ? "Advanced — for programmatic access to the OpenAI-compatible API at /v1. Most users can just use Open WebUI above."
+          ? "Advanced: for programmatic access to the OpenAI-compatible API at /v1. Most users can just use Open WebUI above."
           : `Use this token to authenticate with the ${runtimeLabel} Control UI and API.`
       }
     >
-      <p className="break-all rounded-lg border bg-muted/40 p-3 font-mono text-sm text-foreground">
-        {token ?? "gw_•••••••••••••••••••••"}
-      </p>
-      <div className="mt-3 flex gap-2">
-        <Button size="sm" variant="outline" onClick={reveal} disabled={loading}>
-          {loading ? "…" : "Reveal"}
+      <div className="flex items-center gap-2">
+        <p className="min-w-0 flex-1 break-all rounded-lg border bg-muted/40 p-3 font-mono text-sm text-foreground">
+          {token ?? "gw_•••••••••••••••••••••"}
+        </p>
+        <Button
+          variant="outline"
+          onClick={reveal}
+          disabled={loading}
+          aria-label="Reveal token"
+          className="size-8 shrink-0 px-0"
+        >
+          {loading ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
         </Button>
         {token && (
-          <Button size="sm" variant="outline" onClick={copy}>
-            <Copy data-icon="inline-start" />
-            Copy
+          <Button
+            variant="outline"
+            onClick={copy}
+            aria-label="Copy token"
+            className="size-8 shrink-0 px-0"
+          >
+            <Copy className="size-4" />
           </Button>
         )}
       </div>
@@ -874,7 +885,7 @@ function DeploymentProgress({
       ? "Deleting this agent…"
       : instance.provisionStage
         ? PROVISION_STAGE_HINTS[instance.provisionStage] ??
-          "Still working — safe to leave this page open."
+          "Still working, safe to leave this page open."
         : "Preparing your deployment…"
 
   function handleRetry() {
@@ -985,7 +996,7 @@ function ProvisioningCard({ instance, logs }: { instance: InstanceLite; logs: Lo
     isActive &&
     (instance.provisionStage
       ? PROVISION_STAGE_HINTS[instance.provisionStage] ??
-        "Still working — safe to leave this page open."
+        "Still working, safe to leave this page open."
       : "Provisioning is starting.")
 
   const steps = PROVISION_STEPS.filter((s) =>
@@ -1064,7 +1075,7 @@ function UptimeCard({ kuma }: { kuma: KumaInfo }) {
     return (
       <SectionCard title="Uptime">
         <p className="text-xs text-muted-foreground">
-          Monitoring is enabled — waiting for the first status check.
+          Monitoring is enabled, waiting for the first status check.
         </p>
       </SectionCard>
     )
@@ -1096,7 +1107,7 @@ function UptimeCard({ kuma }: { kuma: KumaInfo }) {
             Uptime (24h)
           </p>
           <p className="text-2xl font-bold text-foreground">
-            {kuma.uptimeRatio != null ? `${(kuma.uptimeRatio * 100).toFixed(2)}%` : "—"}
+            {kuma.uptimeRatio != null ? `${(kuma.uptimeRatio * 100).toFixed(2)}%` : "-"}
           </p>
         </div>
       </div>
@@ -1110,11 +1121,11 @@ function UptimeCard({ kuma }: { kuma: KumaInfo }) {
       <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-3">
         <Stat
           label="Response"
-          value={kuma.responseTimeMs != null ? `${kuma.responseTimeMs} ms` : "—"}
+          value={kuma.responseTimeMs != null ? `${kuma.responseTimeMs} ms` : "-"}
         />
         <Stat
           label="Cert expiry"
-          value={kuma.certDaysRemaining != null ? `${kuma.certDaysRemaining} days` : "—"}
+          value={kuma.certDaysRemaining != null ? `${kuma.certDaysRemaining} days` : "-"}
         />
         <Stat label="Last checked" value={new Date(kuma.checkedAt).toLocaleTimeString()} />
       </div>
@@ -1184,8 +1195,8 @@ function OverviewTab({
       <SectionCard title="Deployment">
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <Stat label="Status" value={instance.status} />
-          <Stat label="IP" value={instance.ipAddress || "—"} />
-          <Stat label="Domain" value={instance.domain ?? instance.managedSubdomain ?? "—"} />
+          <Stat label="IP" value={instance.ipAddress || "-"} />
+          <Stat label="Domain" value={instance.domain ?? instance.managedSubdomain ?? "-"} />
           <Stat
             label="TLS"
             value={
@@ -1193,7 +1204,7 @@ function OverviewTab({
                 ? instance.tlsStatus ?? "pending"
                 : instance.managedSubdomain
                   ? "Cloudflare"
-                  : "—"
+                  : "-"
             }
           />
           <Stat
@@ -1201,7 +1212,7 @@ function OverviewTab({
             value={
               instance.deploymentTarget === "vps" || instance.deploymentTarget === "byos"
                 ? instance.runtimeLabel
-                : "—"
+                : "-"
             }
           />
         </div>
@@ -1214,7 +1225,7 @@ function OverviewTab({
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <Stat
               label="Host"
-              value={`${instance.byosUser ?? "root"}@${instance.byosHost ?? instance.ipAddress ?? "—"}${
+              value={`${instance.byosUser ?? "root"}@${instance.byosHost ?? instance.ipAddress ?? "-"}${
                 instance.byosPort && instance.byosPort !== 22 ? `:${instance.byosPort}` : ""
               }`}
             />
@@ -1294,7 +1305,7 @@ function MonitoringTab({ instance, kuma }: { instance: InstanceLite; kuma: KumaI
           <Stat label="Total LLM cost" value={`$${(instance.costUsd ?? 0).toFixed(2)}`} />
           <Stat
             label="Last event"
-            value={instance.lastEventAt ? new Date(instance.lastEventAt).toLocaleString() : "—"}
+            value={instance.lastEventAt ? new Date(instance.lastEventAt).toLocaleString() : "-"}
           />
         </div>
       </SectionCard>
@@ -1438,7 +1449,7 @@ function ControlsTab({
       await navigator.clipboard.writeText(tokenRevealed)
       toast.success("Token copied to clipboard.")
     } catch {
-      toast.error("Copy failed — clipboard access blocked.")
+      toast.error("Copy failed. Clipboard access blocked.")
     }
   }
 
@@ -1488,6 +1499,7 @@ function ControlsTab({
         </div>
       </SectionCard>
       <AgentTypeCard instance={instance} />
+      <ModelSelectCard instance={instance} />
       {!isVps && (
         <SectionCard
           title="Bot Token"
@@ -1583,6 +1595,143 @@ function AgentTypeCard({ instance }: { instance: InstanceLite }) {
         <Button size="sm" className="mt-3" onClick={save} disabled={saving}>
           {saving ? "Saving…" : "Save & Apply"}
         </Button>
+      )}
+    </SectionCard>
+  )
+}
+
+/* ───────────── MODEL SELECT CARD ───────────── */
+const DEFAULT_MODEL = "__default__"
+
+type ModelOption = { slug: string; label: string; contextLength: number | null }
+type ModelInfo = {
+  current: string | null
+  tierDefault: string
+  runtime: string
+  options: ModelOption[]
+}
+
+function formatContext(ctx: number | null): string | null {
+  if (ctx == null) return null
+  return ctx >= 1000 ? `${Math.round(ctx / 1000)}k ctx` : `${ctx} ctx`
+}
+
+function ModelSelectCard({ instance }: { instance: InstanceLite }) {
+  const [info, setInfo] = useState<ModelInfo | null>(null)
+  const [selected, setSelected] = useState<string>(DEFAULT_MODEL)
+  const [saving, setSaving] = useState(false)
+  const router = useRouter()
+
+  useEffect(() => {
+    let active = true
+    fetch(`/api/instances/${instance.id}/model`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: ModelInfo | null) => {
+        if (!active || !j) return
+        setInfo(j)
+        setSelected(j.current ?? DEFAULT_MODEL)
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [instance.id])
+
+  const initial = info?.current ?? DEFAULT_MODEL
+  const isDirty = selected !== initial
+
+  async function save() {
+    setSaving(true)
+    try {
+      const modelSlug = selected === DEFAULT_MODEL ? null : selected
+      const r = await fetch(`/api/instances/${instance.id}/model`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelSlug }),
+      })
+      const j = await r.json()
+      if (!r.ok) {
+        toast.error(j.error || "Failed to update model")
+        return
+      }
+      if (j.warning) {
+        toast.warning(j.warning)
+      } else {
+        toast.success(
+          modelSlug
+            ? `Model updated to "${modelSlug}".${instance.status === "running" ? " Agent restarting." : ""}`
+            : "Model reset to the tier default.",
+        )
+      }
+      setInfo((prev) => (prev ? { ...prev, current: modelSlug } : prev))
+      router.refresh()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const tierDefaultCtx = formatContext(
+    info?.options.find((o) => o.slug === info?.tierDefault)?.contextLength ?? null,
+  )
+
+  return (
+    <SectionCard
+      title="Model"
+      description="Pick which LLM this agent runs. Only models valid for its runtime are shown."
+    >
+      {!info ? (
+        <p className="text-sm text-muted-foreground">Loading models…</p>
+      ) : (
+        <>
+          <Select value={selected} onValueChange={(v) => v && setSelected(v)}>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value={DEFAULT_MODEL}>
+                  Default for tier ({info.tierDefault})
+                </SelectItem>
+                {info.options.map((m) => (
+                  <SelectItem key={m.slug} value={m.slug}>
+                    {m.label}
+                    {formatContext(m.contextLength)
+                      ? ` · ${formatContext(m.contextLength)}`
+                      : ""}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <p className="mt-2 flex flex-wrap items-center gap-2 font-mono text-[10px] text-muted-foreground">
+            <Badge variant="outline">{info.runtime}</Badge>
+            <span>
+              {selected === DEFAULT_MODEL ? (
+                <>
+                  Using tier default:{" "}
+                  <span className="text-foreground">{info.tierDefault}</span>
+                  {tierDefaultCtx ? ` · ${tierDefaultCtx}` : ""}
+                </>
+              ) : (
+                <>
+                  Override:{" "}
+                  <span className="text-foreground">{selected}</span>
+                </>
+              )}
+            </span>
+          </p>
+          {info.options.length === 0 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              No selectable models for this runtime yet. An admin may need to sync model
+              metadata in Admin · Models.
+            </p>
+          )}
+          {isDirty && (
+            <Button size="sm" className="mt-3" onClick={save} disabled={saving}>
+              {saving ? "Saving…" : "Save & Apply"}
+            </Button>
+          )}
+        </>
       )}
     </SectionCard>
   )
@@ -1711,7 +1860,7 @@ function CloudflareDomainCard({
         toast.error(j.error || "Failed to connect Cloudflare")
         return
       }
-      toast.success(`Cloudflare connected — ${j.zonesCount ?? 0} domain(s) available.`)
+      toast.success(`Cloudflare connected. ${j.zonesCount ?? 0} domain(s) available.`)
       setToken("")
       router.refresh()
     } finally {
@@ -1926,7 +2075,7 @@ function CloudflareDomainCard({
             <AlertTitle>Zone-wide setting</AlertTitle>
             <AlertDescription>
               Saving sets your zone&apos;s SSL/TLS mode to <strong>Full</strong> if it isn&apos;t
-              already — this affects every hostname in the selected Cloudflare zone.
+              already. This affects every hostname in the selected Cloudflare zone.
             </AlertDescription>
           </Alert>
 
@@ -1968,7 +2117,7 @@ function InterfacesTab({ instance }: { instance: InstanceLite }) {
           </Badge>
         </div>
         <p className="mt-3 break-all font-mono text-xs text-muted-foreground">
-          {webUrl ?? "—"}
+          {webUrl ?? "-"}
         </p>
       </SectionCard>
       <SectionCard
@@ -2211,7 +2360,7 @@ function DangerTab({ instance }: { instance: InstanceLite }) {
 /* ───────────── BACKUP & RESTORE ───────────── */
 
 function formatBytes(n: number | null): string {
-  if (!n) return "—"
+  if (!n) return "-"
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
@@ -2305,7 +2454,7 @@ function BackupTab({
         detail?: string
       }
       if (!r.ok) {
-        if (j.code === "drive_reauth") toast.error("Drive access expired — reconnect to continue.")
+        if (j.code === "drive_reauth") toast.error("Drive access expired. Reconnect to continue.")
         else toast.error(j.detail || j.error || "Backup failed.")
         return
       }

@@ -15,7 +15,7 @@ const ENTRIES: Entry[] = [
     tag: "feature",
     title: "Instance detail dashboard + Monitoring",
     body: [
-      "New tabbed detail page at /dashboard/instances/[id] — Overview, Controls, AI Config, Interfaces, Skills, Monitoring, Usage.",
+      "New tabbed detail page at /dashboard/instances/[id]: Overview, Controls, AI Config, Interfaces, Skills, Monitoring, Usage.",
       "Global monitoring at /dashboard/monitoring with per-agent uptime table.",
       "Every instance now has a public gateway URL shown at the top of its detail page.",
     ],
@@ -27,7 +27,7 @@ const ENTRIES: Entry[] = [
     title: "Deploy wizard: streamlined agent-type-driven flow",
     body: [
       "Merged Project and Purpose into a single step with use-case selection, target user, and tone.",
-      "Removed Capability step — core actions are now auto-derived from the selected agent type.",
+      "Removed Capability step. Core actions are now auto-derived from the selected agent type.",
       "Location selection moved under Interface. Telegram, Discord, REST API, Shared Cluster, and Serverless greyed out as coming soon.",
       "Custom domain setup moved to post-deploy Controls tab.",
     ],

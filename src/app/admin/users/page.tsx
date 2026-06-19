@@ -349,7 +349,7 @@ export default function AdminUsersPage() {
                               <AvatarFallback>{getInitials(user.name, user.email)}</AvatarFallback>
                             </Avatar>
                             <div>
-                              <div className="font-medium text-foreground">{user.name || "—"}</div>
+                              <div className="font-medium text-foreground">{user.name || "-"}</div>
                               <div className="text-xs text-muted-foreground">{user.email}</div>
                             </div>
                           </div>
@@ -366,7 +366,7 @@ export default function AdminUsersPage() {
                         </TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           {user.teams.length === 0 ? (
-                            <span className="text-xs text-muted-foreground">—</span>
+                            <span className="text-xs text-muted-foreground">-</span>
                           ) : (
                             <Popover>
                               <PopoverTrigger
@@ -576,7 +576,7 @@ export default function AdminUsersPage() {
                                             @{user.telegramId}
                                           </a>
                                         ) : (
-                                          <span className="text-muted-foreground">—</span>
+                                          <span className="text-muted-foreground">-</span>
                                         )
                                       }
                                     />
@@ -593,7 +593,7 @@ export default function AdminUsersPage() {
                                             @{user.twitterHandle}
                                           </a>
                                         ) : (
-                                          <span className="text-muted-foreground">—</span>
+                                          <span className="text-muted-foreground">-</span>
                                         )
                                       }
                                     />
@@ -601,7 +601,7 @@ export default function AdminUsersPage() {
                                       label="Discord"
                                       value={
                                         user.discordId || (
-                                          <span className="text-muted-foreground">—</span>
+                                          <span className="text-muted-foreground">-</span>
                                         )
                                       }
                                     />
@@ -713,7 +713,7 @@ export default function AdminUsersPage() {
                                             </Button>
                                           </div>
                                           <p className="text-xs text-muted-foreground">
-                                            {note.authorName} —{" "}
+                                            {note.authorName},{" "}
                                             {new Date(note.createdAt).toLocaleString()}
                                           </p>
                                         </CardContent>

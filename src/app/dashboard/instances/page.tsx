@@ -16,14 +16,17 @@ import {
 } from "@/components/ui/empty"
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
 import { whereUserInstancesVisible } from "@/lib/instance-queries"
+import { getEffectiveUserId } from "@/lib/effective-user"
 import { InstancesFilter } from "./instances-filter"
 
 export default async function InstancesPage() {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
+  // Resolve through impersonation so an admin viewing-as a user sees their agents.
+  const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
 
   const rows = await db.query.instances.findMany({
-    where: whereUserInstancesVisible(session.user.id),
+    where: whereUserInstancesVisible(effectiveUserId),
     with: {
       region: true,
       serverConfig: true,
@@ -48,6 +51,7 @@ export default async function InstancesPage() {
       serverLabel: i.serverConfig.label,
       vcpu: i.serverConfig.vcpu,
       ramGb: i.serverConfig.ramGb,
+      priceMonthly: i.serverConfig.priceMonthly,
       recentLogs: i.logs.map((l) => ({
         id: l.id,
         level: l.level,
@@ -59,7 +63,7 @@ export default async function InstancesPage() {
   return (
     <PageContainer>
       <PageHeader
-        title="Instances"
+        title="Agents"
         description="All your deployed AI agents"
         actions={
           <Button

@@ -7,6 +7,7 @@ import { Globe, Search, Terminal, Image as ImageIcon, Plug } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
 import type { AgentTool } from "@/configs/agent-tools"
 
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -106,7 +107,7 @@ export function ToolsTab({
       setEnabled(new Set(ids))
       if (j.warning) toast.warning(j.warning)
       else if (status === "running")
-        toast.success("Tools updated — installing dependencies and restarting the agent…")
+        toast.success("Tools updated. Installing dependencies and restarting the agent…")
       else toast.success("Tools updated. They'll apply when the agent is deployed.")
       router.refresh()
     } finally {
@@ -125,7 +126,7 @@ export function ToolsTab({
           Agent Tools
         </p>
         <p className="mt-1 text-sm text-muted-foreground">
-          Install capabilities into this agent. Changes are applied live — the agent restarts to
+          Install capabilities into this agent. Changes are applied live; the agent restarts to
           pick them up.
         </p>
       </div>
@@ -137,9 +138,24 @@ export function ToolsTab({
           const on = enabled.has(tool.id)
           const disabled = tool.comingSoon || !supported
           return (
-            <Card key={tool.id} data-active={on} className={disabled ? "opacity-70" : undefined}>
+            <Card
+              key={tool.id}
+              data-active={on}
+              className={cn(
+                "transition-colors",
+                on && "border-primary/40 bg-primary/[0.06]",
+                disabled && "opacity-70"
+              )}
+            >
               <CardContent className="flex items-start gap-3 p-4">
-                <div className="mt-0.5 rounded-md border border-border p-2 text-muted-foreground">
+                <div
+                  className={cn(
+                    "mt-0.5 rounded-md border p-2",
+                    on
+                      ? "border-primary/40 bg-primary/10 text-primary"
+                      : "border-border text-muted-foreground"
+                  )}
+                >
                   <Icon className="size-4" />
                 </div>
                 <div className="min-w-0 flex-1">

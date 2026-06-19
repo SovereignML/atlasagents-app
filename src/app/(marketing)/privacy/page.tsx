@@ -2,7 +2,7 @@ import Link from "next/link"
 import { BRANDING } from "@/configs/branding"
 import { Reveal, RevealGroup, RevealItem } from "@/components/marketing/motion/reveal"
 
-const LAST_UPDATED = "January 1, 2025"
+const LAST_UPDATED = "May 30, 2026" // {{TODO: confirm effective date on legal sign-off}}
 
 const sections = [
   {
@@ -18,11 +18,11 @@ By creating an account or using our services, you agree to the collection and us
     subsections: [
       {
         title: "Account Information",
-        content: "When you register, we collect your name, email address, and password (stored as a bcryptjs hash — never in plaintext). If you sign in via Google OAuth, we receive your name, email, and profile picture from Google.",
+        content: "When you register, we collect your name, email address, and password (stored as a bcryptjs hash, never in plaintext). If you sign in via Google OAuth, we receive your name, email, and profile picture from Google.",
       },
       {
         title: "Agent & Deployment Data",
-        content: "We store the configuration of every agent you deploy: project name, region, compute tier, billing interval, and extra storage. We also generate and store a mock IP address for each agent. Root passwords, if provided, are encrypted at rest using AES-256-GCM with a per-instance initialization vector.",
+        content: "We store the configuration of every agent you deploy: project name, region, compute tier, billing interval, and extra storage. We also store an IP address for each agent instance. Root passwords, if provided, are encrypted at rest using AES-256-GCM with a per-instance initialization vector.",
       },
       {
         title: "Billing Information",
@@ -42,7 +42,7 @@ By creating an account or using our services, you agree to the collection and us
       },
       {
         title: "Cookies & Sessions",
-        content: "We use JWT-based session cookies (via NextAuth v5) to keep you authenticated. These are httpOnly, secure cookies that do not contain your password or payment information — only a signed token encoding your user ID and role.",
+        content: "We use signed, JWT-based session cookies to keep you authenticated. These are httpOnly, secure cookies that do not contain your password or payment information, only a signed token encoding your user ID and role.",
       },
     ],
   },
@@ -56,7 +56,7 @@ By creating an account or using our services, you agree to the collection and us
       "To send transactional emails (password resets, deployment confirmations) via Resend",
       "To enforce platform security, detect abuse, and apply rate limits",
       "To provide customer support when you contact us",
-      "To improve the platform based on aggregate, anonymized usage patterns",
+      "To improve the platform — including agent performance and our models over time — based only on aggregated, anonymized usage patterns. You can opt out of analytics-based product improvement by contacting privacy@sovereignml.com. {{TODO: legal review — confirm opt-out wording and mechanism}}",
     ],
   },
   {
@@ -65,7 +65,7 @@ By creating an account or using our services, you agree to the collection and us
     subsections: [
       {
         title: "Stripe",
-        content: "Payment processing. Stripe's Privacy Policy applies to payment data. We share only what Stripe requires to process transactions — your email and subscription details.",
+        content: "Payment processing. Stripe's Privacy Policy applies to payment data. We share only what Stripe requires to process transactions: your email and subscription details.",
       },
       {
         title: "Resend",
@@ -90,10 +90,10 @@ By creating an account or using our services, you agree to the collection and us
     title: "Data Security",
     content: `We implement industry-standard security measures:
 
-• Passwords are hashed with bcryptjs (10 salt rounds) — never stored or logged in plaintext
+• Passwords are hashed with bcryptjs (10 salt rounds), never stored or logged in plaintext
 • Root passwords are encrypted at rest using AES-256-GCM with per-instance IVs
-• Password reset tokens are stored as SHA-256 hashes — the plaintext token only ever exists in the reset email link
-• All data queries are scoped to your user ID — cross-user data access requires admin role
+• Password reset tokens are stored as SHA-256 hashes; the plaintext token only ever exists in the reset email link
+• All data queries are scoped to your user ID; cross-user data access requires admin role
 • Session cookies are JWT-signed with a secret key, httpOnly, and secure
 • HTTPS is enforced on all production endpoints
 
@@ -147,7 +147,7 @@ Website: sovereignml.com`,
 ]
 
 export const metadata = {
-  title: "Privacy Policy — SovereignML",
+  title: "Privacy Policy | SovereignML",
   description: "How SovereignML collects, uses, and protects your personal information.",
 }
 

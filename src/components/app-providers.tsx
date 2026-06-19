@@ -8,8 +8,10 @@ import { AdClickCapture } from "@/components/ad-click-capture"
 import { ConsentBanner } from "@/components/consent-banner"
 
 export function AppProviders({ children }: { children: React.ReactNode }) {
+  // Default to dark everywhere; ignore OS preference so the landing page is
+  // always dark unless the user explicitly toggles light (persisted).
   return (
-    <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
+    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
       <SessionProvider refetchOnWindowFocus refetchWhenOffline={false}>
         {/* Inside SessionProvider so PostHogIdentify can read useSession() */}
         <PostHogProvider>

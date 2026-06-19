@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
+import { getEffectiveUserId } from "@/lib/effective-user"
 import { setInstanceAccess, revokeInstanceAccess, isAccessLevel } from "@/lib/instance-access"
 
 /**
@@ -16,6 +17,7 @@ export async function PATCH(
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
+  const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
   const { instanceId, userId } = await params
   const body = (await req.json().catch(() => ({}))) as { level?: string }
   if (!isAccessLevel(body.level)) {
@@ -26,7 +28,7 @@ export async function PATCH(
     instanceId,
     granteeUserId: userId,
     level: body.level,
-    actorUserId: session.user.id,
+    actorUserId: effectiveUserId,
     mode: "update",
   })
   if (!result.ok) {
@@ -48,12 +50,13 @@ export async function DELETE(
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
+  const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
   const { instanceId, userId } = await params
 
   const result = await revokeInstanceAccess({
     instanceId,
     granteeUserId: userId,
-    actorUserId: session.user.id,
+    actorUserId: effectiveUserId,
   })
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: result.status })

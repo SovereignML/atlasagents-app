@@ -13,9 +13,12 @@ const NAV_LINKS = [
   { href: "/docs", label: "Docs" },
 ]
 
-export default function Navbar() {
+export default function Navbar({ isAuthenticated = false }: { isAuthenticated?: boolean }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
+
+  const accountHref = isAuthenticated ? "/dashboard" : "/login"
+  const accountLabel = isAuthenticated ? "Dashboard" : "Log In"
 
   // Solidify the bar once the user scrolls past the hero's top edge.
   const { scrollY } = useScroll()
@@ -55,8 +58,8 @@ export default function Navbar() {
           </div>
 
           <div className="hidden md:flex items-center gap-3">
-            <Link href="/login" className="text-white/70 hover:text-white text-sm font-medium transition-colors">
-              Log In
+            <Link href={accountHref} className="text-white/70 hover:text-white text-sm font-medium transition-colors">
+              {accountLabel}
             </Link>
             <a
               href="https://tidycal.com/sovereignml/demo"
@@ -150,8 +153,8 @@ export default function Navbar() {
                 Book Demo
               </motion.a>
               <motion.div variants={{ hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0 } }}>
-                <Link href="/login" className="btn-antimetal" onClick={() => setMobileOpen(false)}>
-                  Log In
+                <Link href={accountHref} className="btn-antimetal" onClick={() => setMobileOpen(false)}>
+                  {accountLabel}
                 </Link>
               </motion.div>
             </motion.div>

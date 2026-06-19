@@ -2,7 +2,7 @@ import Link from "next/link"
 import { BRANDING } from "@/configs/branding"
 import { Reveal, RevealGroup, RevealItem } from "@/components/marketing/motion/reveal"
 
-const LAST_UPDATED = "January 1, 2025"
+const LAST_UPDATED = "May 30, 2026" // {{TODO: confirm effective date on legal sign-off}}
 
 const sections = [
   {
@@ -61,7 +61,7 @@ Features described in documentation or marketing materials may be subject to pla
       },
       {
         title: "Renewals & Cancellation",
-        content: "Subscriptions automatically renew at the end of each billing cycle. You may cancel at any time from your dashboard. Cancellation takes effect at the end of the current billing period — no partial refunds are issued.",
+        content: "Subscriptions automatically renew at the end of each billing cycle. You may cancel at any time from your dashboard. Cancellation takes effect at the end of the current billing period. No partial refunds are issued.",
       },
       {
         title: "Failed Payments",
@@ -106,11 +106,15 @@ Violation of these terms may result in immediate account suspension or terminati
       },
       {
         title: "Agent Behavior",
-        content: "You are responsible for the behavior and outputs of agents you deploy. SovereignML provides the infrastructure — you are responsible for the tasks, prompts, and integrations you configure your agents to perform.",
+        content: "You are responsible for the behavior and outputs of agents you deploy. SovereignML provides the infrastructure. You are responsible for the tasks, prompts, and integrations you configure your agents to perform.",
       },
       {
-        title: "Mock Infrastructure",
-        content: "In the current version of the Platform, agent deployment provisions infrastructure on Akamai/Linode cloud. You acknowledge that service availability depends on upstream provider status.",
+        title: "Cloud Infrastructure",
+        content: "Agent deployment provisions infrastructure on enterprise-grade cloud providers. You acknowledge that service availability depends on upstream provider status. {{TODO: legal review}}",
+      },
+      {
+        title: "Data Use & Product Improvement",
+        content: "We may use aggregated, anonymized data derived from platform usage to operate, secure, and improve the Platform, including improving agent performance and our models over time. We do not sell your data. You can opt out of analytics-based product improvement by contacting us at privacy@sovereignml.com. {{TODO: legal review — confirm scope, wording, and opt-out mechanism}}",
       },
     ],
   },
@@ -143,7 +147,7 @@ AI agents may produce inaccurate, incomplete, or unexpected outputs. You are sol
 
 SOVEREIGNML'S TOTAL LIABILITY TO YOU FOR ANY CLAIMS ARISING FROM USE OF THE PLATFORM SHALL NOT EXCEED THE AMOUNT YOU PAID TO SOVEREIGNML IN THE 12 MONTHS PRECEDING THE CLAIM.
 
-Some jurisdictions do not allow limitation of liability for consequential or incidental damages — in such jurisdictions, liability is limited to the maximum extent permitted by law.`,
+Some jurisdictions do not allow limitation of liability for consequential or incidental damages; in such jurisdictions, liability is limited to the maximum extent permitted by law.`,
   },
   {
     id: "ip",
@@ -173,7 +177,7 @@ Website: sovereignml.com`,
 ]
 
 export const metadata = {
-  title: "Terms of Service — SovereignML",
+  title: "Terms of Service | SovereignML",
   description: "Terms and conditions governing your use of the SovereignML AI operations platform.",
 }
 

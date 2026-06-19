@@ -18,28 +18,32 @@ import Link from "next/link";
  *   - A conic-gradient mask hides the bottom half of the arc.
  *   - Custom spring easing via CSS  transition-duration: 1s.
  *
- * We use SovereignML's 8 agent-type icons from the Antimetal assets folder.
+ * We render third-party integration logos from the assets folder.
  */
 
 const INTEGRATIONS = [
-  { src: "github",       alt: "Scanning GitHub repos",         hasDark: true,  padding: "16px" },
-  { src: "slack",        alt: "Connected Slack workspace",     hasDark: false, padding: "16px" },
-  { src: "aws",          alt: "Connected AWS account",         hasDark: true,  padding: "12px" },
-  { src: "vercel",       alt: "Connected Vercel account",      hasDark: true,  padding: "16px" },
-  { src: "sentry",       alt: "Tracking Sentry errors",        hasDark: true,  padding: "12px" },
-  { src: "linear",       alt: "Syncing Linear issues",         hasDark: true,  padding: "16px" },
-  { src: "gcp",          alt: "Connected GCP account",         hasDark: false, padding: "12px" },
-  { src: "cloudflare",   alt: "Connected Cloudflare account",  hasDark: false, padding: "12px" },
-  { src: "pagerduty",    alt: "Syncing PagerDuty incidents",   hasDark: false, padding: "12px" },
-  { src: "prometheus",   alt: "Ingesting Prometheus metrics",  hasDark: false, padding: "12px" },
-  { src: "azure",        alt: "Connected Azure account",       hasDark: false, padding: "12px" },
-  { src: "planetscale",  alt: "Connected PlanetScale account", hasDark: false, padding: "12px" },
-  { src: "wiz",          alt: "Scanning Wiz findings",         hasDark: false, padding: "16px" },
-  { src: "oracle",       alt: "Connected OCI account",         hasDark: false, padding: "12px" },
+  { src: "github",       alt: "GitHub",       hasDark: true,  padding: "16px" },
+  { src: "slack",        alt: "Slack",        hasDark: false, padding: "16px" },
+  { src: "aws",          alt: "AWS",          hasDark: true,  padding: "12px" },
+  { src: "vercel",       alt: "Vercel",       hasDark: true,  padding: "16px" },
+  { src: "sentry",       alt: "Sentry",       hasDark: true,  padding: "12px" },
+  { src: "linear",       alt: "Linear",       hasDark: true,  padding: "16px" },
+  { src: "gcp",          alt: "Google Cloud", hasDark: false, padding: "12px" },
+  { src: "cloudflare",   alt: "Cloudflare",   hasDark: false, padding: "12px" },
+  { src: "pagerduty",    alt: "PagerDuty",    hasDark: false, padding: "12px" },
+  { src: "prometheus",   alt: "Prometheus",   hasDark: false, padding: "12px" },
+  { src: "azure",        alt: "Azure",        hasDark: false, padding: "12px" },
+  { src: "planetscale",  alt: "PlanetScale",  hasDark: false, padding: "12px" },
+  { src: "wiz",          alt: "Wiz",          hasDark: false, padding: "16px" },
+  { src: "oracle",       alt: "Oracle Cloud", hasDark: false, padding: "12px" },
 ];
 
 const N = INTEGRATIONS.length;
 const STEP = 360 / N;
+
+// The wheel advances one step every TICK_MS. The steady centre logo flashes a
+// shine on each tick, in parallel with the new icon sliding into place.
+const TICK_MS = 2500;
 
 export function AgentWheel() {
   const reduceMotion = useReducedMotion();
@@ -47,6 +51,7 @@ export function AgentWheel() {
   const popupTextRef = useRef<HTMLSpanElement>(null);
   const popupImgLightRef = useRef<HTMLImageElement>(null);
   const popupImgDarkRef = useRef<HTMLImageElement>(null);
+  const shineRef = useRef<HTMLSpanElement>(null);
   const itemsRef = useRef<
     {
       wrapper: HTMLDivElement;
@@ -142,8 +147,18 @@ export function AgentWheel() {
         item.wrapper.style.transform = `translate(-50%, -50%) rotate(${item.currentAngle}deg)`;
         item.inner.style.transform = `rotate(${-item.currentAngle}deg)`;
       });
+
+      // Flash the hub shine in parallel with the incoming icon. Re-add the
+      // class after a forced reflow so the keyframes restart every tick.
+      const shine = shineRef.current;
+      if (shine) {
+        shine.classList.remove("is-shining");
+        void shine.offsetWidth;
+        shine.classList.add("is-shining");
+      }
+
       setTimeout(updateSizes, 50);
-    }, 2500);
+    }, TICK_MS);
 
     return () => clearInterval(interval);
   }, [reduceMotion]);
@@ -180,7 +195,7 @@ export function AgentWheel() {
             href="/login?deploy=true"
             className="btn-integration-get-started max-lg:mx-auto"
           >
-            Get started
+            Connect your stack
           </Link>
 
           {/* ── Popup pill (desktop only) ── */}
@@ -194,7 +209,7 @@ export function AgentWheel() {
                       <img
                         ref={popupImgLightRef}
                         decoding="async"
-                        alt="Scanning GitHub repos"
+                        alt="GitHub"
                         className="w-6 h-6 dark:hidden"
                         loading="lazy"
                         src="/assets/integrations/github.avif"
@@ -203,14 +218,14 @@ export function AgentWheel() {
                       <img
                         ref={popupImgDarkRef}
                         decoding="async"
-                        alt="Scanning GitHub repos"
+                        alt="GitHub"
                         className="w-6 h-6 hidden dark:block"
                         loading="lazy"
                         src="/assets/integrations/github-dark.avif"
                       />
                     </div>
                     <span ref={popupTextRef} className="text-text-loud text-sm font-medium">
-                      Scanning GitHub repos
+                      GitHub
                     </span>
                   </div>
                 </div>
@@ -234,11 +249,56 @@ export function AgentWheel() {
           className="int-center-hub absolute rounded-full p-4 lg:p-5"
           style={{ border: "1px solid var(--color-border-faint)" }}
         >
-          <div className="relative w-[90px] h-[90px] lg:w-[120px] lg:h-[120px] mx-auto flex items-center justify-center rounded-full shadow-lg"
+          <div className="relative w-[117px] h-[117px] lg:w-[156px] lg:h-[156px] mx-auto flex items-center justify-center rounded-full shadow-lg"
             style={{ background: "var(--card-bg, rgba(255,255,255,0.06))" }}
           >
-            {/* SovereignML Logo text mark */}
-            <span className="text-text-loud font-bold text-base lg:text-lg tracking-tight select-none">S</span>
+            {/* Same soft halo the orbiting icon nodes use, so the hub reads as
+                one of them — just held steady at the centre. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              decoding="async"
+              alt=""
+              aria-hidden
+              className="pointer-events-none absolute -left-full -top-full max-w-none dark:hidden"
+              style={{ width: "300%", height: "300%" }}
+              src="/assets/integrations/logo-background.avif"
+            />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              decoding="async"
+              alt=""
+              aria-hidden
+              className="pointer-events-none absolute -left-full -top-full hidden max-w-none dark:block"
+              style={{ width: "300%", height: "300%" }}
+              src="/assets/integrations/logo-background-dark.avif"
+            />
+
+            {/* SovereignML brand mark — navy on light, white on dark */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/assets/icons/Blue-Navy-SovereignML.png"
+              alt="SovereignML"
+              draggable={false}
+              className="relative z-10 block w-[61px] h-auto select-none object-contain lg:w-[79px] dark:hidden"
+            />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/assets/icons/SovereignML-logo-white.svg"
+              alt=""
+              aria-hidden
+              draggable={false}
+              className="relative z-10 hidden w-[61px] h-auto select-none object-contain lg:w-[79px] dark:block"
+            />
+
+            {/* Shine — a light sweep across the hub, retriggered from the wheel
+                tick loop each time a new icon slides in. Clipped to the circle;
+                no shine under reduced motion (the tick loop doesn't run). */}
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-0 z-20 overflow-hidden rounded-full"
+            >
+              <span ref={shineRef} className="int-hub-shine absolute inset-0" />
+            </span>
           </div>
         </div>
 

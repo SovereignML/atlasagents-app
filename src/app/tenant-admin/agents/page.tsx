@@ -37,7 +37,7 @@ export default async function TenantAgentsPage() {
       id: r.id,
       name: r.name,
       status: r.status,
-      customer: teamNames.get(r.teamId) ?? "—",
+      customer: teamNames.get(r.teamId) ?? "-",
       ownerUserId: r.userId,
       ownerEmail: r.ownerEmail ?? "",
       ownerName: r.ownerName ?? null,

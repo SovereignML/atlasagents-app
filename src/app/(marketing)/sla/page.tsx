@@ -2,10 +2,10 @@ import Link from "next/link"
 import { BRANDING } from "@/configs/branding"
 import { Reveal } from "@/components/marketing/motion/reveal"
 
-const LAST_UPDATED = "January 1, 2025"
+const LAST_UPDATED = "May 30, 2026" // {{TODO: confirm effective date on legal sign-off}}
 
 export const metadata = {
-  title: "Service Level Agreement — SovereignML",
+  title: "Service Level Agreement | SovereignML",
   description: "SovereignML's uptime commitments, response times, and support standards.",
 }
 
@@ -31,9 +31,10 @@ export default function SLAPage() {
           Uptime Commitment
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+          {/* {{TODO: confirm per-tier uptime targets with founder}} */}
           {[
-            { plan: "Starter", uptime: "99.5%", monthly: "~3.6 hrs" },
-            { plan: "Pro", uptime: "99.9%", monthly: "~43 min" },
+            { plan: "Builder & Operator", uptime: "99.5%", monthly: "~3.6 hrs" },
+            { plan: "Scale", uptime: "99.9%", monthly: "~43 min" },
             { plan: "Enterprise", uptime: "99.99%", monthly: "~4.3 min" },
           ].map((tier) => (
             <div key={tier.plan} className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-5 text-center">
@@ -101,9 +102,9 @@ export default function SLAPage() {
         </h2>
         <div className="space-y-4">
           {[
-            { plan: "Starter", interval: "Daily", alerts: "None", desc: "Daily health status checks on deployed agents." },
-            { plan: "Pro", interval: "Hourly", alerts: "Email alerts", desc: "Hourly health checks with email notification on degradation." },
-            { plan: "Enterprise", interval: "Real-time", alerts: "Slack + Phone", desc: "Continuous real-time monitoring with immediate multi-channel alerting." },
+            { plan: "Builder & Operator", interval: "Daily", alerts: "None", desc: "Daily health status checks on deployed agents." },
+            { plan: "Scale", interval: "Hourly", alerts: "Email alerts", desc: "Hourly health checks with email notification on degradation." },
+            { plan: "Enterprise", interval: "Real-time", alerts: "Chat + Phone", desc: "Continuous real-time monitoring with immediate multi-channel alerting." },
           ].map((tier) => (
             <div key={tier.plan} className="rounded-2xl border border-[var(--border-color)] shadow-[var(--shadow-sm)] p-5 flex gap-4">
               <div className="shrink-0">
@@ -113,7 +114,7 @@ export default function SLAPage() {
               </div>
               <div>
                 <p className="text-[var(--text-primary)] font-medium text-sm mb-1">
-                  {tier.interval} checks — {tier.alerts}
+                  {tier.interval} checks: {tier.alerts}
                 </p>
                 <p className="text-[var(--text-secondary)] text-sm">{tier.desc}</p>
               </div>
@@ -180,7 +181,7 @@ export default function SLAPage() {
             "Actions or inactions by the customer that cause service degradation",
             "Third-party service outages (Stripe, Google OAuth, Resend) outside SovereignML’s control",
             "Beta or experimental features explicitly marked as such",
-            "Free tier accounts (Starter plan SLA applies only to paid subscriptions)",
+            "Free tier accounts (the SLA applies only to paid subscriptions)",
           ].map((item) => (
             <li key={item} className="flex items-start gap-3 text-sm text-[var(--text-secondary)]">
               <span className="text-primary mt-0.5">&rsaquo;</span>

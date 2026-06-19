@@ -47,8 +47,12 @@ type AllowedModel = {
   slug: string
   label: string
   kind: "chat" | "image" | "moderation"
+  contextLength: number | null
   enabled: boolean
 }
+
+/** Hermes rejects <64k models at startup — see HERMES_MIN_CONTEXT. */
+const HERMES_MIN_CONTEXT = 64_000
 
 type TestResult = {
   ok: boolean
@@ -63,14 +67,14 @@ const KINDS: AllowedModel["kind"][] = ["chat", "image", "moderation"]
 
 /** $/token strings from OpenRouter rendered as $/M tokens. */
 function perMillion(price: string | null): string {
-  if (price == null) return "—"
+  if (price == null) return "-"
   const n = Number(price)
-  if (!Number.isFinite(n)) return "—"
+  if (!Number.isFinite(n)) return "-"
   return `$${(n * 1_000_000).toFixed(2)}`
 }
 
 function formatContext(len: number | null): string {
-  if (!len) return "—"
+  if (!len) return "-"
   return `${Math.round(len / 1000)}k`
 }
 
@@ -182,8 +186,28 @@ export default function AdminModelsPage() {
       slug,
       label: fromCatalog?.name ?? slug,
       kind,
+      contextLength: fromCatalog?.contextLength ?? null,
     })
     setNewSlug("")
+  }
+
+  async function syncMetadata() {
+    setMutating(true)
+    setMutateErr(null)
+    try {
+      const res = await fetch("/api/admin/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "sync" }),
+      })
+      const json = (await res.json()) as { updated?: number; error?: string }
+      if (!res.ok) throw new Error(json.error ?? `Sync failed: ${res.status}`)
+      await loadAllowed()
+    } catch (e) {
+      setMutateErr(String(e))
+    } finally {
+      setMutating(false)
+    }
   }
 
   async function runTest() {
@@ -208,7 +232,7 @@ export default function AdminModelsPage() {
     <PageContainer>
       <PageHeader
         title="Admin · Models"
-        description="OpenRouter account allowlist and live catalog. The list below mirrors what the OpenRouter account permits — change it here whenever the account settings change. Probes and test runs use the platform OPENROUTER_API_KEY."
+        description="OpenRouter account allowlist and live catalog. The list below mirrors what the OpenRouter account permits. Change it here whenever the account settings change. Probes and test runs use the platform OPENROUTER_API_KEY."
       />
 
       <Card>
@@ -289,7 +313,7 @@ export default function AdminModelsPage() {
           <CardTitle>Allowed models</CardTitle>
           <CardDescription>
             {allowed
-              ? `${allowed.filter((m) => m.enabled).length} enabled of ${allowed.length} — mirror of the OpenRouter account allowlist. Disable to keep the row but hide the model; remove to drop it entirely.`
+              ? `${allowed.filter((m) => m.enabled).length} enabled of ${allowed.length}. Mirror of the OpenRouter account allowlist. Disable to keep the row but hide the model; remove to drop it entirely.`
               : "Mirror of the OpenRouter account allowlist."}
           </CardDescription>
         </CardHeader>
@@ -326,6 +350,15 @@ export default function AdminModelsPage() {
             >
               Add
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={syncMetadata}
+              disabled={mutating}
+              title="Refresh context windows from the OpenRouter catalog (drives Hermes-readiness)."
+            >
+              Sync metadata
+            </Button>
           </div>
           <datalist id="catalog-all-models">
             {(catalog ?? []).map((m) => (
@@ -340,6 +373,7 @@ export default function AdminModelsPage() {
                   <TableHead>Model</TableHead>
                   <TableHead>Kind</TableHead>
                   <TableHead>Context</TableHead>
+                  <TableHead>Hermes</TableHead>
                   <TableHead>Prompt $/M</TableHead>
                   <TableHead>Completion $/M</TableHead>
                   <TableHead>Listed</TableHead>
@@ -350,6 +384,9 @@ export default function AdminModelsPage() {
               <TableBody>
                 {allowed.map((m) => {
                   const cat = catalogById.get(m.slug)
+                  const ctx = m.contextLength ?? cat?.contextLength ?? null
+                  const hermesReady =
+                    m.kind === "chat" && ctx != null && ctx >= HERMES_MIN_CONTEXT
                   return (
                     <TableRow
                       key={m.slug}
@@ -365,7 +402,20 @@ export default function AdminModelsPage() {
                         <Badge variant="outline">{m.kind}</Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {formatContext(cat?.contextLength ?? null)}
+                        {formatContext(ctx)}
+                      </TableCell>
+                      <TableCell>
+                        {m.kind === "chat" ? (
+                          <Badge variant={hermesReady ? "secondary" : "destructive"}>
+                            {hermesReady
+                              ? "ready"
+                              : ctx == null
+                                ? "unknown"
+                                : "too small"}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {perMillion(cat?.promptPrice ?? null)}

@@ -120,7 +120,7 @@ export function SupportInboxClient() {
                   }`}
                 >
                   <span className="text-sm font-medium">{c.contactName || `Conversation #${c.id}`}</span>
-                  <span className="line-clamp-1 text-xs text-muted-foreground">{c.subject || "—"}</span>
+                  <span className="line-clamp-1 text-xs text-muted-foreground">{c.subject || "-"}</span>
                   <Badge variant="outline" className="text-[10px]">{c.status}</Badge>
                 </button>
               ))

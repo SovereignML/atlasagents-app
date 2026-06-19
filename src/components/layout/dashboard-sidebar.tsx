@@ -203,11 +203,11 @@ export function DashboardSidebar({
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader>
+      <SidebarHeader className="border-b border-sidebar-border">
         <Link
           href="/"
           aria-label={brandName}
-          className="flex items-center text-lg font-semibold tracking-tight group-data-[collapsible=icon]:justify-center"
+          className="flex items-center gap-2.5 text-base font-semibold tracking-tight group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0"
         >
           {logoUrl ? (
             // Tenant logos are arbitrary external URLs; next/image would need
@@ -220,18 +220,36 @@ export function DashboardSidebar({
               className="h-7 w-auto max-w-[160px] object-contain group-data-[collapsible=icon]:hidden"
             />
           ) : (
-            <span className="group-data-[collapsible=icon]:hidden">{brandName}</span>
+            <>
+              {/* Default SovereignML logo: dark mark on the light console, white
+                  mark on the dark console. Doubles as the collapsed-rail mark, so
+                  no separate initial fallback. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/assets/icons/SovereignML-logo.svg"
+                alt={brandName}
+                className="size-7 shrink-0 object-contain dark:hidden"
+              />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/assets/icons/SovereignML-logo-white.svg"
+                alt={brandName}
+                className="hidden size-7 shrink-0 object-contain dark:block"
+              />
+              <span className="group-data-[collapsible=icon]:hidden">{brandName}</span>
+            </>
           )}
-          {logoMarkUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={logoMarkUrl}
-              alt={brandName}
-              className="hidden h-7 w-7 object-contain group-data-[collapsible=icon]:inline-block"
-            />
-          ) : (
-            <span className="hidden group-data-[collapsible=icon]:inline">{initial}</span>
-          )}
+          {logoUrl &&
+            (logoMarkUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={logoMarkUrl}
+                alt={brandName}
+                className="hidden h-7 w-7 object-contain group-data-[collapsible=icon]:inline-block"
+              />
+            ) : (
+              <span className="hidden group-data-[collapsible=icon]:inline">{initial}</span>
+            ))}
         </Link>
       </SidebarHeader>
       <SidebarContent>
@@ -247,7 +265,13 @@ export function DashboardSidebar({
                     )
                   }
                   const Icon = item.icon
-                  const active = pathname === item.href
+                  // Highlight the section for nested routes too (e.g. an agent
+                  // detail page keeps "My Agents" active), but keep Overview
+                  // exact so it isn't always lit.
+                  const active =
+                    item.href === "/dashboard"
+                      ? pathname === "/dashboard"
+                      : pathname === item.href || pathname.startsWith(item.href + "/")
                   return (
                     <SidebarMenuItem key={item.href}>
                       <SidebarMenuButton

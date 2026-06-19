@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import crypto from "node:crypto"
 import { auth } from "@/auth"
+import { getEffectiveUserId } from "@/lib/effective-user"
 import { db, instances, instanceLogs, eq } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { canOperateInstance } from "@/lib/instance-access"
@@ -42,12 +43,13 @@ export async function POST(
 
   const { instanceId } = await params
   const isAdmin = (session.user as { role?: string }).role === "admin"
+  const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
   const instance = await db.query.instances.findFirst({
-    where: isAdmin ? eq(instances.id, instanceId) : whereUserInstanceVisible(session.user.id, instanceId),
+    where: isAdmin ? eq(instances.id, instanceId) : whereUserInstanceVisible(effectiveUserId, instanceId),
   })
   if (!instance) return NextResponse.json({ error: "Not found" }, { status: 404 })
   // Connecting an interface is an operation — Operator+ on the agent.
-  if (!isAdmin && !(await canOperateInstance(session.user.id, instance.id))) {
+  if (!isAdmin && !(await canOperateInstance(effectiveUserId, instance.id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
   if (instance.status === "deleted") {
@@ -55,7 +57,7 @@ export async function POST(
   }
   if (!instance.botToken) {
     return NextResponse.json(
-      { error: "Instance is missing a botToken — re-deploy this instance first." },
+      { error: "Instance is missing a botToken. Re-deploy this instance first." },
       { status: 400 }
     )
   }

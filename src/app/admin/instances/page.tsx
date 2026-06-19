@@ -150,7 +150,7 @@ export default async function AdminInstancesPage({
                     <p className="mt-2 font-mono text-xs text-muted-foreground">
                       Deleted:{" "}
                       {(instance.deletedAt ?? instance.lastTransitionAt)?.toISOString().slice(0, 19) ??
-                        "—"}{" "}
+                        "-"}{" "}
                       UTC
                       {instance.lastActiveAt && (
                         <>

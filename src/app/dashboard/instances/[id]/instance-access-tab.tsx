@@ -63,7 +63,7 @@ type Grant = {
 type Member = { userId: string; name: string | null; email: string; teamRole: string }
 
 const LEVEL_HELP: Record<Level, string> = {
-  viewer: "Read-only — status & logs",
+  viewer: "Read-only: status & logs",
   operator: "Restart, backup, bind domains",
   manager: "Full control + re-share access",
 }
@@ -210,7 +210,7 @@ export function AccessTab({
                       <SelectGroup>
                         {grantableLevels.map((l) => (
                           <SelectItem key={l} value={l}>
-                            {l} — {LEVEL_HELP[l]}
+                            {l}: {LEVEL_HELP[l]}
                           </SelectItem>
                         ))}
                       </SelectGroup>

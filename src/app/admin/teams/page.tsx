@@ -124,7 +124,7 @@ function AdminTeamsInner() {
     <PageContainer>
       <PageHeader
         title="Team Management"
-        description="Grant or revoke white-label access per team. This switch is the sole source of truth — it overrides plan tier."
+        description="Grant or revoke white-label access per team. This switch is the sole source of truth. It overrides plan tier."
       />
 
       <InputGroup className="max-w-md">
@@ -189,7 +189,7 @@ function AdminTeamsInner() {
                   </TableCell>
                   <TableCell>
                     <div className="text-sm text-foreground">
-                      {team.owner.name || "—"}
+                      {team.owner.name || "-"}
                     </div>
                     <div className="text-xs text-muted-foreground">
                       {team.owner.email}
@@ -205,7 +205,7 @@ function AdminTeamsInner() {
                     {team.hasEnterpriseSub ? (
                       <Badge variant="outline">Enterprise</Badge>
                     ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
+                      <span className="text-xs text-muted-foreground">-</span>
                     )}
                   </TableCell>
                   <TableCell>

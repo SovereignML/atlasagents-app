@@ -94,6 +94,10 @@ async function main() {
     let mintCalls = 0
     const fakeMint: typeof RealMintFn = async ({ label }) => {
       mintCalls++
+      // Lock in the human-readable label format used in the OpenRouter dashboard.
+      if (label !== `Sovereign-OpenClaw-${slug}`) {
+        fail.push(`unexpected mint label: ${label} (expected Sovereign-OpenClaw-${slug})`)
+      }
       return { keyId: `fake-id-${mintCalls}`, key: `sk-or-test-${label}-${mintCalls}` }
     }
 

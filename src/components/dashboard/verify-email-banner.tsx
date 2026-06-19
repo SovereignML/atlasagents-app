@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Mail, X } from "lucide-react"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 
 /**
@@ -37,12 +38,12 @@ export function VerifyEmailBanner() {
   }
 
   return (
-    <div className="mb-6 flex flex-wrap items-center gap-3 rounded-lg border border-yellow-500/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200">
-      <Mail className="size-4 shrink-0" />
-      <span className="flex-1 min-w-0">
+    <Alert variant="warning" className="mb-6 flex flex-wrap items-center gap-3">
+      <Mail className="shrink-0" />
+      <AlertDescription className="min-w-0 flex-1 text-current">
         Please verify your email address to secure your account.
-        {message && <span className="ml-2 text-yellow-100/80">{message}</span>}
-      </span>
+        {message && <span className="ml-2 opacity-80">{message}</span>}
+      </AlertDescription>
       <Button
         variant="outline"
         size="sm"
@@ -59,10 +60,10 @@ export function VerifyEmailBanner() {
         type="button"
         aria-label="Dismiss"
         onClick={() => setDismissed(true)}
-        className="text-yellow-200/60 hover:text-yellow-100"
+        className="text-current opacity-60 transition-opacity hover:opacity-100"
       >
         <X className="size-4" />
       </button>
-    </div>
+    </Alert>
   )
 }

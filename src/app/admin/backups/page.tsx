@@ -28,7 +28,7 @@ export default async function AdminBackupsPage() {
     <PageContainer>
       <PageHeader
         title="Admin · Backups"
-        description="Full-database snapshots (pg_dump) stored in Cloudflare R2. Back up on demand or nightly, download a dump, or restore the whole database from one. This captures all app data — users, teams, instances, billing, audit logs, and branding."
+        description="Full-database snapshots (pg_dump) stored in Cloudflare R2. Back up on demand or nightly, download a dump, or restore the whole database from one. This captures all app data: users, teams, instances, billing, audit logs, and branding."
       />
       <BackupsClient
         initialSettings={{

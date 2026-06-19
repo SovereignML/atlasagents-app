@@ -53,6 +53,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
 import type { TeamRole } from "@/lib/team"
 
 type Member = { userId: string; role: TeamRole; name: string | null; email: string }
@@ -144,7 +145,7 @@ export function TeamClient({
     }
     setInviteEmail("")
     if (!data.emailSent && data.acceptUrl) {
-      setInfo(`Invite created. Email not configured — share this link: ${data.acceptUrl}`)
+      setInfo(`Invite created. Email not configured. Share this link: ${data.acceptUrl}`)
     } else {
       setInfo(`Invite sent to ${data.invite.email}.`)
     }
@@ -315,10 +316,21 @@ export function TeamClient({
         <Card size="sm">
           <CardHeader>
             <CardDescription className="text-xs">Seats Used</CardDescription>
-            <CardTitle className="font-mono text-2xl text-primary">
-              {seatsUsed} / {team.seatLimit}
+            <CardTitle className="font-mono text-2xl text-foreground">
+              {seatsUsed}{" "}
+              <span className="text-muted-foreground">/ {team.seatLimit}</span>
             </CardTitle>
           </CardHeader>
+          <CardContent>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-primary"
+                style={{
+                  width: `${Math.min(100, team.seatLimit > 0 ? (seatsUsed / team.seatLimit) * 100 : 0)}%`,
+                }}
+              />
+            </div>
+          </CardContent>
         </Card>
         <Card size="sm">
           <CardHeader>
@@ -342,10 +354,17 @@ export function TeamClient({
             {members.map((m) => (
               <TableRow key={m.userId}>
                 <TableCell className="pl-5 text-foreground">
-                  <div>{m.name || m.email}</div>
-                  {m.name && (
-                    <div className="font-mono text-xs text-muted-foreground">{m.email}</div>
-                  )}
+                  <div className="flex items-center gap-3">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium uppercase text-foreground">
+                      {(m.name || m.email).charAt(0)}
+                    </span>
+                    <div>
+                      <div>{m.name || m.email}</div>
+                      {m.name && (
+                        <div className="font-mono text-xs text-muted-foreground">{m.email}</div>
+                      )}
+                    </div>
+                  </div>
                 </TableCell>
                 <TableCell>
                   {canManage && m.role !== "owner" ? (
@@ -367,12 +386,23 @@ export function TeamClient({
                       </SelectContent>
                     </Select>
                   ) : (
-                    <Badge variant={roleBadgeVariant(m.role)} className="font-mono">
+                    <Badge
+                      variant={roleBadgeVariant(m.role)}
+                      className={cn(
+                        "font-mono",
+                        m.role === "owner" && "bg-foreground text-background",
+                      )}
+                    >
                       {m.role}
                     </Badge>
                   )}
                 </TableCell>
-                <TableCell className="text-xs text-muted-foreground">active</TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
+                    active
+                  </span>
+                </TableCell>
                 <TableCell className="pr-5 text-right">
                   {canManage && m.role !== "owner" && (
                     <Button
@@ -420,18 +450,18 @@ export function TeamClient({
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-3 text-sm text-muted-foreground md:grid-cols-2">
           <div>
-            <span className="font-mono text-primary">owner</span> — full access incl. billing
+            <span className="font-mono text-primary">owner</span>: full access incl. billing
           </div>
           <div>
-            <span className="font-mono text-amber-500">admin</span> — manage agents, team, settings
+            <span className="font-mono text-amber-500">admin</span>: manage agents, team, settings
             (no billing)
           </div>
           <div>
-            <span className="font-mono text-foreground">developer</span> — deploy, restart, edit
+            <span className="font-mono text-foreground">developer</span>: deploy, restart, edit
             agents
           </div>
           <div>
-            <span className="font-mono">viewer</span> — read-only dashboards and logs
+            <span className="font-mono">viewer</span>: read-only dashboards and logs
           </div>
         </CardContent>
       </Card>

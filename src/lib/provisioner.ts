@@ -55,7 +55,7 @@ import { notify } from "@/lib/notifications/dispatch"
 import { syncUptimeMonitor, removeUptimeMonitor } from "@/lib/uptime-monitoring"
 import {
   routeModel,
-  hermesModel,
+  effectiveModel,
   isValidOpenRouterSlug,
   resolveLlmProvider,
   nvidiaKeyForSlot,
@@ -119,8 +119,14 @@ export async function getOrMintInstanceOpenRouterKey(
   // old lifetime-funded cap) it doesn't hand a reprovisioned key a fresh full
   // ceiling. See src/lib/openrouter-billing.ts.
   const limitUsd = tenantKey ? undefined : await computeKeyLimitUsd(instance.userId)
+  // Human-readable label so the key is identifiable in the OpenRouter dashboard
+  // (e.g. `Sovereign-OpenClaw-acme-support-bot`). The agent slug is already
+  // label-safe. The label is purely cosmetic — orphan detection/cap-drift in the
+  // reconciler matches on `instances.openRouterKeyId`, NOT on the label text, so
+  // the format can change freely without risking a live key being mis-parsed and
+  // revoked. Pre-existing `sovereign-<id>` keys keep working unchanged.
   const { keyId, key } = await mintFn(
-    { label: `sovereign-${instance.id}`, limitUsd },
+    { label: `Sovereign-OpenClaw-${instance.slug}`, limitUsd },
     tenantKey ?? undefined,
   )
   await db
@@ -1445,10 +1451,13 @@ async function configureRuntimeOverSsh(
   // routed model. On the NVIDIA switch, Hermes uses the routed NVIDIA model directly.
   // Validate the slug up front so a bad model fails the deploy with a clear
   // error instead of a silent gateway crash loop.
-  const initModel =
-    runtime.id === "hermes" && llmProvider === "openrouter"
-      ? hermesModel(tier)
-      : route.model
+  const initModel = effectiveModel({
+    runtimeId: runtime.id,
+    llmProvider,
+    tier,
+    modelSlug: instance.modelSlug,
+    routedModel: route.model,
+  })
   if (runtime.renderInitScript && !isValidOpenRouterSlug(initModel)) {
     throw new Error(
       `${runtime.displayName} model "${initModel}" is not a valid OpenRouter <author>/<slug> ` +
@@ -1539,7 +1548,7 @@ async function configureRuntimeOverSsh(
         runtime.renderConfig({
           gatewayToken,
           openRouterApiKey,
-          model: route.model,
+          model: initModel,
           fallbackModel: route.fallback,
           domain: instance.domain,
           managedSubdomain,
@@ -2501,10 +2510,13 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
       ? decryptSecret(instance.eventIngestTokenEnc)
       : generateGatewayToken()
 
-    const initModel =
-      runtime.id === "hermes" && llmProvider === "openrouter"
-        ? hermesModel(tier)
-        : route.model
+    const initModel = effectiveModel({
+      runtimeId: runtime.id,
+      llmProvider,
+      tier,
+      modelSlug: instance.modelSlug,
+      routedModel: route.model,
+    })
     if (runtime.renderInitScript && !isValidOpenRouterSlug(initModel)) {
       throw new Error(
         `${runtime.displayName} model "${initModel}" is not a valid OpenRouter <author>/<slug> ` +
@@ -2575,7 +2587,7 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
         runtime.renderConfig({
           gatewayToken,
           openRouterApiKey,
-          model: route.model,
+          model: initModel,
           fallbackModel: route.fallback,
           domain: instance.domain,
           managedSubdomain: instance.managedSubdomain,

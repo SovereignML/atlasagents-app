@@ -4,7 +4,13 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
+/* `dark:` utilities follow whichever theme root is in play. Marketing/global
+   theming uses `.dark` on <html> (next-themes). The authenticated console is an
+   INDEPENDENT theme island: its wrapper carries `.console-dark` / `.console-light`
+   (server-rendered from the `console-theme` cookie), and those win over any
+   ancestor `.dark` next-themes/OS puts on <html> — the `:not(.console-light …)`
+   clause shields a light console nested under a dark <html>. */
+@custom-variant dark (&:is(.dark *, .console-dark, .console-dark *):not(.console-light, .console-light *));
 
 /* ─── Custom Fonts (from Landing Page) ────────────────────────── */
 @font-face {
@@ -37,7 +43,7 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: "ABC Diatype Plus", var(--font-body), system-ui, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --font-mono: "Geist Mono", var(--font-geist-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --font-heading: "ABC Diatype Plus", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-serif: "Ivar Text", Georgia, "Times New Roman", serif;
   --font-pixel: "Silkscreen", monospace;
@@ -293,64 +299,131 @@
   --color-signal: #d0f100;
 }
 
-/* ─── App Shell Token Scope (Light) ───────────────────────────── */
+/* ─── App Shell Token Scope (Light — derived console) ─────────── */
 /* Applied only inside dashboard/admin/auth layouts via `.app-shell`. */
 /* Marketing/landing pages keep the default :root tokens above.       */
-/* Highlight/selection uses Blue-400; --accent stays a subtle hover.  */
-.app-shell {
-  --secondary: #dbeafe;
-  --secondary-foreground: #1e3a8a;
-  --accent: #f1f5f9;
-  --accent-foreground: #0f172a;
-  --ring: #60a5fa;
+/* The console is a SovereignML "operations" surface: neutral zinc    */
+/* surfaces, hairline borders. LIGHT mode uses the MARKETING brand     */
+/* BLUE (#015efe) as the primary accent (lime fails contrast on white  */
+/* and the brand reads blue on light surfaces); DARK mode keeps the    */
+/* signal lime. Every accent is token-driven (--primary / --brand-bar) */
+/* so the same components render blue on light and lime on dark.       */
+/* The `html[data-console-theme=…]` mirrors carry these same tokens to  */
+/* PORTALED popups (dialogs, dropdowns, selects, tooltips) that mount at */
+/* <body>, outside `.app-shell` — see ConsoleThemePortalSync.            */
+.app-shell,
+html[data-console-theme="light"],
+html[data-console-theme="dark"] {
+  --background: #fafafa;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
 
-  --sidebar-accent: #dbeafe;
-  --sidebar-accent-foreground: #1e3a8a;
-  --sidebar-ring: #60a5fa;
+  /* Marketing brand blue: white ink as a fill, readable as text on white. */
+  --primary: #015efe;
+  --primary-foreground: #ffffff;
+
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+  --muted: #f4f4f5;
+  --muted-foreground: #52525b;
+  --accent: #f4f4f5;
+  --accent-foreground: #18181b;
+
+  --border: #09090b14;
+  --input: #09090b1f;
+  --ring: #015efe;
+
+  --sidebar: #fafafa;
+  --sidebar-foreground: #18181b;
+  --sidebar-primary: #015efe;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f4f4f5;
+  --sidebar-accent-foreground: #18181b;
+  --sidebar-border: #09090b14;
+  --sidebar-ring: #015efe;
+
+  /* On-brand chart palette for dashboard data viz. Chart-1 is the brand
+     series (blue on light); status hues (green/cyan/amber/violet) stay. */
+  --chart-1: #015efe;
+  --chart-2: #16a34a;
+  --chart-3: #0891b2;
+  --chart-4: #d97706;
+  --chart-5: #7c3aed;
+
+  /* Brand bar-chart fills (proximity-resolved per theme): blue on light. */
+  --brand-bar: #015efe;
+  --brand-bar-peak: #4dabf7;
+
+  --bg-color: #fafafa;
+  --card-bg: #ffffff;
+  --border-color: #09090b14;
 }
 
-/* ─── App Shell Token Scope (Dark) ────────────────────────────── */
-/* Hybrid: neutral zinc surfaces + Lime-400 highlight inside the app */
-/* shell only. The warm amber palette is preserved for marketing.    */
-/* --accent stays a subtle zinc hover so menu items aren't jarring;  */
-/* --secondary / --sidebar-accent carry the bright Lime-400 active   */
-/* state for sidebar selection, focus rings, and primary highlights. */
-.dark .app-shell {
-  --background: #09090b;
+/* ─── App Shell Token Scope (Dark — SovereignML Console) ──────── */
+/* The reference console palette: near-black canvas, #161618 cards,  */
+/* #1d1d20 inset fields, hairline white-alpha borders, and signal     */
+/* lime (#a3e635) as the primary CTA + active accent. The warm amber  */
+/* marketing palette is preserved outside the shell.                  */
+/* Lime reads as both fill (dark ink) and text/icon here because the  */
+/* canvas is near-black, so --primary is the bright lime directly.    */
+/* Scoped to the wrapper's own `.console-dark` class (not an ancestor  */
+/* `.dark`) so the console theme is independent of next-themes/OS and  */
+/* wins by CSS-variable proximity.                                     */
+/* The `html[data-console-theme="dark"]` mirror applies the same dark    */
+/* overrides to PORTALED popups mounted at <body> — see                  */
+/* ConsoleThemePortalSync. It sits after the base block above so its     */
+/* declarations win for the dark console.                                */
+.app-shell.console-dark,
+html[data-console-theme="dark"] {
+  --background: #0a0a0b;
   --foreground: #fafafa;
-  --card: #18181b;
+  --card: #161618;
   --card-foreground: #fafafa;
-  --popover: #18181b;
+  --popover: #161618;
   --popover-foreground: #fafafa;
 
-  --primary: #fafafa;
-  --primary-foreground: #09090b;
+  --primary: #a3e635;
+  --primary-foreground: #15240a;
 
-  --secondary: #a3e635;
-  --secondary-foreground: #09090b;
+  --secondary: #1d1d20;
+  --secondary-foreground: #fafafa;
 
-  --muted: #1f1f23;
+  --muted: #1d1d20;
   --muted-foreground: #a1a1aa;
 
-  --accent: #27272a;
+  --accent: #1d1d20;
   --accent-foreground: #fafafa;
 
-  --border: #27272a;
-  --input: #27272a;
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 12%);
   --ring: #a3e635;
 
-  --sidebar: #0a0a0b;
+  --sidebar: #0c0c0d;
   --sidebar-foreground: #fafafa;
   --sidebar-primary: #a3e635;
-  --sidebar-primary-foreground: #09090b;
-  --sidebar-accent: #a3e635;
-  --sidebar-accent-foreground: #09090b;
-  --sidebar-border: #27272a;
+  --sidebar-primary-foreground: #15240a;
+  --sidebar-accent: #1d1d20;
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-border: oklch(1 0 0 / 8%);
   --sidebar-ring: #a3e635;
 
-  --bg-color: #09090b;
-  --card-bg: #18181b;
-  --border-color: #27272a;
+  /* Console accent set — lime · green · cyan · amber · violet. */
+  --chart-1: #a3e635;
+  --chart-2: #34d27b;
+  --chart-3: #22d3ee;
+  --chart-4: #f59e0b;
+  --chart-5: #a855f7;
+
+  /* Brand bar-chart fills — lime on dark (blue on light, see .app-shell). */
+  --brand-bar: #a3e635;
+  --brand-bar-peak: #bef264;
+
+  --bg-color: #0a0a0b;
+  --card-bg: #161618;
+  --border-color: oklch(1 0 0 / 10%);
 }
 
 /* ─── Body ─────────────────────────────────────────────────────── */
@@ -378,6 +451,61 @@ body {
 ::selection {
   background: rgba(1, 94, 254, 0.2);
   color: inherit;
+}
+
+/* Console uses the signal-lime selection tint instead of marketing blue. */
+.app-shell ::selection {
+  background: rgba(163, 230, 53, 0.28);
+  color: inherit;
+}
+
+/* ─── Console Stat-Tile Glow + Grid ───────────────────────────── */
+/* Reference recipe: a soft radial accent glow in the top-left corner */
+/* plus a faint engineering grid. The glow hue is driven by           */
+/* --stat-glow (defaults to signal lime); set it per-tile to recolor.  */
+/* The grid lines fade out in light mode where a dark hairline grid    */
+/* would read as noise on white cards.                                 */
+.stat-glow {
+  --stat-glow: var(--primary);
+  position: relative;
+  isolation: isolate;
+  background-image:
+    radial-gradient(140px 100px at 14% 0%, color-mix(in oklch, var(--stat-glow) 16%, transparent), transparent),
+    linear-gradient(color-mix(in oklch, var(--foreground) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklch, var(--foreground) 4%, transparent) 1px, transparent 1px);
+  background-size: auto, 22px 22px, 22px 22px;
+}
+.dark .stat-glow,
+.console-dark .stat-glow {
+  background-image:
+    radial-gradient(140px 100px at 14% 0%, color-mix(in oklch, var(--stat-glow) 22%, transparent), transparent),
+    linear-gradient(oklch(1 0 0 / 0.022) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(1 0 0 / 0.022) 1px, transparent 1px);
+  background-size: auto, 22px 22px, 22px 22px;
+}
+
+/* ─── Console Hero Surface (theme-adaptive) ───────────────────── */
+/* Self-contained hero background: a lime radial glow (top-right) + a faint  */
+/* 26px engineering grid layered over a base gradient. Resolves correctly in */
+/* both console themes, so it replaces the previous dark-only inline gradient */
+/* that broke light mode. Use the class alone (do NOT also add .stat-glow).   */
+.console-hero {
+  background-color: var(--card);
+  background-image:
+    radial-gradient(420px 200px at 82% -20%, color-mix(in oklch, var(--primary) 14%, transparent), transparent),
+    linear-gradient(color-mix(in oklch, var(--foreground) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklch, var(--foreground) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(135deg, #ffffff, #f4f4f5);
+  background-size: auto, 26px 26px, 26px 26px, auto;
+}
+.dark .console-hero,
+.console-dark .console-hero {
+  background-image:
+    radial-gradient(420px 200px at 82% -20%, rgba(163, 230, 53, 0.12), transparent),
+    linear-gradient(oklch(1 0 0 / 0.022) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(1 0 0 / 0.022) 1px, transparent 1px),
+    linear-gradient(135deg, #16161a, #0f0f12);
+  background-size: auto, 26px 26px, 26px 26px, auto;
 }
 
 /* ─── Antimetal Primary Button (lime accent) ─────────────────── */
@@ -660,18 +788,19 @@ body {
 
 /* Centre hub pill */
 .int-center-hub {
-  /* Mobile: centred horizontally, fixed top */
-  width: 122px;
-  left: calc(50% - 61px);
-  top: 133px;
+  /* Mobile: centred horizontally, fixed top. Widened + raised so the 30%-
+     larger disc still fits and its centre stays on the icon convergence point. */
+  width: 158px;
+  left: calc(50% - 79px);
+  top: 119px;
   height: 252px;
 }
 @media (min-width: 1024px) {
   .int-center-hub {
     width: 352px;
     left: calc(50% + 97px);
-    height: 160px;
-    top: calc(50% - 80px);
+    height: 196px;
+    top: calc(50% - 98px);
   }
 }
 
@@ -729,6 +858,44 @@ body {
   .int-circle-wrapper {
     -webkit-mask: linear-gradient(90deg, #0000 45%, #000 60%);
     mask: linear-gradient(90deg, #0000 45%, #000 60%);
+  }
+}
+
+/* Hub shine — a diagonal light sweep across the steady centre logo, retriggered
+   from the wheel tick loop (via the .is-shining class) each time a new icon
+   slides into place. Transform/opacity only. */
+.int-hub-shine {
+  opacity: 0;
+  transform: translateX(-130%) skewX(-18deg);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.5) 50%,
+    transparent 100%
+  );
+}
+.int-hub-shine.is-shining {
+  animation: int-hub-shine 0.9s ease-out;
+}
+@keyframes int-hub-shine {
+  0% {
+    transform: translateX(-130%) skewX(-18deg);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(130%) skewX(-18deg);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .int-hub-shine.is-shining {
+    animation: none;
   }
 }
 

@@ -5,12 +5,14 @@ import { motion, useScroll, useTransform } from "framer-motion";
 import { easing } from "@/lib/motion";
 import { CountUp } from "@/components/marketing/motion/count-up";
 
+// {{TODO: replace with real, documented customer metrics when available.}}
+// Until then these are illustrative examples, labeled as such in the UI below.
 const useCases = [
   {
     tag: "E-Commerce",
     title: "80% of tickets never reach a human.",
-    desc: "A support agent that resolves, routes, and escalates — trained on your knowledge base, running 24/7.",
-    stat: 90,
+    desc: "A support agent that resolves, routes, and escalates, trained on your knowledge base, running 24/7.",
+    stat: 80,
     statSuffix: "% deflection",
   },
   {
@@ -23,7 +25,7 @@ const useCases = [
   {
     tag: "Agency",
     title: "10 clients. One operator.",
-    desc: "White-label AI agents for every client — isolated data, custom config, your branding. Scale service without scaling headcount.",
+    desc: "White-label AI agents for every client: isolated data, custom config, your branding. Scale service without scaling headcount.",
     stat: 10,
     statSuffix: "x capacity",
   },
@@ -55,13 +57,16 @@ export function CaseStudyCarousel() {
           transition={{ duration: 0.8, ease: easing.outExpo }}
           className="text-center mb-16"
         >
-          <p className="text-xs text-accent-blue-rest uppercase tracking-[0.2em] mb-4 font-medium">Proof</p>
+          <p className="text-xs text-accent-blue-rest uppercase tracking-[0.2em] mb-4 font-medium">Use cases</p>
           <h2 className="text-[clamp(2rem,4vw,48px)] font-bold text-text-loud tracking-[-1.5px] mb-5">
-            Already running in production.
+            Built for outcomes like these.
           </h2>
           <p className="text-text-secondary text-lg max-w-[460px] mx-auto">
-            Real results from teams that stopped doing it manually.
+            Illustrative examples of what teams automate with SovereignML.
           </p>
+          <span className="mt-5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-border-muted bg-background-faint text-[10px] font-bold uppercase tracking-wider text-text-secondary">
+            Illustrative
+          </span>
         </motion.div>
 
         <div className="space-y-6 lg:space-y-8">

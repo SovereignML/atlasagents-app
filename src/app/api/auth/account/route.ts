@@ -1,7 +1,10 @@
+import { headers } from "next/headers"
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { db, users, accounts, eq, and } from "@/db"
 import { hashPassword, verifyPassword } from "@/lib/password"
+import { isGoogleOAuthConfigured } from "@/lib/oauth"
+import { normalizeHost, isCanonicalHost } from "@/lib/host"
 import { notify } from "@/lib/notifications/dispatch"
 
 export async function GET() {
@@ -30,6 +33,14 @@ export async function GET() {
       where: and(eq(accounts.userId, user.id), eq(accounts.provider, "google")),
     })
 
+    // Whether the "Connect Google" action is available: Google OAuth must be
+    // configured, and we must be on the canonical host (OAuth callback URLs
+    // can't be pre-registered for white-label custom domains).
+    const h = await headers()
+    const host = normalizeHost(h.get("x-forwarded-host") ?? h.get("host"))
+    const onCustomDomain = host != null && !isCanonicalHost(host)
+    const googleConfigured = !onCustomDomain && isGoogleOAuthConfigured()
+
     return NextResponse.json({
       id: user.id,
       name: user.name,
@@ -37,6 +48,7 @@ export async function GET() {
       image: user.image,
       hasPassword: !!user.hashedPassword,
       hasGoogle: !!googleAccount,
+      googleConfigured,
       createdAt: user.createdAt,
       telegramId: user.telegramId,
       twitterHandle: user.twitterHandle,

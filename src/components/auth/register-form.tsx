@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useCallback, useState } from "react"
+import { CircleAlert } from "lucide-react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -41,12 +42,19 @@ export function RegisterForm({ showGoogleOAuth = false, providers }: RegisterFor
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
   const [turnstileToken, setTurnstileToken] = useState("")
+  const [agreed, setAgreed] = useState(false)
 
   const onTurnstileVerify = useCallback((token: string) => setTurnstileToken(token), [])
   const onTurnstileExpire = useCallback(() => setTurnstileToken(""), [])
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
+
+    if (!agreed) {
+      setError("Please agree to the Privacy Policy, Terms of Service, and Refund Policy to continue.")
+      return
+    }
+
     setLoading(true)
     setError("")
 
@@ -79,7 +87,7 @@ export function RegisterForm({ showGoogleOAuth = false, providers }: RegisterFor
     <Card className="w-full">
       <CardHeader className="text-center">
         <CardTitle className="text-2xl font-bold">Create Account</CardTitle>
-        <CardDescription>Get started with your trading bot subscription</CardDescription>
+        <CardDescription>Deploy and manage your AI agents in minutes</CardDescription>
       </CardHeader>
       <CardContent>
         <FieldGroup>
@@ -92,8 +100,9 @@ export function RegisterForm({ showGoogleOAuth = false, providers }: RegisterFor
 
           <form onSubmit={onSubmit} className="space-y-4">
             {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
+              <Alert variant="destructive" className="flex items-center justify-center gap-2 text-center">
+                <CircleAlert className="shrink-0" />
+                <AlertDescription className="text-center">{error}</AlertDescription>
               </Alert>
             )}
             <Field>
@@ -132,12 +141,39 @@ export function RegisterForm({ showGoogleOAuth = false, providers }: RegisterFor
               onVerify={onTurnstileVerify}
               onExpire={onTurnstileExpire}
             />
+            <Field>
+              <label className="flex items-start gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  name="agree"
+                  checked={agreed}
+                  onChange={(e) => setAgreed(e.target.checked)}
+                  className="mt-0.5 size-4 shrink-0 rounded border-border accent-primary"
+                  required
+                />
+                <span>
+                  I agree to the{" "}
+                  <Link href="/privacy" target="_blank" className="text-primary hover:underline">
+                    Privacy Policy
+                  </Link>
+                  ,{" "}
+                  <Link href="/terms" target="_blank" className="text-primary hover:underline">
+                    Terms of Service
+                  </Link>
+                  , and{" "}
+                  <Link href="/refund" target="_blank" className="text-primary hover:underline">
+                    Refund Policy
+                  </Link>
+                  .
+                </span>
+              </label>
+            </Field>
             <Button
               type="submit"
               variant="gradient"
               size="pill"
               className="w-full"
-              disabled={loading || (turnstileEnabled && !turnstileToken)}
+              disabled={loading || !agreed || (turnstileEnabled && !turnstileToken)}
             >
               {loading ? "Creating account..." : "Create Account"}
             </Button>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
+import { getEffectiveUserId } from "@/lib/effective-user"
 import { db, instanceLogs, eq, desc } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
 
@@ -11,11 +12,12 @@ export async function GET(
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
+  const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
 
   const { instanceId } = await params
 
   const instance = await db.query.instances.findFirst({
-    where: whereUserInstanceVisible(session.user.id, instanceId),
+    where: whereUserInstanceVisible(effectiveUserId, instanceId),
     columns: {
       id: true,
       status: true,

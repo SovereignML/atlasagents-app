@@ -126,13 +126,13 @@ export function ApiKeysClient({ initial }: { initial: Key[] }) {
     <PageContainer>
       <PageHeader
         title="API Keys"
-        description="Personal access tokens for the public API. Treat like passwords — never commit them."
+        description="Personal access tokens for the public API. Treat like passwords. Never commit them."
         actions={newKeyDialog}
       />
 
       {revealedSecret && (
-        <Alert className="border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-300">
-          <AlertTitle>Copy now — you won&apos;t see this again</AlertTitle>
+        <Alert variant="warning">
+          <AlertTitle>Copy now, you won&apos;t see this again</AlertTitle>
           <AlertDescription className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <code className="flex-1 break-all rounded-lg border bg-background/70 px-3 py-2 font-mono text-sm text-foreground">
@@ -218,7 +218,7 @@ export function ApiKeysClient({ initial }: { initial: Key[] }) {
       )}
 
       <p className="font-mono text-[10px] text-amber-500/80">
-        ⚠ local UI state only — ApiKey model + `/api/keys` endpoints pending
+        ⚠ local UI state only. ApiKey model + `/api/keys` endpoints pending
       </p>
 
       <AlertDialog open={revokeId !== null} onOpenChange={(o) => !o && setRevokeId(null)}>

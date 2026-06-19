@@ -25,27 +25,6 @@ function ExternalLinkArrow() {
   )
 }
 
-function ShieldIcon() {
-  return (
-    <svg
-      className="text-hero/90"
-      fill="none"
-      height="20"
-      viewBox="0 0 20 20"
-      width="20"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path
-        d="M7.70833 9.58352L9.16667 11.0419L12.2917 7.91683M16.875 9.9271V5.18413C16.875 4.82544 16.6455 4.50699 16.3052 4.39357L10.2635 2.37968C10.0925 2.32266 9.9075 2.32266 9.7365 2.37968L3.69481 4.39357C3.35453 4.50699 3.125 4.82544 3.125 5.18413V9.9271C3.125 14.0709 6.66667 16.0419 10 17.8401C13.3333 16.0419 16.875 14.0709 16.875 9.9271Z"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.25"
-      />
-    </svg>
-  )
-}
-
 function StatusSpinner() {
   return (
     <svg
@@ -86,8 +65,9 @@ const footerSections = [
     links: [
       { href: "https://blog.sovereignml.com", label: "Blog", external: true },
       { href: "/docs", label: "Docs", external: true },
+      { href: "/team", label: "Team" },
+      { href: "/careers", label: "Careers" },
       { href: "/docs#faq", label: "Resources" },
-      { href: "/careers", label: "Careers", hidden: true },
     ],
   },
   {
@@ -110,7 +90,7 @@ const footerSections = [
 
 export default function Footer() {
   return (
-    <footer className="relative overflow-x-clip pb-14 max-lg:pt-[188px] lg:pb-[129px] lg:-mt-[130px]">
+    <footer className="relative overflow-x-clip pb-10 max-lg:pt-[188px] lg:pb-12 lg:-mt-[40px]">
       {/* Footer background gradient layer */}
       <div className="footer-background pointer-events-none absolute bottom-0 left-0 h-[2709px] w-full">
         <div className="absolute top-[1183px] lg:top-[886px] left-1/2 -translate-x-1/2 w-[3088px] h-[960px] pointer-events-none dark:hidden">
@@ -140,9 +120,9 @@ export default function Footer() {
       </div>
 
       {/* CTA area */}
-      <div className="relative mx-auto mb-[84px] max-w-[1320px] pt-10 lg:mb-36 lg:pt-[454px]">
+      <div className="relative mx-auto mb-[84px] max-w-[1320px] pt-10 lg:mb-36 lg:pt-[200px]">
         {/* Decorative vertical lines */}
-        <div className="footer-cta-line-1 pointer-events-none absolute top-[255px] h-[1096px] w-full max-lg:hidden">
+        <div className="footer-cta-line-1 pointer-events-none absolute top-[255px] h-[680px] w-full max-lg:hidden">
           <div className="absolute top-0 left-0 h-full w-px" />
           <div className="absolute top-0 right-0 h-full w-px" />
         </div>
@@ -235,32 +215,8 @@ export default function Footer() {
         <div className="h-px flex-1 lg:bg-hero/[0.06]" />
       </div>
 
-      {/* Compliance row */}
-      <div className="relative mx-auto flex max-w-[976px] justify-between text-[15px] leading-5">
-        <div className="flex flex-wrap items-center gap-2 max-lg:w-full max-lg:justify-center">
-          <div className="text-hero/40 max-lg:w-full max-lg:text-center">
-            Yes, of course we&apos;re...
-          </div>
-          <div className="flex items-center gap-1.5 text-hero/90">
-            <div className="flex gap-1">
-              <ShieldIcon />
-              <div>SOC 2,</div>
-            </div>
-            <div className="flex gap-1">
-              <ShieldIcon />
-              <div>GDPR,<span className="text-hero/40"> and</span></div>
-            </div>
-            <div className="flex gap-1">
-              <ShieldIcon />
-              <div>HIPAA<span className="text-hero/40"> compliant</span></div>
-            </div>
-          </div>
-        </div>
-        <div className="max-lg:hidden" />
-      </div>
-
       {/* Bottom copyright */}
-      <div className="relative mx-auto mt-14 lg:mt-24 text-center">
+      <div className="relative mx-auto text-center">
         <p className="text-hero/30 text-sm">
           &copy; {new Date().getFullYear()} {BRANDING.name}. All rights reserved.
         </p>

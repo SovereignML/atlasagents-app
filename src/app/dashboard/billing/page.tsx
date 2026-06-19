@@ -36,6 +36,8 @@ import {
 } from "@/components/ui/card"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { PageContainer, PageHeader, PageSection } from "@/components/layout/page-container"
+import { Progress } from "@/components/ui/progress"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Table,
   TableBody,
@@ -225,15 +227,15 @@ export default async function BillingPage() {
   // across every runway state — no emerald/amber/red.
   const HEALTH_BAR: Record<Health, string> = {
     idle: "bg-muted-foreground/40",
-    healthy: "bg-secondary",
-    low: "bg-secondary",
-    critical: "bg-secondary",
+    healthy: "bg-primary",
+    low: "bg-primary",
+    critical: "bg-primary",
   }
   const HEALTH_TEXT: Record<Health, string> = {
     idle: "text-muted-foreground",
-    healthy: "text-secondary",
-    low: "text-secondary",
-    critical: "text-secondary",
+    healthy: "text-primary",
+    low: "text-primary",
+    critical: "text-primary",
   }
 
   const renderPlan = (sub: (typeof subs)[number]) => {
@@ -305,14 +307,14 @@ export default async function BillingPage() {
 
       {/* ─── Low-balance warning ────────────────────────────────── */}
       {(health === "critical" || health === "low") && (
-        <div className="flex items-start gap-3 rounded-2xl border border-secondary/40 bg-secondary/10 px-4 py-3 text-sm">
-          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-secondary" />
+        <div className="flex items-start gap-3 rounded-[14px] border border-primary/30 border-l-[3px] border-l-primary bg-primary/10 px-4 py-3 text-sm">
+          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-primary" />
           <div className="space-y-0.5">
             <p className="font-medium text-foreground">
               {belowMinimum
                 ? "Balance at or below the auto-pause threshold"
                 : health === "critical"
-                  ? "Low balance — top up to keep your agents running"
+                  ? "Low balance. Top up to keep your agents running"
                   : "Running low on credits"}
             </p>
             <p className="text-[0.8rem] text-muted-foreground">
@@ -328,11 +330,11 @@ export default async function BillingPage() {
       <div className="grid gap-5 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardDescription className="font-mono text-[10px] tracking-[0.1em] uppercase text-primary">
+            <CardDescription className="font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">
               Credit Balance
             </CardDescription>
             <CardTitle className="flex items-center gap-3 text-foreground">
-              <span className="flex size-11 items-center justify-center rounded-xl bg-secondary text-secondary-foreground">
+              <span className="flex size-[54px] items-center justify-center rounded-xl bg-[linear-gradient(160deg,color-mix(in_oklch,var(--primary)_78%,white),var(--primary))] text-primary-foreground shadow-[0_6px_18px_color-mix(in_oklch,var(--primary)_35%,transparent)]">
                 <Coins className="size-5" />
               </span>
               <span className="flex items-baseline gap-2">
@@ -361,12 +363,10 @@ export default async function BillingPage() {
                       : `${daysOfRunway} day${daysOfRunway === 1 ? "" : "s"} left`}
                 </span>
               </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                <div
-                  className={cn("h-full rounded-full transition-all", HEALTH_BAR[health])}
-                  style={{ width: `${daysOfRunway === null ? 0 : Math.max(runwayPct, 4)}%` }}
-                />
-              </div>
+              <Progress
+                value={daysOfRunway === null ? 0 : Math.max(runwayPct, 4)}
+                indicatorClassName={HEALTH_BAR[health]}
+              />
             </div>
 
             <div className="grid grid-cols-1 divide-y rounded-xl border bg-muted/30 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
@@ -386,7 +386,7 @@ export default async function BillingPage() {
                 tone={HEALTH_TEXT[health]}
                 value={
                   daysOfRunway === null
-                    ? "—"
+                    ? "-"
                     : daysOfRunway > 999
                       ? "999+ days"
                       : `${daysOfRunway} day${daysOfRunway === 1 ? "" : "s"}`
@@ -411,7 +411,19 @@ export default async function BillingPage() {
         <TopUpCard stripeConfigured={stripeOn} />
       </div>
 
-      {/* ─── Subscriptions ──────────────────────────────────────── */}
+      {/* ─── Tabbed sections: Plans · Usage · History ───────────── */}
+      <Tabs defaultValue="plans">
+        <TabsList
+          variant="line"
+          className="w-full justify-start gap-1 border-b [&_[data-active]]:text-foreground [&_[data-active]]:after:bg-primary"
+        >
+          <TabsTrigger value="plans">Plans</TabsTrigger>
+          <TabsTrigger value="usage">Usage</TabsTrigger>
+          <TabsTrigger value="history">History</TabsTrigger>
+        </TabsList>
+
+        {/* ─── Subscriptions ────────────────────────────────────── */}
+        <TabsContent value="plans" className="pt-6">
       <PageSection
         title="Your plans"
         actions={
@@ -439,7 +451,7 @@ export default async function BillingPage() {
               currentSubs.map(renderPlan)
             ) : (
               <p className="text-sm text-muted-foreground">
-                No active plans — see canceled history below.
+                No active plans. See canceled history below.
               </p>
             )}
 
@@ -457,18 +469,35 @@ export default async function BillingPage() {
           </div>
         )}
       </PageSection>
+        </TabsContent>
 
-      {/* ─── Usage by agent (30d) ───────────────────────────────── */}
-      {agentBreakdown.length > 0 && (
+        {/* ─── Usage by agent (30d) ─────────────────────────────── */}
+        <TabsContent value="usage" className="pt-6">
         <PageSection
           title="Usage by agent"
           description="Credits spent in the last 30 days, split by compute and AI usage."
           actions={
-            <Badge variant="outline" className="font-mono text-[10px]">
-              {spend30.toLocaleString()} cr · 30d
-            </Badge>
+            agentBreakdown.length > 0 ? (
+              <Badge variant="outline" className="font-mono text-[10px]">
+                {spend30.toLocaleString()} cr · 30d
+              </Badge>
+            ) : null
           }
         >
+          {agentBreakdown.length === 0 ? (
+            <Card>
+              <CardContent className="py-8">
+                <Empty>
+                  <EmptyHeader>
+                    <EmptyTitle>No usage yet</EmptyTitle>
+                    <EmptyDescription>
+                      Per-agent spend appears here once your agents start running.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              </CardContent>
+            </Card>
+          ) : (
           <Card className="overflow-hidden p-0">
             <Table>
               <TableHeader>
@@ -497,10 +526,12 @@ export default async function BillingPage() {
               </TableBody>
             </Table>
           </Card>
+          )}
         </PageSection>
-      )}
+        </TabsContent>
 
-      {/* ─── Transaction history ────────────────────────────────── */}
+        {/* ─── Transaction history ──────────────────────────────── */}
+        <TabsContent value="history" className="pt-6">
       <PageSection
         title="Recent activity"
         actions={
@@ -561,7 +592,7 @@ export default async function BillingPage() {
                             {tx.instance.name}
                           </Link>
                         ) : (
-                          tx.description || "—"
+                          tx.description || "-"
                         )}
                       </TableCell>
                       <TableCell
@@ -592,6 +623,8 @@ export default async function BillingPage() {
           </Card>
         )}
       </PageSection>
+        </TabsContent>
+      </Tabs>
     </PageContainer>
   )
 }

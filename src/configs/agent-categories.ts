@@ -77,7 +77,7 @@ export const AGENT_CATEGORIES: readonly AgentCategory[] = [
     slug: "social",
     name: "Social Media Manager",
     icon: "Share2",
-    description: "Your autonomous social media team — generate content, schedule posts, and grow your audience.",
+    description: "Your autonomous social media team: generate content, schedule posts, and grow your audience.",
     examples: [
       "Content generation & scheduling",
       "Engagement optimization",
