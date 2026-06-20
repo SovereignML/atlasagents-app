@@ -18,7 +18,7 @@ export function Features() {
                                     </svg>
                                     <span className="mx-auto block w-fit text-5xl font-semibold">100%</span>
                                 </div>
-                                <h2 className="mt-6 text-center text-3xl font-semibold">Customizable</h2>
+                                <h2 className="mt-6 text-center text-3xl font-semibold">Yours to own</h2>
                             </CardContent>
                         </Card>
                         <Card className="relative col-span-full overflow-hidden sm:col-span-3 lg:col-span-2">
@@ -50,7 +50,7 @@ export function Features() {
                                 </div>
                                 <div className="relative z-10 mt-6 space-y-2 text-center">
                                     <h2 className="group-hover:text-secondary-950 text-lg font-medium transition dark:text-white">Secure by default</h2>
-                                    <p className="text-foreground">Your own private instance with isolated data — your agents never share infrastructure with anyone else.</p>
+                                    <p className="text-foreground">Your own private instance with isolated data. Your agents never share infrastructure with anyone else.</p>
                                 </div>
                             </CardContent>
                         </Card>
@@ -96,8 +96,8 @@ export function Features() {
                                     </svg>
                                 </div>
                                 <div className="relative z-10 mt-14 space-y-2 text-center">
-                                    <h2 className="text-lg font-medium transition">Tickets, handled 24/7</h2>
-                                    <p className="text-foreground">A support agent that resolves, routes, and escalates — trained on your knowledge base, running 24/7.</p>
+                                    <h2 className="text-lg font-medium transition">High-speed agents that run themselves</h2>
+                                    <p className="text-foreground">A support agent that triages, answers, and escalates from your knowledge base, clearing routine tickets in seconds.</p>
                                 </div>
                             </CardContent>
                         </Card>
@@ -108,8 +108,8 @@ export function Features() {
                                         <Shield className="m-auto size-5" strokeWidth={1} />
                                     </div>
                                     <div className="space-y-2">
-                                        <h2 className="group-hover:text-secondary-950 text-lg font-medium text-zinc-800 transition dark:text-white">Incidents down. Sleep up.</h2>
-                                        <p className="text-foreground">A DevOps agent that monitors logs, detects anomalies, and auto-resolves failures before your team wakes up.</p>
+                                        <h2 className="group-hover:text-secondary-950 text-lg font-medium text-zinc-800 transition dark:text-white">Uptime, around the clock</h2>
+                                        <p className="text-foreground">A DevOps agent that watches logs, catches anomalies, and resolves failures before they ever page your team.</p>
                                     </div>
                                 </div>
                                 <div className="rounded-tl-(--radius) relative -mb-6 -mr-6 mt-6 h-fit border-l border-t p-6 py-6 sm:ml-6">
@@ -148,28 +148,28 @@ export function Features() {
                                         <Users className="m-auto size-6" strokeWidth={1} />
                                     </div>
                                     <div className="space-y-2">
-                                        <h2 className="text-lg font-medium transition">10 clients. One operator.</h2>
-                                        <p className="text-foreground">White-label AI agents for every client — isolated data, custom config, your branding.</p>
+                                        <h2 className="text-lg font-medium transition">Multiple agents. One platform.</h2>
+                                        <p className="text-foreground">Run a fleet of agents on OpenClaw and Hermes, deployed, monitored, and managed from one place.</p>
                                     </div>
                                 </div>
                                 <div className="before:bg-(--color-border) relative mt-6 before:absolute before:inset-0 before:mx-auto before:w-px sm:-my-6 sm:-mr-6">
                                     <div className="relative flex h-full flex-col justify-center space-y-6 py-6">
                                         <div className="relative flex w-[calc(50%+0.875rem)] items-center justify-end gap-2">
-                                            <span className="block h-fit rounded border px-2 py-1 text-xs shadow-sm">Likeur</span>
+                                            <span className="block h-fit rounded border px-2 py-1 text-xs shadow-sm">OpenClaw</span>
                                             <div className="ring-background size-7 ring-4">
-                                                <img className="size-full rounded-full" src="https://avatars.githubusercontent.com/u/102558960?v=4" alt="" />
+                                                <img className="size-full rounded-full bg-white object-contain p-1" src="/assets/icons/openclaw-color.svg" alt="OpenClaw" />
                                             </div>
                                         </div>
                                         <div className="relative ml-[calc(50%-1rem)] flex items-center gap-2">
                                             <div className="ring-background size-8 ring-4">
-                                                <img className="size-full rounded-full" src="https://avatars.githubusercontent.com/u/47919550?v=4" alt="" />
+                                                <img className="size-full rounded-full bg-white object-contain p-1" src="/assets/icons/Blue-Navy-SovereignML.png" alt="SovereignML" />
                                             </div>
-                                            <span className="block h-fit rounded border px-2 py-1 text-xs shadow-sm">M. Irung</span>
+                                            <span className="block h-fit rounded border px-2 py-1 text-xs shadow-sm">SovereignML</span>
                                         </div>
                                         <div className="relative flex w-[calc(50%+0.875rem)] items-center justify-end gap-2">
-                                            <span className="block h-fit rounded border px-2 py-1 text-xs shadow-sm">B. Ng</span>
+                                            <span className="block h-fit rounded border px-2 py-1 text-xs shadow-sm">Hermes</span>
                                             <div className="ring-background size-7 ring-4">
-                                                <img className="size-full rounded-full" src="https://avatars.githubusercontent.com/u/31113941?v=4" alt="" />
+                                                <img className="size-full rounded-full bg-white object-contain p-1" src="/assets/icons/hermesagent.svg" alt="Hermes" />
                                             </div>
                                         </div>
                                     </div>

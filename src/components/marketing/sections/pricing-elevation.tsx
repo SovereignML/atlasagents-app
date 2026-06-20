@@ -61,7 +61,7 @@ export function PricingElevation() {
             Free to start. Built to scale.
           </h2>
           <p className="text-text-secondary text-lg max-w-[440px] mx-auto">
-            Upgrade when your agents are pulling their weight — not before.
+            Upgrade when your agents are pulling their weight, not before.
           </p>
         </motion.div>
 

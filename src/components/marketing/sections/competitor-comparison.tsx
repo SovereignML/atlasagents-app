@@ -1,121 +1,135 @@
 "use client";
 
-import Link from "next/link";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import {
-  Server, LockOpen, Boxes, Shield, Layers, Workflow, Download,
+  Server, Shield, LockOpen, Boxes, KeyRound, Layers, Workflow,
+  Rocket, RefreshCw, Wallet, LifeBuoy, Check, Minus,
 } from "lucide-react";
 import { easing } from "@/lib/motion";
 import { BRANDING } from "@/configs/branding";
 
 /*
- * Competitor comparison as a "datasheet", not a ✓/✗ matrix.
- * Closed AI-employee SaaS (Sintra, WorkBuddy, Lindy) rent you seats to hosted
- * bots; SovereignML hands you an operations layer you own. The differentiator
- * is ownership and portability, so every cell carries a specific spec value
- * rather than a checkmark, and SovereignML is the only solid, "owned" column.
+ * Competitor comparison as a ✓/— matrix (per reference design).
+ * Closed AI-employee SaaS (Sintra, WorksBuddy, Lindy) rent you hosted bots —
+ * convenient, but you never own the runtime or data. Self-hosting hands you
+ * ownership but no managed runtime, updates, or support. SovereignML is the
+ * ONLY column that is all-✓: the ownership of self-hosting with the convenience
+ * of managed SaaS.
  *
- * {{TODO: competitor cell values reflect publicly available positioning and
- * should be confirmed by marketing/legal before this ships publicly.}}
+ * {{TODO: competitor cell values reflect publicly available positioning
+ * (researched June 2026) and should be confirmed by marketing/legal before
+ * this ships publicly.}}
  */
 
-const competitors = [
+const SOVEREIGN = "sovereign" as const;
+
+const products = [
+  { key: SOVEREIGN, name: BRANDING.name, tag: "AI operations layer" },
   { key: "sintra", name: "Sintra", tag: "Rented AI employees" },
-  { key: "workbuddy", name: "WorksBuddy", tag: "Closed AI assistant" },
+  { key: "worksbuddy", name: "WorksBuddy", tag: "Closed assistant suite" },
   { key: "lindy", name: "Lindy", tag: "Hosted agent builder" },
+  { key: "selfhost", name: "Self-hosting", tag: "DIY open source" },
 ] as const;
 
-type CompetitorKey = (typeof competitors)[number]["key"];
+type ProductKey = (typeof products)[number]["key"];
+
+/** true = supported, false = not, "partial" = limited (renders as — with a note) */
+type Cell = true | false | "partial";
 
 type Row = {
-  dimension: string;
+  feature: string;
   icon: typeof Server;
-  sovereign: string;
-  others: string; // mobile reduction — the shared competitor stance
-  values: Record<CompetitorKey, { text: string; weak?: boolean }>;
+  badge?: string;
+  values: Record<ProductKey, Cell>;
 };
 
 const rows: Row[] = [
   {
-    dimension: "Where it runs",
+    feature: "Runs on your own private instance",
     icon: Server,
-    sovereign: "Your private instance",
-    others: "Vendor cloud",
-    values: {
-      sintra: { text: "Vendor cloud" },
-      workbuddy: { text: "Vendor cloud" },
-      lindy: { text: "Vendor cloud" },
-    },
+    values: { sovereign: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
   },
   {
-    dimension: "Vendor lock-in",
-    icon: LockOpen,
-    sovereign: "None — leave anytime",
-    others: "Locked to platform",
-    values: {
-      sintra: { text: "Locked in", weak: true },
-      workbuddy: { text: "Locked in", weak: true },
-      lindy: { text: "Locked in", weak: true },
-    },
-  },
-  {
-    dimension: "Agent runtime",
-    icon: Boxes,
-    sovereign: "Open · OpenClaw / Hermes",
-    others: "Closed, proprietary",
-    values: {
-      sintra: { text: "Closed", weak: true },
-      workbuddy: { text: "Closed", weak: true },
-      lindy: { text: "Closed", weak: true },
-    },
-  },
-  {
-    dimension: "Your data",
+    feature: "You own & isolate all data",
     icon: Shield,
-    sovereign: "Isolated to you",
-    others: "On vendor cloud",
-    values: {
-      sintra: { text: "On vendor cloud" },
-      workbuddy: { text: "On vendor cloud" },
-      lindy: { text: "On vendor cloud" },
-    },
+    values: { sovereign: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
   },
   {
-    dimension: "Agent types",
+    feature: "No vendor lock-in, full config export",
+    icon: LockOpen,
+    values: { sovereign: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
+  },
+  {
+    feature: "Open agent runtime (OpenClaw / Hermes)",
+    icon: Boxes,
+    values: { sovereign: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
+  },
+  {
+    feature: "Bring your own model keys",
+    icon: KeyRound,
+    badge: "new",
+    values: { sovereign: true, sintra: false, worksbuddy: false, lindy: "partial", selfhost: true },
+  },
+  {
+    feature: "Build any custom agent type",
     icon: Layers,
-    sovereign: "Any type, fully custom",
-    others: "Preset roster",
-    values: {
-      sintra: { text: "Fixed bot roster" },
-      workbuddy: { text: "Preset assistants" },
-      lindy: { text: "Hosted builder" },
-    },
+    values: { sovereign: true, sintra: false, worksbuddy: false, lindy: true, selfhost: true },
   },
   {
-    dimension: "Multi-agent orchestration",
+    feature: "Native multi-agent orchestration",
     icon: Workflow,
-    sovereign: "Native",
-    others: "Limited",
-    values: {
-      sintra: { text: "Not supported", weak: true },
-      workbuddy: { text: "Not supported", weak: true },
-      lindy: { text: "Partial" },
-    },
+    values: { sovereign: true, sintra: false, worksbuddy: false, lindy: "partial", selfhost: false },
   },
   {
-    dimension: "Take it with you",
-    icon: Download,
-    sovereign: "Full config export",
-    others: "Not available",
-    values: {
-      sintra: { text: "Not available", weak: true },
-      workbuddy: { text: "Not available", weak: true },
-      lindy: { text: "Not available", weak: true },
-    },
+    feature: "Managed deploy in minutes",
+    icon: Rocket,
+    values: { sovereign: true, sintra: true, worksbuddy: true, lindy: true, selfhost: false },
+  },
+  {
+    feature: "Auto-updates & maintenance handled",
+    icon: RefreshCw,
+    values: { sovereign: true, sintra: true, worksbuddy: true, lindy: true, selfhost: false },
+  },
+  {
+    feature: "No per-seat or per-action credit metering",
+    icon: Wallet,
+    values: { sovereign: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
+  },
+  {
+    feature: "Support & SLA included",
+    icon: LifeBuoy,
+    values: { sovereign: true, sintra: true, worksbuddy: true, lindy: true, selfhost: false },
   },
 ];
 
+const cost: Record<ProductKey, string> = {
+  sovereign: "From $79/mo",
+  sintra: "~$97/mo",
+  worksbuddy: "~$99/mo",
+  lindy: "~$20/mo",
+  selfhost: "Infra + your time",
+};
+
+/** A single matrix cell: a bold accent ✓ for supported (blue in light, lime in dark), a muted — for absent. */
+function CellMark({ value }: { value: Cell }) {
+  if (value === true) {
+    return <Check className="mx-auto size-5 text-accent-blue-rest dark:text-signal" strokeWidth={3} aria-label="Yes" />;
+  }
+  if (value === "partial") {
+    return (
+      <span className="flex flex-col items-center gap-0.5">
+        <Minus className="size-5 text-text-disabled" strokeWidth={2.5} aria-label="Limited" />
+        <span className="text-[10px] leading-none text-text-disabled">limited</span>
+      </span>
+    );
+  }
+  return <Minus className="mx-auto size-5 text-text-disabled" strokeWidth={2.5} aria-label="No" />;
+}
+
 export function CompetitorComparison() {
+  const [hoveredCol, setHoveredCol] = useState<ProductKey | null>(null);
+
   return (
     <section
       id="comparison"
@@ -137,177 +151,149 @@ export function CompetitorComparison() {
           <h2 className="text-[clamp(2rem,4vw,48px)] font-bold text-text-loud tracking-[-1.5px] mb-5">
             They rent you bots. You own the whole stack.
           </h2>
-          <p className="text-text-secondary text-lg max-w-[520px] mx-auto">
-            Most AI-employee tools keep your agents, data, and runtime on their cloud. SovereignML hands you the operations layer — and lets you walk away with it.
+          <p className="text-text-secondary text-lg max-w-[560px] mx-auto">
+            SaaS bots rent you seats. Self-hosting hands you a second job.
+            {" "}{BRANDING.name} gives you both: the ownership of self-hosting with a
+            fully managed runtime.
           </p>
         </motion.div>
 
-        {/* ── Desktop: datasheet table ── */}
+        {/* Matrix — horizontally scrollable on small screens */}
         <motion.div
           initial={{ opacity: 0, y: 32, filter: "blur(4px)" }}
           whileInView={{ opacity: 1, y: 0, filter: "blur(0px)" }}
           viewport={{ once: true, amount: 0.1 }}
           transition={{ duration: 0.8, ease: easing.outExpo }}
-          className="hidden md:block"
+          className="-mx-8 overflow-x-auto px-8 md:mx-0 md:overflow-visible md:px-0"
         >
-          <table className="w-full border-separate border-spacing-0 text-left">
+          <table className="w-full min-w-[720px] border-separate border-spacing-0 text-left">
+            <colgroup>
+              <col className="w-[26%]" />
+              <col className="w-[14.8%]" />
+              <col className="w-[14.8%]" />
+              <col className="w-[14.8%]" />
+              <col className="w-[14.8%]" />
+              <col className="w-[14.8%]" />
+            </colgroup>
             <thead>
               <tr>
-                <th className="w-[26%] align-bottom p-0" />
-                {/* SovereignML — the owned column */}
-                <th className="w-[22%] align-bottom p-0">
-                  <div className="rounded-t-2xl border-x border-t border-accent-blue-rest/25 bg-card-full px-5 pt-4 pb-4 border-t-[3px] border-t-signal">
-                    <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-accent-blue-rest">
-                      Yours to own
-                    </span>
-                    <p className="mt-1 text-lg font-bold tracking-[-0.5px] text-text-loud">
-                      {BRANDING.name}
-                    </p>
-                    <p className="text-xs text-text-muted">AI operations layer</p>
-                  </div>
-                </th>
-                {competitors.map((c) => (
-                  <th key={c.key} className="w-[17.3%] align-bottom p-0">
-                    <div className="px-5 pb-4 pt-6">
-                      <p className="text-lg font-semibold tracking-[-0.5px] text-text-muted">
-                        {c.name}
-                      </p>
-                      <p className="text-xs text-text-disabled">{c.tag}</p>
-                    </div>
-                  </th>
-                ))}
+                <th className="sticky left-0 z-10 bg-background align-bottom p-0" />
+                {products.map((p) => {
+                  const owned = p.key === SOVEREIGN;
+                  const hovered = hoveredCol === p.key;
+                  return (
+                    <th
+                      key={p.key}
+                      className="align-bottom p-0 text-center"
+                      onMouseEnter={() => setHoveredCol(p.key)}
+                      onMouseLeave={() => setHoveredCol(null)}
+                    >
+                      <div
+                        className={
+                          "rounded-t-xl px-3 pb-5 pt-6 transition-colors " +
+                          (hovered ? "bg-text-loud/[0.04]" : "")
+                        }
+                      >
+                        <p
+                          className={
+                            "text-base font-semibold tracking-[-0.5px] " +
+                            (owned ? "text-text-loud" : "text-text-muted")
+                          }
+                        >
+                          {p.name}
+                        </p>
+                        <p className={"text-xs " + (owned ? "text-text-muted" : "text-text-disabled")}>
+                          {p.tag}
+                        </p>
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, i) => {
+              {rows.map((row) => {
                 const Icon = row.icon;
-                const last = i === rows.length - 1;
                 return (
-                  <tr key={row.dimension} className="group">
-                    {/* Dimension label */}
+                  <tr key={row.feature} className="group">
+                    {/* Feature label */}
                     <th
                       scope="row"
-                      className="border-b border-border-muted py-4 pr-6 text-left align-middle font-normal"
+                      className="sticky left-0 z-10 border-b border-border-muted bg-background py-4 pr-6 text-left align-middle font-normal"
                     >
                       <span className="flex items-center gap-2.5">
                         <Icon className="size-4 shrink-0 text-text-muted" />
                         <span className="text-sm font-medium text-text-loud">
-                          {row.dimension}
+                          {row.feature}
                         </span>
+                        {row.badge && (
+                          <span className="rounded-full bg-accent-blue-rest/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-blue-rest">
+                            {row.badge}
+                          </span>
+                        )}
                       </span>
                     </th>
 
-                    {/* SovereignML cell — continuous solid column */}
-                    <td
-                      className={
-                        "border-x border-accent-blue-rest/25 bg-card-full px-5 py-4 align-middle " +
-                        (last ? "rounded-b-2xl border-b" : "")
-                      }
-                    >
-                      <span className="flex items-center gap-2">
-                        <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-accent-blue-rest/10">
-                          <span className="size-1.5 rounded-full bg-accent-blue-rest" />
-                        </span>
-                        <span className="text-sm font-semibold text-text-loud">
-                          {row.sovereign}
-                        </span>
-                      </span>
-                    </td>
-
-                    {/* Competitor cells */}
-                    {competitors.map((c) => {
-                      const cell = row.values[c.key];
-                      return (
-                        <td
-                          key={c.key}
-                          className="border-b border-border-muted px-5 py-4 align-middle"
-                        >
-                          <span
-                            className={
-                              "text-sm " +
-                              (cell.weak
-                                ? "text-text-disabled line-through decoration-text-disabled/40"
-                                : "text-text-muted")
-                            }
-                          >
-                            {cell.text}
-                          </span>
-                        </td>
-                      );
-                    })}
+                    {products.map((p) => (
+                      <td
+                        key={p.key}
+                        onMouseEnter={() => setHoveredCol(p.key)}
+                        onMouseLeave={() => setHoveredCol(null)}
+                        className={
+                          "border-b border-border-muted px-3 py-4 text-center align-middle transition-colors " +
+                          (hoveredCol === p.key ? "bg-text-loud/[0.04]" : "")
+                        }
+                      >
+                        <CellMark value={row.values[p.key]} />
+                      </td>
+                    ))}
                   </tr>
                 );
               })}
+
+              {/* Cost row */}
+              <tr>
+                <th
+                  scope="row"
+                  className="sticky left-0 z-10 bg-background py-5 pr-6 text-left align-middle font-normal"
+                >
+                  <span className="text-sm font-semibold text-text-loud">Cost</span>
+                </th>
+                {products.map((p) => {
+                  const owned = p.key === SOVEREIGN;
+                  return (
+                    <td
+                      key={p.key}
+                      onMouseEnter={() => setHoveredCol(p.key)}
+                      onMouseLeave={() => setHoveredCol(null)}
+                      className={
+                        "rounded-b-xl px-3 py-5 text-center align-middle transition-colors " +
+                        (hoveredCol === p.key ? "bg-text-loud/[0.04]" : "")
+                      }
+                    >
+                      <span
+                        className={
+                          "text-sm " +
+                          (owned
+                            ? "font-bold text-accent-blue-rest dark:text-signal"
+                            : "font-medium text-text-muted")
+                        }
+                      >
+                        {cost[p.key]}
+                      </span>
+                    </td>
+                  );
+                })}
+              </tr>
             </tbody>
           </table>
-
-          <div className="mt-8 flex items-center justify-between gap-4">
-            <p className="text-xs text-text-muted max-w-[440px]">
-              Comparison reflects publicly available positioning, June 2026. Competitor names are trademarks of their respective owners.
-            </p>
-            <Link href="/login?deploy=true" className="btn-green text-base shrink-0">
-              Deploy your first agent
-            </Link>
-          </div>
         </motion.div>
 
-        {/* ── Mobile: SovereignML vs the field ── */}
-        <div className="md:hidden">
-          <div className="mb-4 grid grid-cols-2 gap-3">
-            <div className="rounded-2xl border border-accent-blue-rest/25 bg-card-full p-4 border-t-[3px] border-t-signal">
-              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-accent-blue-rest">
-                Yours to own
-              </span>
-              <p className="mt-1 text-base font-bold text-text-loud">{BRANDING.name}</p>
-            </div>
-            <div className="rounded-2xl border border-border-muted p-4">
-              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-text-muted">
-                The field
-              </span>
-              <p className="mt-1 text-sm font-semibold text-text-muted leading-tight">
-                Sintra · WorksBuddy · Lindy
-              </p>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            {rows.map((row) => {
-              const Icon = row.icon;
-              return (
-                <div
-                  key={row.dimension}
-                  className="rounded-2xl border border-border-muted bg-background-faint p-4"
-                >
-                  <div className="mb-3 flex items-center gap-2">
-                    <Icon className="size-4 text-text-muted" />
-                    <span className="text-sm font-medium text-text-loud">
-                      {row.dimension}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="flex items-center gap-2">
-                      <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-accent-blue-rest/10">
-                        <span className="size-1.5 rounded-full bg-accent-blue-rest" />
-                      </span>
-                      <span className="text-sm font-semibold text-text-loud">
-                        {row.sovereign}
-                      </span>
-                    </div>
-                    <span className="text-sm text-text-disabled">{row.others}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <Link
-            href="/login?deploy=true"
-            className="btn-green text-base mt-6 inline-flex w-full justify-center"
-          >
-            Deploy your first agent
-          </Link>
-          <p className="mt-4 text-xs text-text-muted">
-            Comparison reflects publicly available positioning, June 2026. Competitor names are trademarks of their respective owners.
+        {/* Footnote */}
+        <div className="mt-10 flex flex-col items-center">
+          <p className="text-center text-xs text-text-muted max-w-[480px]">
+            Comparison reflects publicly available positioning, June 2026.
+            Competitor names are trademarks of their respective owners.
           </p>
         </div>
       </div>

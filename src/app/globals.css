@@ -362,6 +362,38 @@ html[data-console-theme="dark"] {
   --border-color: #09090b14;
 }
 
+/* ─── Light Console: flat surfaces (no resting drop shadows) ──── */
+/* The light console reads cleaner without card/panel elevation —  */
+/* the heavy resting shadows made every page look muddy. Scoped to  */
+/* `.console-light` so the DARK console keeps its shadows untouched, */
+/* and so PORTALED popups (dropdown/popover/select/sheet, mounted at */
+/* <body> under html[data-console-theme]) keep their own elevation.  */
+.console-light {
+  --shadow-sm: 0 0 #0000;
+  --shadow-md: 0 0 #0000;
+  --shadow-hover: 0 0 #0000;
+  --card-shadow: transparent;
+}
+/* Native Tailwind elevation utilities used directly on in-page      */
+/* surfaces (cards reference the tokens above; these cover the rest). */
+.console-light
+  :is(.shadow-2xs, .shadow-xs, .shadow-sm, .shadow, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl),
+.console-light
+  :is(.hover\:shadow-sm, .hover\:shadow-md, .hover\:shadow-lg, .hover\:shadow-xl):hover {
+  box-shadow: none;
+}
+/* Arbitrary literal box-shadows (shadow-[…]) and drop-shadow filters used  */
+/* directly on in-page surfaces — e.g. the billing credit-chip glow and     */
+/* status-dot glows — which the token/named-utility rules above don't reach. */
+/* Buttons keep their glossy colored elevation (data-slot=button); portaled  */
+/* popups under html[data-console-theme] sit outside this scope.            */
+.console-light [class*="shadow-["]:not([data-slot="button"]) {
+  box-shadow: none;
+}
+.console-light [class*="drop-shadow"] {
+  filter: none;
+}
+
 /* ─── App Shell Token Scope (Dark — SovereignML Console) ──────── */
 /* The reference console palette: near-black canvas, #161618 cards,  */
 /* #1d1d20 inset fields, hairline white-alpha borders, and signal     */
@@ -475,7 +507,7 @@ body {
     linear-gradient(90deg, color-mix(in oklch, var(--foreground) 4%, transparent) 1px, transparent 1px);
   background-size: auto, 22px 22px, 22px 22px;
 }
-.dark .stat-glow,
+.dark .stat-glow:not(.console-light *),
 .console-dark .stat-glow {
   background-image:
     radial-gradient(140px 100px at 14% 0%, color-mix(in oklch, var(--stat-glow) 22%, transparent), transparent),
@@ -498,7 +530,7 @@ body {
     linear-gradient(135deg, #ffffff, #f4f4f5);
   background-size: auto, 26px 26px, 26px 26px, auto;
 }
-.dark .console-hero,
+.dark .console-hero:not(.console-light *),
 .console-dark .console-hero {
   background-image:
     radial-gradient(420px 200px at 82% -20%, rgba(163, 230, 53, 0.12), transparent),

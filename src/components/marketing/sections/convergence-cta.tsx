@@ -39,7 +39,7 @@ export function ConvergenceCTA() {
           style={{ opacity: subOpacity }}
           className="text-lg text-text-secondary mb-10 max-w-md mx-auto"
         >
-          OpenClaw or Hermes — pick a runtime and go live in minutes.
+          OpenClaw or Hermes: pick a runtime and go live in minutes.
         </motion.p>
 
         <motion.div

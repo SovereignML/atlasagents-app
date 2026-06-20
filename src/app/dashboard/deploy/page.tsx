@@ -210,7 +210,7 @@ export default function DeployPage() {
         description="No code, no DevOps. Three steps to launch into your own private instance."
       />
 
-      <div className="flex items-center gap-1 overflow-x-auto pb-2">
+      <div className="flex items-center gap-1 overflow-x-auto px-0.5 pb-2 pt-1">
         {STEPS.map((s, i) => {
           const isActive = s === step
           const isComplete = i < stepIdx
@@ -240,7 +240,7 @@ export default function DeployPage() {
               >
                 {isComplete ? <Check className="size-3.5" /> : i + 1}
               </span>
-              {`${i + 1} · ${STEP_LABELS[s]}`}
+              {STEP_LABELS[s]}
             </button>
           )
         })}

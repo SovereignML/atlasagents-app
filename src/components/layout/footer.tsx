@@ -65,7 +65,8 @@ const footerSections = [
     links: [
       { href: "https://blog.sovereignml.com", label: "Blog", external: true },
       { href: "/docs", label: "Docs", external: true },
-      { href: "/team", label: "Team" },
+      // Team page hidden from the landing page for now — restore when ready.
+      // { href: "/team", label: "Team" },
       { href: "/careers", label: "Careers" },
       { href: "/docs#faq", label: "Resources" },
     ],
@@ -138,7 +139,7 @@ export default function Footer() {
         {/* CTA headline */}
         <Reveal className="relative mx-auto mb-10 max-w-[360px] text-center text-hero-white text-[clamp(2rem,4.5vw,46px)] leading-[1.04] tracking-[-0.46px] font-serif lg:max-w-[500px]" style={{ fontWeight: 400 }}>
           <div className="absolute -top-[35.5px] lg:-top-[82px] left-0 right-0 h-px bg-hero/[0.06]" />
-          Be ready for whatever you launch next
+          Own the agents that run your business
         </Reveal>
 
         {/* CTA button row */}

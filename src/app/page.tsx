@@ -7,8 +7,6 @@ import Navbar from "@/components/layout/navbar"
 import Footer from "@/components/layout/footer"
 import { SmoothScrollProvider } from "@/components/marketing/motion/smooth-scroll-provider"
 import { AgentWheel } from "@/components/marketing/sections/agent-wheel"
-import FeatureSections from "@/components/ui/feature-sections"
-import FeatureHighlights from "@/components/ui/feature-highlights"
 import { MissionControlPlanner } from "@/components/marketing/sections/mission-control-planner"
 import { CapabilityTimeline } from "@/components/marketing/sections/capability-timeline"
 import TrustedCompanies from "@/components/ui/trusted-companies"
@@ -193,8 +191,8 @@ export default function Home() {
               transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
               className="text-[20px] leading-[26px] tracking-[-0.1px] text-hero-white/80 max-w-[526px] mt-7 mx-auto"
             >
-              Pick a runtime — OpenClaw or Hermes — customize your agent, and put
-              support, sales, and ops on autopilot. No code. Your own private
+              Pick a runtime, OpenClaw or Hermes, then customize your agent and
+              put support, sales, and ops on autopilot. No code. Your own private
               instance. Zero vendor lock-in.
             </motion.p>
 
@@ -233,17 +231,15 @@ export default function Home() {
 
         {/* ─── Living System Sections ─── */}
         <AgentWheel />
-        <FeatureSections />
-        <FeatureHighlights />
         <MissionControlPlanner />
         <CapabilityTimeline />
         <Features />
         {/* <AgentConfigurator /> hidden for now */}
         {/* Integration constellation — central hub orb + tool grid */}
         <IntegrationConstellation />
-        <ConvergenceCTA />
         <Testimonials />
         <CompetitorComparison />
+        <ConvergenceCTA />
         {/* Trust strip — enable once program memberships + official logos are
             confirmed (see backed-by.tsx). Intentionally left un-rendered. */}
         {/* <BackedBy /> */}

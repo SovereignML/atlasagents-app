@@ -24,7 +24,7 @@ export function CapabilityTimeline() {
             You own every layer. We keep it running.
           </h2>
           <p className="text-text-secondary text-lg max-w-[480px] mx-auto">
-            A clean line between what&apos;s yours to control and what we operate for you — so nothing falls through.
+            A clean line between what&apos;s yours to control and what we operate for you, so nothing falls through.
           </p>
         </motion.div>
       </div>

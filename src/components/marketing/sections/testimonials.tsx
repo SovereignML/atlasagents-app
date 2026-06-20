@@ -25,7 +25,7 @@ const testimonials: Testimonial[] = [
     role: "Customer Support Lead",
   },
   {
-    text: "Not being locked to one AI provider matters. When a better model ships, we switch with a config change — no rebuild.",
+    text: "Not being locked to one AI provider matters. When a better model ships, we switch with a config change. No rebuild.",
     image: "https://randomuser.me/api/portraits/men/4.jpg",
     name: "Omar Raza",
     role: "CEO",
@@ -43,7 +43,7 @@ const testimonials: Testimonial[] = [
     role: "Business Analyst",
   },
   {
-    text: "We white-label agents for every client — isolated data, their branding, our margins. It changed our service model.",
+    text: "We white-label agents for every client: isolated data, their branding, our margins. It changed our service model.",
     image: "https://randomuser.me/api/portraits/men/7.jpg",
     name: "Farhan Siddiqui",
     role: "Agency Director",
@@ -81,11 +81,11 @@ export function Testimonials() {
             <div className="border py-1 px-4 rounded-lg">Testimonials</div>
           </div>
 
-          <h2 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl xl:text-5xl font-bold tracking-tighter mt-5">
+          <h2 className="text-center text-xl sm:text-2xl md:text-3xl lg:text-4xl xl:text-5xl font-bold tracking-tighter mt-5">
             How teams put their agents to work.
           </h2>
           <p className="text-center mt-5 opacity-75">
-            Support, sales, devops, and agency teams — running on autopilot.
+            Support, sales, devops, and agency teams, running on autopilot.
           </p>
         </motion.div>
 
