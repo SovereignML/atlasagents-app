@@ -8,13 +8,18 @@ import Footer from "@/components/layout/footer"
 import { SmoothScrollProvider } from "@/components/marketing/motion/smooth-scroll-provider"
 import { AgentWheel } from "@/components/marketing/sections/agent-wheel"
 import { MissionControlPlanner } from "@/components/marketing/sections/mission-control-planner"
-import { WhySection } from "@/components/marketing/sections/why-section"
 import { CapabilityTimeline } from "@/components/marketing/sections/capability-timeline"
-import { CaseStudyCarousel } from "@/components/marketing/sections/case-study-carousel"
+import TrustedCompanies from "@/components/ui/trusted-companies"
+import { Features } from "@/components/ui/features-8"
+import { Testimonials } from "@/components/marketing/sections/testimonials"
+import { CompetitorComparison } from "@/components/marketing/sections/competitor-comparison"
 import { AgentConfigurator } from "@/components/marketing/sections/agent-configurator"
 import { PricingElevation } from "@/components/marketing/sections/pricing-elevation"
 import { KnowledgeBaseFAQ } from "@/components/marketing/sections/knowledge-base-faq"
 import { ConvergenceCTA } from "@/components/marketing/sections/convergence-cta"
+import { LogoCloudSection } from "@/components/marketing/sections/logo-cloud-section"
+import { IntegrationConstellation } from "@/components/marketing/sections/integration-constellation"
+// import { BackedBy } from "@/components/marketing/sections/backed-by"
 
 const lineRevealTransition = (delay: number) => ({
   duration: 0.6,
@@ -164,7 +169,7 @@ export default function Home() {
               }}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-signal animate-[pulse-glow_2s_ease-in-out_infinite]" />
-              <span className="text-xs font-medium text-hero-white">New — Multi-Agent Orchestration</span>
+              <span className="text-xs font-medium text-hero-white">New: Multi-Agent Orchestration</span>
             </motion.div>
 
             <motion.h1
@@ -174,10 +179,10 @@ export default function Home() {
               style={{ fontWeight: 400 }}
             >
               <span className="block text-[clamp(2rem,5vw,46px)] text-hero-white">
-                Run your Own
+                Deploy AI agents that
               </span>
               <span className="block text-[clamp(2rem,5vw,46px)] text-hero-white">
-                AI Agents
+                actually do the work.
               </span>
             </motion.h1>
 
@@ -186,9 +191,9 @@ export default function Home() {
               transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
               className="text-[20px] leading-[26px] tracking-[-0.1px] text-hero-white/80 max-w-[526px] mt-7 mx-auto"
             >
-              Deploy AI agents for support, sales, and operations in minutes.
-              <br />
-              No coding required. You own your data. Cancel anytime.
+              Pick a runtime, OpenClaw or Hermes, then customize your agent and
+              put support, sales, and ops on autopilot. No code. Your own private
+              instance. Zero vendor lock-in.
             </motion.p>
 
             <motion.div
@@ -199,7 +204,7 @@ export default function Home() {
               <Link href="/login?deploy=true"
                 className="btn-green text-base"
               >
-                Get Started Free
+                Deploy Your First Agent
               </Link>
             </motion.div>
 
@@ -210,6 +215,16 @@ export default function Home() {
             >
               Free plan available &middot; No credit card required
             </motion.p>
+
+            {/* Vision line — frames the long-term thesis, not a shipped feature. */}
+            <motion.p
+              variants={heroContentVariants}
+              transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+              className="mt-8 max-w-[460px] text-xs leading-5 text-hero-white/40"
+            >
+              We&apos;re building toward agentic AI models trained on the
+              real-world work our platform runs every day.
+            </motion.p>
           </motion.div>
 
         </section>
@@ -217,13 +232,22 @@ export default function Home() {
         {/* ─── Living System Sections ─── */}
         <AgentWheel />
         <MissionControlPlanner />
-        <WhySection />
         <CapabilityTimeline />
-        <CaseStudyCarousel />
-        <AgentConfigurator />
-        <PricingElevation />
-        <KnowledgeBaseFAQ />
+        <Features />
+        {/* <AgentConfigurator /> hidden for now */}
+        {/* Integration constellation — central hub orb + tool grid */}
+        <IntegrationConstellation />
+        <Testimonials />
+        <CompetitorComparison />
         <ConvergenceCTA />
+        {/* Trust strip — enable once program memberships + official logos are
+            confirmed (see backed-by.tsx). Intentionally left un-rendered. */}
+        {/* <BackedBy /> */}
+        <PricingElevation />
+        <TrustedCompanies />
+        {/* Ecosystem strip — "powered by" infrastructure; see logo-cloud-section.tsx */}
+        <LogoCloudSection />
+        <KnowledgeBaseFAQ />
       </main>
       <Footer />
     </SmoothScrollProvider>

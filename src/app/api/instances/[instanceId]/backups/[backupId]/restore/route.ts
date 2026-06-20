@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 import { auth } from "@/auth"
+import { getEffectiveUserId } from "@/lib/effective-user"
 import { db, instances, instanceLogs, subscriptions, backupRecords, eq, and } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { canOperateInstance } from "@/lib/instance-access"
@@ -45,18 +46,19 @@ export async function POST(
   }
   const { mode } = parsed.data
   const isAdmin = (session.user as { role?: string }).role === "admin"
+  const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
 
   // ── Locate the backup via its source instance (ownership gate) ──────
   const sourceInstance = await db.query.instances.findFirst({
     where: isAdmin
       ? eq(instances.id, instanceId)
-      : whereUserInstanceVisible(session.user.id, instanceId),
+      : whereUserInstanceVisible(effectiveUserId, instanceId),
   })
   if (!sourceInstance) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 })
   }
   // Restoring is an operation — requires Operator+ on the source agent.
-  if (!isAdmin && !(await canOperateInstance(session.user.id, sourceInstance.id))) {
+  if (!isAdmin && !(await canOperateInstance(effectiveUserId, sourceInstance.id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
   const record = await db.query.backupRecords.findFirst({
@@ -96,13 +98,13 @@ export async function POST(
     const target = await db.query.instances.findFirst({
       where: isAdmin
         ? eq(instances.id, targetId)
-        : whereUserInstanceVisible(session.user.id, targetId),
+        : whereUserInstanceVisible(effectiveUserId, targetId),
     })
     if (!target) {
       return NextResponse.json({ error: "Target agent not found" }, { status: 404 })
     }
     // In-place restore overwrites the target's settings — Operator+ on the target.
-    if (!isAdmin && !(await canOperateInstance(session.user.id, target.id))) {
+    if (!isAdmin && !(await canOperateInstance(effectiveUserId, target.id))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
     if (target.status !== "running" && target.status !== "stopped") {
@@ -255,7 +257,7 @@ export async function POST(
         ownerId,
         createdPlan.creditsPerPeriod,
         planPeriodEnd("month"),
-        `Restore grant — ${createdPlan.name}`,
+        `Restore grant: ${createdPlan.name}`,
         newId,
       )
     } catch (err) {

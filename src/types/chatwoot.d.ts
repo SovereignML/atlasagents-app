@@ -17,6 +17,8 @@ interface ChatwootInstance {
   setCustomAttributes(attributes: Record<string, unknown>): void
   setColorScheme(scheme: "light" | "dark" | "auto"): void
   reset(): void
+  toggle(state?: "open" | "close"): void
+  toggleBubbleVisibility(visibility: "show" | "hide"): void
 }
 
 interface Window {

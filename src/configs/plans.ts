@@ -161,7 +161,7 @@ export const PLANS: readonly PlanConfig[] = [
     // no compute billing (we don't own the box). LLM usage is either metered
     // against the credit wallet (pay-as-you-go) or paid directly via the
     // customer's own API key. serverConfigSlug points at the `byos-managed`
-    // sentinel row so the Instance FKs are satisfied without a Linode plan.
+    // sentinel row so the Instance FKs are satisfied without a managed-VPS plan.
     slug: "byos",
     tier: "byos",
     name: "Bring Your Own Server",
@@ -170,7 +170,7 @@ export const PLANS: readonly PlanConfig[] = [
       "Connect your own server",
       "Full management panel",
       "Deploy & monitor your agent",
-      "Use our OpenRouter credits or your own API key",
+      "Use our managed AI model credits or bring your own API key",
       "Logs, restart, and config controls",
     ],
     stripePriceIdMonthly: process.env.STRIPE_PRICE_BYOS_MONTHLY ?? "",
@@ -188,7 +188,7 @@ export const PLANS: readonly PlanConfig[] = [
 export const PRICING_POSITIONING = {
   headline: "AI Workforce Infrastructure",
   subheadline:
-    "Build, deploy, and scale autonomous AI operations — without managing complexity.",
+    "Build, deploy, and scale autonomous AI operations without managing complexity.",
 } as const
 
 export const OVERAGE_PACKS = [

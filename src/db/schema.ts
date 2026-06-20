@@ -327,6 +327,11 @@ export const instances = pgTable(
       .default(sql`'[]'::jsonb`)
       .notNull(),
     modelTier: text(),
+    // Per-instance model override (OpenRouter slug). NULL → use the tier default
+    // (hermesModel(tier) for Hermes, routeModel(tier).model for OpenClaw). Set by
+    // the user via the Controls "Model" picker; validated against the runtime's
+    // selectable allowlist. See effectiveModel() in src/lib/model-router.ts.
+    modelSlug: text(),
     botToken: text(),
     // SSH host key fingerprint pinned on first successful connect (TOFU).
     // Format: "sha256:<base64>". Subsequent SSH calls verify against this;
@@ -1856,6 +1861,11 @@ export const allowedModels = pgTable("AllowedModel", {
   label: text().notNull(),
   // chat | image | moderation — only chat models are usable as agent brains.
   kind: text().default("chat").notNull(),
+  // Max context window (tokens), synced from the OpenRouter catalog. Gates
+  // Hermes-compatibility: Hermes crash-loops on <64k models, so the per-instance
+  // picker only offers chat models with contextLength >= 64000. NULL = unknown
+  // (not yet synced) → excluded from the Hermes list. See syncModelMetadata().
+  contextLength: integer(),
   enabled: boolean().default(true).notNull(),
   createdAt: now(),
   updatedAt: timestamp({ mode: "date", withTimezone: false })

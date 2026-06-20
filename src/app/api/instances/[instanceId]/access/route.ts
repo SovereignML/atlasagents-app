@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
+import { getEffectiveUserId } from "@/lib/effective-user"
 import { db, instances, memberships, teams, eq } from "@/db"
 import {
   getInstanceAccessLevel,
@@ -23,9 +24,10 @@ export async function GET(
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
+  const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
   const { instanceId } = await params
 
-  const access = await getInstanceAccessLevel(session.user.id, instanceId)
+  const access = await getInstanceAccessLevel(effectiveUserId, instanceId)
   if (!access.teamId) {
     return NextResponse.json({ error: "Agent not found" }, { status: 404 })
   }
@@ -77,6 +79,7 @@ export async function POST(
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
+  const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
   const { instanceId } = await params
   const body = (await req.json().catch(() => ({}))) as { userId?: string; level?: string }
   if (!body.userId || !isAccessLevel(body.level)) {
@@ -87,7 +90,7 @@ export async function POST(
     instanceId,
     granteeUserId: body.userId,
     level: body.level,
-    actorUserId: session.user.id,
+    actorUserId: effectiveUserId,
     mode: "grant",
   })
   if (!result.ok) {

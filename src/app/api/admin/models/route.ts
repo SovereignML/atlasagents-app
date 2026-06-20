@@ -6,6 +6,7 @@ import {
   isAllowedModelKind,
   listAllowedModels,
   removeAllowedModel,
+  syncModelMetadata,
   updateAllowedModel,
 } from "@/lib/allowed-models"
 
@@ -15,9 +16,10 @@ import {
  * enforcement lives in the OpenRouter account settings, so keep both in sync.
  *
  *   GET             — list all rows
- *   POST   {slug, label?, kind?}            — add (or re-enable) a model
- *   PATCH  {slug, label?, kind?, enabled?}  — edit a model
- *   DELETE {slug}                           — remove a model
+ *   POST   {action: "sync"}                                — refresh contextLength from catalog
+ *   POST   {slug, label?, kind?, contextLength?}           — add (or re-enable) a model
+ *   PATCH  {slug, label?, kind?, enabled?}                 — edit a model
+ *   DELETE {slug}                                          — remove a model
  */
 
 export async function GET() {
@@ -30,12 +32,29 @@ export async function POST(req: Request) {
   const guard = await requireAdmin()
   if (!guard.ok) return guard.res
 
-  let body: { slug?: string; label?: string; kind?: string }
+  let body: {
+    action?: string
+    slug?: string
+    label?: string
+    kind?: string
+    contextLength?: number | null
+  }
   try {
     body = await req.json()
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
   }
+
+  // Refresh contextLength for every row from the public OpenRouter catalog.
+  if (body.action === "sync") {
+    try {
+      const result = await syncModelMetadata()
+      return NextResponse.json(result)
+    } catch (e) {
+      return NextResponse.json({ error: String(e) }, { status: 502 })
+    }
+  }
+
   const slug = body.slug?.trim() ?? ""
   if (!slug) {
     return NextResponse.json({ error: "slug is required" }, { status: 400 })
@@ -53,6 +72,8 @@ export async function POST(req: Request) {
       slug,
       label: body.label?.trim() || slug,
       kind,
+      contextLength:
+        typeof body.contextLength === "number" ? body.contextLength : null,
     })
     return NextResponse.json({ model })
   } catch (e) {

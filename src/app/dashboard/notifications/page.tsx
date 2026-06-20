@@ -2,15 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Check, Trash2 } from "lucide-react"
+import { Bell, Check, Coins, OctagonAlert, Rocket, TriangleAlert, Activity, Trash2 } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
 import { Skeleton } from "@/components/ui/skeleton"
-import { CATEGORY_LABELS, type NotificationCategory } from "@/lib/notifications/types"
 import type { NotificationItem } from "@/components/notifications/notification-bell"
 import { cn } from "@/lib/utils"
 
@@ -25,6 +24,37 @@ function formatWhen(iso: string): string {
   })
 }
 
+type Filter = "all" | "alerts" | "billing"
+
+const FILTERS: { key: Filter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "alerts", label: "Alerts" },
+  { key: "billing", label: "Billing" },
+]
+
+// Failure events get an incident icon + destructive tint regardless of category,
+// so a failed deployment never looks like the "Agent is live" success notification.
+const FAILURE_TYPES = new Set(["provision_failed", "payment_failed"])
+
+// Visual tile: icon + tint, keyed off the notification type (failures first), then category.
+function categoryVisual(category: string, type: string): { Icon: LucideIcon; tile: string } {
+  if (FAILURE_TYPES.has(type)) {
+    return { Icon: OctagonAlert, tile: "bg-destructive/15 text-destructive" }
+  }
+  switch (category) {
+    case "billing":
+      return { Icon: Coins, tile: "bg-primary/15 text-primary" }
+    case "provisioning":
+      return { Icon: Rocket, tile: "bg-emerald-500/15 text-emerald-500" }
+    case "monitoring":
+      return { Icon: Activity, tile: "bg-sky-400/15 text-sky-400" }
+    case "security":
+      return { Icon: TriangleAlert, tile: "bg-amber-400/15 text-amber-400" }
+    default:
+      return { Icon: Bell, tile: "bg-muted text-muted-foreground" }
+  }
+}
+
 export default function NotificationsPage() {
   const router = useRouter()
   const [items, setItems] = useState<NotificationItem[]>([])
@@ -32,6 +62,7 @@ export default function NotificationsPage() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(false)
   const [unread, setUnread] = useState(0)
+  const [filter, setFilter] = useState<Filter>("all")
 
   const fetchPage = useCallback(async (before?: string) => {
     const qs = new URLSearchParams({ limit: String(PAGE_SIZE) })
@@ -98,11 +129,24 @@ export default function NotificationsPage() {
     if (n.url) router.push(n.url)
   }
 
+  // Client-side filter over already-loaded items only. Does not touch the
+  // fetch contract, so "Load more" pagination keeps working unchanged.
+  const visibleItems = items.filter((n) => {
+    switch (filter) {
+      case "alerts":
+        return n.category === "security"
+      case "billing":
+        return n.category === "billing"
+      default:
+        return true
+    }
+  })
+
   return (
     <PageContainer>
       <PageHeader
         title="Notifications"
-        description="Your alerts across all channels"
+        description="Alerts, deploys, and billing events across your workspace."
         actions={
           <>
             {unread > 0 && (
@@ -140,30 +184,66 @@ export default function NotificationsPage() {
         </Empty>
       ) : (
         <>
-          <Card>
-            <CardContent className="divide-y p-0">
-              {items.map((n) => (
+          <div className="flex flex-wrap gap-2">
+            {FILTERS.map((f) => {
+              const active = filter === f.key
+              return (
                 <button
-                  key={n.id}
-                  onClick={() => handleClick(n)}
+                  key={f.key}
+                  type="button"
+                  onClick={() => setFilter(f.key)}
                   className={cn(
-                    "flex w-full flex-col gap-1 px-4 py-3 text-left transition-colors hover:bg-muted/50",
-                    !n.readAt && "bg-muted/30",
+                    "rounded-full px-4 py-2 text-sm transition-colors",
+                    active
+                      ? "bg-primary font-semibold text-primary-foreground"
+                      : "border border-border bg-secondary text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  <div className="flex items-center gap-2">
-                    {!n.readAt && <span className="size-2 shrink-0 rounded-full bg-primary" />}
-                    <span className="flex-1 font-medium">{n.title}</span>
-                    <Badge variant="outline" className="shrink-0 text-[10px]">
-                      {CATEGORY_LABELS[n.category as NotificationCategory] ?? n.category}
-                    </Badge>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {formatWhen(n.createdAt)}
-                    </span>
-                  </div>
-                  <span className="text-sm text-muted-foreground">{n.message}</span>
+                  {f.label}
                 </button>
-              ))}
+              )
+            })}
+          </div>
+
+          <Card>
+            <CardContent className="divide-y p-0">
+              {visibleItems.length === 0 ? (
+                <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  No notifications match this filter.
+                </p>
+              ) : (
+                visibleItems.map((n) => {
+                  const { Icon, tile } = categoryVisual(n.category, n.type)
+                  return (
+                    <button
+                      key={n.id}
+                      onClick={() => handleClick(n)}
+                      className={cn(
+                        "flex w-full gap-3.5 border-l-2 border-l-transparent px-4 py-3 text-left transition-colors hover:bg-muted/50",
+                        !n.readAt && "border-l-primary bg-primary/[0.04]",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "flex size-9 shrink-0 items-center justify-center rounded-[10px]",
+                          tile,
+                        )}
+                      >
+                        <Icon className="size-4" />
+                      </span>
+                      <div className="flex min-w-0 flex-1 flex-col gap-1">
+                        <div className="flex items-start gap-2">
+                          <span className="min-w-0 flex-1 font-medium">{n.title}</span>
+                          <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                            {formatWhen(n.createdAt)}
+                          </span>
+                        </div>
+                        <span className="text-sm text-muted-foreground">{n.message}</span>
+                      </div>
+                    </button>
+                  )
+                })
+              )}
             </CardContent>
           </Card>
           {hasMore && (

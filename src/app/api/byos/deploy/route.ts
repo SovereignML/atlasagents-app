@@ -134,7 +134,7 @@ async function handleByosDeploy(req: NextRequest) {
   }
   if (!serverConfig) {
     return NextResponse.json(
-      { error: "BYOS server config missing — run the seed (npm run db:seed)" },
+      { error: "BYOS server config missing. Run the seed (npm run db:seed)" },
       { status: 500 },
     )
   }
@@ -245,7 +245,7 @@ async function handleByosDeploy(req: NextRequest) {
           price_data: {
             currency: "usd",
             product_data: {
-              name: `${BRANDING.name} — Bring Your Own Server`,
+              name: `${BRANDING.name} Bring Your Own Server`,
               description: `Management panel for your own server · ${
                 llmMode === "own_key" ? "your own API key" : "pay-as-you-go OpenRouter credits"
               }`,

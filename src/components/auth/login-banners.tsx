@@ -1,6 +1,9 @@
 "use client"
 
 import { useSearchParams } from "next/navigation"
+import { CircleCheck } from "lucide-react"
+
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 export function LoginBanners() {
   const searchParams = useSearchParams()
@@ -11,19 +14,28 @@ export function LoginBanners() {
   return (
     <>
       {reset && (
-        <div className="w-full max-w-md p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm text-center mb-4">
-          Password reset successful. You can now sign in with your new password.
-        </div>
+        <Alert variant="success" className="mb-4 flex w-full max-w-md items-center justify-center gap-2 text-center">
+          <CircleCheck className="shrink-0" />
+          <AlertDescription className="text-center">
+            Password reset successful. You can now sign in with your new password.
+          </AlertDescription>
+        </Alert>
       )}
       {registered && (
-        <div className="w-full max-w-md p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm text-center mb-4">
-          Account created. Sign in to continue.
-        </div>
+        <Alert variant="success" className="mb-4 flex w-full max-w-md items-center justify-center gap-2 text-center">
+          <CircleCheck className="shrink-0" />
+          <AlertDescription className="text-center">
+            Account created. Welcome! Sign in to get started.
+          </AlertDescription>
+        </Alert>
       )}
       {verified && (
-        <div className="w-full max-w-md p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm text-center mb-4">
-          Email verified. You can now sign in.
-        </div>
+        <Alert variant="success" className="mb-4 flex w-full max-w-md items-center justify-center gap-2 text-center">
+          <CircleCheck className="shrink-0" />
+          <AlertDescription className="text-center">
+            Email verified. You can now sign in.
+          </AlertDescription>
+        </Alert>
       )}
     </>
   )

@@ -29,7 +29,9 @@ const METRICS: { value: string; label: string; defaultComparator: "gt" | "lt" }[
 ]
 
 const selectClass =
-  "h-9 rounded-none border border-input bg-transparent px-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+  "h-11 rounded-[10px] border border-border bg-secondary px-3.5 py-2.5 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+
+const optionClass = "bg-popover text-popover-foreground"
 
 function describe(r: Rule, agents: AgentOption[]): string {
   const scope = r.instanceId
@@ -179,7 +181,7 @@ export function AlertRules({
             onChange={(e) => onMetricChange(e.target.value)}
           >
             {METRICS.map((m) => (
-              <option key={m.value} value={m.value}>
+              <option key={m.value} value={m.value} className={optionClass}>
                 {m.label}
               </option>
             ))}
@@ -193,8 +195,12 @@ export function AlertRules({
                 value={comparator}
                 onChange={(e) => setComparator(e.target.value as "gt" | "lt")}
               >
-                <option value="gt">greater than</option>
-                <option value="lt">less than</option>
+                <option value="gt" className={optionClass}>
+                  greater than
+                </option>
+                <option value="lt" className={optionClass}>
+                  less than
+                </option>
               </select>
               <Input
                 aria-label="Threshold"
@@ -213,15 +219,17 @@ export function AlertRules({
             value={instanceId}
             onChange={(e) => setInstanceId(e.target.value)}
           >
-            <option value="">All team agents</option>
+            <option value="" className={optionClass}>
+              All team agents
+            </option>
             {agents.map((a) => (
-              <option key={a.id} value={a.id}>
+              <option key={a.id} value={a.id} className={optionClass}>
                 {a.name}
               </option>
             ))}
           </select>
 
-          <Button size="sm" onClick={create} disabled={saving}>
+          <Button size="sm" className="h-11" onClick={create} disabled={saving}>
             {saving ? "Adding…" : "Add rule"}
           </Button>
         </div>

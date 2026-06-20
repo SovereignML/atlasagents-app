@@ -21,7 +21,7 @@ const faqItems = [
   {
     question: "What is SovereignML?",
     answer:
-      "SovereignML is an AI operations platform that lets you deploy, manage, and scale intelligent agents that automate real business tasks — from customer support to DevOps to content generation. You pick the agent type, configure it, and it runs.",
+      "SovereignML is an AI operations platform that lets you deploy, manage, and scale intelligent agents that automate real business tasks: from customer support to DevOps to content generation. You pick the agent type, configure it, and it runs.",
   },
   {
     question: "Do I need AI/ML expertise to use SovereignML?",
@@ -95,7 +95,7 @@ const sections = [
           {[
             "Create an account at sovereignml.com/register",
             "From your dashboard, click Deploy Agent",
-            "Name your project — a URL slug is auto-generated",
+            "Name your project. A URL slug is auto-generated",
             "Select a billing interval (monthly or yearly)",
             "Pick a compute tier based on your workload",
             "Optionally add SSH keys or extra storage",

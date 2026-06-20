@@ -18,28 +18,40 @@ import Link from "next/link";
  *   - A conic-gradient mask hides the bottom half of the arc.
  *   - Custom spring easing via CSS  transition-duration: 1s.
  *
- * We use SovereignML's 8 agent-type icons from the Antimetal assets folder.
+ * We render third-party integration logos from the assets folder.
  */
 
-const INTEGRATIONS = [
-  { src: "github",       alt: "Scanning GitHub repos",         hasDark: true,  padding: "16px" },
-  { src: "slack",        alt: "Connected Slack workspace",     hasDark: false, padding: "16px" },
-  { src: "aws",          alt: "Connected AWS account",         hasDark: true,  padding: "12px" },
-  { src: "vercel",       alt: "Connected Vercel account",      hasDark: true,  padding: "16px" },
-  { src: "sentry",       alt: "Tracking Sentry errors",        hasDark: true,  padding: "12px" },
-  { src: "linear",       alt: "Syncing Linear issues",         hasDark: true,  padding: "16px" },
-  { src: "gcp",          alt: "Connected GCP account",         hasDark: false, padding: "12px" },
-  { src: "cloudflare",   alt: "Connected Cloudflare account",  hasDark: false, padding: "12px" },
-  { src: "pagerduty",    alt: "Syncing PagerDuty incidents",   hasDark: false, padding: "12px" },
-  { src: "prometheus",   alt: "Ingesting Prometheus metrics",  hasDark: false, padding: "12px" },
-  { src: "azure",        alt: "Connected Azure account",       hasDark: false, padding: "12px" },
-  { src: "planetscale",  alt: "Connected PlanetScale account", hasDark: false, padding: "12px" },
-  { src: "wiz",          alt: "Scanning Wiz findings",         hasDark: false, padding: "16px" },
-  { src: "oracle",       alt: "Connected OCI account",         hasDark: false, padding: "12px" },
+// Each icon points at a full image path. `dark` is optional — when present the
+// node renders a separate logo in dark mode, otherwise the single `light` image
+// is used in both themes (the new colour SVGs read fine on either background).
+// `scale` optionally shrinks an icon's image (the runtime forces a flat 10%
+// padding, so it's the lever for edge-to-edge logos that otherwise read large).
+type Integration = { light: string; dark?: string; alt: string; padding: string; scale?: number };
+
+const INTEGRATIONS: Integration[] = [
+  { light: "/assets/integrations/github.avif",     dark: "/assets/integrations/github-dark.avif", alt: "GitHub",       padding: "16px" },
+  { light: "/assets/integrations/slack.avif",      alt: "Slack",        padding: "16px" },
+  { light: "/assets/icons/n8n-color.svg",          alt: "n8n",          padding: "16px" },
+  { light: "/assets/integrations/vercel.avif",     dark: "/assets/integrations/vercel-dark.avif", alt: "Vercel",       padding: "16px" },
+  { light: "/assets/integrations/sentry.avif",     dark: "/assets/integrations/sentry-dark.avif", alt: "Sentry",       padding: "12px" },
+  { light: "/assets/icons/Jira.svg",               alt: "Jira",         padding: "14px" },
+  { light: "/assets/integrations/linear.avif",     dark: "/assets/integrations/linear-dark.avif", alt: "Linear",       padding: "16px" },
+  { light: "/assets/icons/meta-color.svg",         alt: "Meta",         padding: "14px" },
+  { light: "/assets/integrations/gcp.avif",        alt: "Google Cloud", padding: "12px" },
+  { light: "/assets/icons/discord.svg",            alt: "Discord",      padding: "14px" },
+  { light: "/assets/integrations/cloudflare.avif", alt: "Cloudflare",   padding: "12px" },
+  { light: "/assets/icons/notion.svg",             alt: "Notion",       padding: "16px", scale: 0.82 },
+  { light: "/assets/integrations/planetscale.avif", alt: "PlanetScale", padding: "12px" },
+  { light: "/assets/icons/shopify.svg",            alt: "Shopify",      padding: "14px", scale: 0.82 },
+  { light: "/assets/icons/spaceship.svg",          alt: "Spaceship",    padding: "16px", scale: 0.82 },
 ];
 
 const N = INTEGRATIONS.length;
 const STEP = 360 / N;
+
+// The wheel advances one step every TICK_MS. The steady centre logo flashes a
+// shine on each tick, in parallel with the new icon sliding into place.
+const TICK_MS = 2500;
 
 export function AgentWheel() {
   const reduceMotion = useReducedMotion();
@@ -47,6 +59,7 @@ export function AgentWheel() {
   const popupTextRef = useRef<HTMLSpanElement>(null);
   const popupImgLightRef = useRef<HTMLImageElement>(null);
   const popupImgDarkRef = useRef<HTMLImageElement>(null);
+  const shineRef = useRef<HTMLSpanElement>(null);
   const itemsRef = useRef<
     {
       wrapper: HTMLDivElement;
@@ -142,8 +155,18 @@ export function AgentWheel() {
         item.wrapper.style.transform = `translate(-50%, -50%) rotate(${item.currentAngle}deg)`;
         item.inner.style.transform = `rotate(${-item.currentAngle}deg)`;
       });
+
+      // Flash the hub shine in parallel with the incoming icon. Re-add the
+      // class after a forced reflow so the keyframes restart every tick.
+      const shine = shineRef.current;
+      if (shine) {
+        shine.classList.remove("is-shining");
+        void shine.offsetWidth;
+        shine.classList.add("is-shining");
+      }
+
       setTimeout(updateSizes, 50);
-    }, 2500);
+    }, TICK_MS);
 
     return () => clearInterval(interval);
   }, [reduceMotion]);
@@ -180,7 +203,7 @@ export function AgentWheel() {
             href="/login?deploy=true"
             className="btn-integration-get-started max-lg:mx-auto"
           >
-            Get started
+            Connect your stack
           </Link>
 
           {/* ── Popup pill (desktop only) ── */}
@@ -194,7 +217,7 @@ export function AgentWheel() {
                       <img
                         ref={popupImgLightRef}
                         decoding="async"
-                        alt="Scanning GitHub repos"
+                        alt="GitHub"
                         className="w-6 h-6 dark:hidden"
                         loading="lazy"
                         src="/assets/integrations/github.avif"
@@ -203,14 +226,14 @@ export function AgentWheel() {
                       <img
                         ref={popupImgDarkRef}
                         decoding="async"
-                        alt="Scanning GitHub repos"
+                        alt="GitHub"
                         className="w-6 h-6 hidden dark:block"
                         loading="lazy"
                         src="/assets/integrations/github-dark.avif"
                       />
                     </div>
                     <span ref={popupTextRef} className="text-text-loud text-sm font-medium">
-                      Scanning GitHub repos
+                      GitHub
                     </span>
                   </div>
                 </div>
@@ -234,11 +257,56 @@ export function AgentWheel() {
           className="int-center-hub absolute rounded-full p-4 lg:p-5"
           style={{ border: "1px solid var(--color-border-faint)" }}
         >
-          <div className="relative w-[90px] h-[90px] lg:w-[120px] lg:h-[120px] mx-auto flex items-center justify-center rounded-full shadow-lg"
+          <div className="relative w-[117px] h-[117px] lg:w-[156px] lg:h-[156px] mx-auto flex items-center justify-center rounded-full shadow-lg"
             style={{ background: "var(--card-bg, rgba(255,255,255,0.06))" }}
           >
-            {/* SovereignML Logo text mark */}
-            <span className="text-text-loud font-bold text-base lg:text-lg tracking-tight select-none">S</span>
+            {/* Same soft halo the orbiting icon nodes use, so the hub reads as
+                one of them — just held steady at the centre. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              decoding="async"
+              alt=""
+              aria-hidden
+              className="pointer-events-none absolute -left-full -top-full max-w-none dark:hidden"
+              style={{ width: "300%", height: "300%" }}
+              src="/assets/integrations/logo-background.avif"
+            />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              decoding="async"
+              alt=""
+              aria-hidden
+              className="pointer-events-none absolute -left-full -top-full hidden max-w-none dark:block"
+              style={{ width: "300%", height: "300%" }}
+              src="/assets/integrations/logo-background-dark.avif"
+            />
+
+            {/* SovereignML brand mark — navy on light, white on dark */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/assets/icons/Blue-Navy-SovereignML.png"
+              alt="SovereignML"
+              draggable={false}
+              className="relative z-10 block w-[61px] h-auto select-none object-contain lg:w-[79px] dark:hidden"
+            />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/assets/icons/SovereignML-logo-white.svg"
+              alt=""
+              aria-hidden
+              draggable={false}
+              className="relative z-10 hidden w-[61px] h-auto select-none object-contain lg:w-[79px] dark:block"
+            />
+
+            {/* Shine — a light sweep across the hub, retriggered from the wheel
+                tick loop each time a new icon slides in. Clipped to the circle;
+                no shine under reduced motion (the tick loop doesn't run). */}
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-0 z-20 overflow-hidden rounded-full"
+            >
+              <span ref={shineRef} className="int-hub-shine absolute inset-0" />
+            </span>
           </div>
         </div>
 
@@ -262,9 +330,13 @@ export function AgentWheel() {
             {/* ── All integration icon nodes ── */}
             {INTEGRATIONS.map((item, i) => {
               const initialAngle = i * STEP + 90;
+              // The custom SVG logos run edge-to-edge in their viewBox, so the
+              // img's rounded-full clip nips their square corners. Skip the
+              // circular clip for them so they render whole.
+              const isCustomIcon = item.light.includes("/assets/icons/");
               return (
                 <div
-                  key={item.src}
+                  key={item.alt}
                   className="int-circle-transition-outer absolute top-1/2 left-1/2"
                   style={{
                     transform: `translate(-50%, -50%) rotate(${initialAngle}deg)`,
@@ -304,7 +376,7 @@ export function AgentWheel() {
                     />
 
                     {/* The icon itself */}
-                    {item.hasDark ? (
+                    {item.dark ? (
                       <>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
@@ -316,7 +388,7 @@ export function AgentWheel() {
                             transition: "filter 450ms cubic-bezier(0.16,1,0.3,1), padding 450ms cubic-bezier(0.16,1,0.3,1)",
                           }}
                           loading="lazy"
-                          src={`/assets/integrations/${item.src}.avif`}
+                          src={item.light}
                         />
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
@@ -328,7 +400,7 @@ export function AgentWheel() {
                             transition: "filter 450ms cubic-bezier(0.16,1,0.3,1), padding 450ms cubic-bezier(0.16,1,0.3,1)",
                           }}
                           loading="lazy"
-                          src={`/assets/integrations/${item.src}-dark.avif`}
+                          src={item.dark}
                         />
                       </>
                     ) : (
@@ -336,13 +408,14 @@ export function AgentWheel() {
                       <img
                         decoding="async"
                         alt={item.alt}
-                        className="int-circle-logo relative h-full w-full rounded-full"
+                        className={`int-circle-logo relative h-full w-full${isCustomIcon ? "" : " rounded-full"}`}
                         style={{
                           padding: item.padding,
+                          transform: item.scale ? `scale(${item.scale})` : undefined,
                           transition: "filter 450ms cubic-bezier(0.16,1,0.3,1), padding 450ms cubic-bezier(0.16,1,0.3,1)",
                         }}
                         loading="lazy"
-                        src={`/assets/integrations/${item.src}.avif`}
+                        src={item.light}
                       />
                     )}
                   </div>

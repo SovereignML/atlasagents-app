@@ -39,7 +39,7 @@ function healthVariant(status: string | undefined): "default" | "secondary" | "d
 }
 
 function usd(n: number | null | undefined): string {
-  if (n == null) return "—"
+  if (n == null) return "-"
   return `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
 }
 
@@ -138,7 +138,7 @@ export function ProvidersClient({
                 <p>
                   Success rate:{" "}
                   <span className="font-mono">
-                    {p.successRate != null ? `${(p.successRate * 100).toFixed(0)}%` : "—"}
+                    {p.successRate != null ? `${(p.successRate * 100).toFixed(0)}%` : "-"}
                   </span>{" "}
                   <span className="text-xs text-muted-foreground">({p.provisioningSamples} samples)</span>
                 </p>
@@ -201,10 +201,10 @@ export function ProvidersClient({
                       </TableCell>
                       <TableCell className="text-xs">{l.workloadType ?? "general"}</TableCell>
                       <TableCell className="text-xs">
-                        {l.chosenProviderId ? providerNames[l.chosenProviderId] ?? l.chosenProviderId : "—"}
+                        {l.chosenProviderId ? providerNames[l.chosenProviderId] ?? l.chosenProviderId : "-"}
                       </TableCell>
                       <TableCell className="font-mono text-xs">
-                        {l.score != null ? l.score.toFixed(3) : "—"}
+                        {l.score != null ? l.score.toFixed(3) : "-"}
                       </TableCell>
                       <TableCell>
                         <Badge
@@ -222,7 +222,7 @@ export function ProvidersClient({
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {rejected.length === 0
-                          ? "—"
+                          ? "-"
                           : rejected
                               .map((r) => `${providerNames[r.providerId] ?? r.providerId}: ${r.reason}`)
                               .join("; ")}

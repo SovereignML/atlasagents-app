@@ -5,10 +5,10 @@ import { motion, useReducedMotion } from "framer-motion";
 import { easing } from "@/lib/motion";
 
 const STATUS_AGENTS = [
-  { name: "Support Agent", status: "active", uptime: "99.97%" },
-  { name: "DevOps Agent", status: "active", uptime: "99.99%" },
-  { name: "Sales Agent", status: "active", uptime: "99.94%" },
-  { name: "Content Agent", status: "idle", uptime: "100%" },
+  { name: "Support Agent", status: "active", uptime: "99.97%", load: 72 },
+  { name: "DevOps Agent", status: "active", uptime: "99.99%", load: 41 },
+  { name: "Sales Agent", status: "active", uptime: "99.94%", load: 58 },
+  { name: "Content Agent", status: "idle", uptime: "99.95%", load: 12 }, // {{TODO: confirm real figure}}
 ];
 
 const TASK_FEED = [
@@ -33,10 +33,17 @@ const DECISION_LOG = [
   { time: "30s ago", msg: "Escalate: VIP customer detected", agent: "Support" },
 ];
 
+// Static bar heights for the throughput sparkline (percent of track height).
+const SPARK = [38, 52, 44, 61, 49, 73, 58, 81, 66, 92, 74, 88];
+
 export function MissionControlPlanner() {
   const reduceMotion = useReducedMotion();
-  const [visibleTasks, setVisibleTasks] = useState(TASK_FEED.slice(0, 4));
-  const taskIndex = useRef(4);
+  const [visibleTasks, setVisibleTasks] = useState(TASK_FEED.slice(0, 5));
+  const taskIndex = useRef(5);
+
+  // Live "resolved today" counter — starts from a stable base (SSR-safe) and
+  // ticks up after mount so the board feels live without a hydration mismatch.
+  const [resolved, setResolved] = useState(1284);
 
   const rotateTasks = useCallback(() => {
     setVisibleTasks((prev) => {
@@ -44,14 +51,22 @@ export function MissionControlPlanner() {
       taskIndex.current++;
       return next;
     });
+    setResolved((n) => n + 1);
   }, []);
 
   useEffect(() => {
-    // Respect "Reduce Motion": keep the task feed static (no auto-rotation).
+    // Respect "Reduce Motion": keep the feed and counter static.
     if (reduceMotion) return;
     const interval = setInterval(rotateTasks, 2800);
     return () => clearInterval(interval);
   }, [rotateTasks, reduceMotion]);
+
+  const metrics = [
+    { label: "Resolved today", value: resolved.toLocaleString(), live: true },
+    { label: "Avg resolution", value: "38s" },
+    { label: "Agents active", value: "3 / 4" },
+    { label: "Fleet uptime", value: "99.97%" },
+  ];
 
   return (
     <section id="planner" className="relative py-32 overflow-hidden">
@@ -77,7 +92,7 @@ export function MissionControlPlanner() {
             Your agents are working right now.
           </h2>
           <p className="text-text-secondary text-lg max-w-[500px] mx-auto">
-            Real-time view of agent activity, decisions, and system health.
+            Watch every task, decision, and health check as it happens.
           </p>
         </motion.div>
 
@@ -89,57 +104,110 @@ export function MissionControlPlanner() {
           className="glass rounded-3xl p-1"
         >
           <div className="rounded-[22px] bg-background-plain/80 backdrop-blur-sm border border-border-ghost overflow-hidden">
+            {/* Console title bar */}
             <div className="flex items-center gap-2 px-5 py-3 border-b border-border-muted">
               <div className="w-2.5 h-2.5 rounded-full bg-red-400/60" />
               <div className="w-2.5 h-2.5 rounded-full bg-yellow-400/60" />
               <div className="w-2.5 h-2.5 rounded-full bg-green-400/60" />
-              <span className="ml-3 text-[11px] font-mono text-text-muted">mission-control — live</span>
+              <span className="ml-3 text-[11px] font-mono text-text-muted">mission-control: live</span>
               <div className="ml-auto flex items-center gap-2">
                 <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
                 <span className="text-[10px] font-mono text-green-400/80">CONNECTED</span>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-border-muted">
+            {/* Metric strip */}
+            <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-y md:divide-y-0 divide-border-muted border-b border-border-muted">
+              {metrics.map((m) => (
+                <div key={m.label} className="px-5 py-4">
+                  <p className="text-[10px] font-mono uppercase tracking-widest text-text-muted mb-1.5">{m.label}</p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl font-bold tracking-[-1px] text-text-loud tabular-nums">{m.value}</span>
+                    {m.live && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-accent-blue-rest/10 px-1.5 py-0.5">
+                        <span className="size-1 rounded-full bg-accent-blue-rest animate-pulse" />
+                        <span className="text-[9px] font-mono uppercase text-accent-blue-rest">live</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Board: roster · live stream · decision log */}
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,240px)_minmax(0,1.5fr)_minmax(0,1fr)] divide-y lg:divide-y-0 lg:divide-x divide-border-muted">
+              {/* Agent roster with utilization bars */}
               <div className="p-5">
-                <p className="text-[10px] font-mono uppercase tracking-widest text-text-muted mb-4">Agent Status</p>
-                <div className="space-y-3">
+                <p className="text-[10px] font-mono uppercase tracking-widest text-text-muted mb-4">Agent Roster</p>
+                <div className="space-y-4">
                   {STATUS_AGENTS.map((a) => (
-                    <div key={a.name} className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className={`w-1.5 h-1.5 rounded-full ${a.status === "active" ? "bg-green-400 animate-pulse" : "bg-text-muted opacity-40"}`} />
-                        <span className="text-xs text-text-loud font-medium">{a.name}</span>
+                    <div key={a.name}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-1.5 h-1.5 rounded-full ${a.status === "active" ? "bg-green-400 animate-pulse" : "bg-text-muted opacity-40"}`} />
+                          <span className="text-xs text-text-loud font-medium">{a.name}</span>
+                        </div>
+                        <span className="text-[10px] font-mono text-text-muted">{a.uptime}</span>
                       </div>
-                      <span className="text-[10px] font-mono text-text-muted">{a.uptime}</span>
+                      <div className="h-1 rounded-full bg-background-loud overflow-hidden">
+                        <motion.div
+                          className={`h-full rounded-full ${a.status === "active" ? "bg-accent-blue-rest" : "bg-text-muted/40"}`}
+                          initial={{ width: 0 }}
+                          whileInView={{ width: `${a.load}%` }}
+                          viewport={{ once: true }}
+                          transition={{ duration: 0.9, ease: easing.outExpo }}
+                        />
+                      </div>
                     </div>
+                  ))}
+                </div>
+
+                {/* Throughput sparkline */}
+                <p className="text-[10px] font-mono uppercase tracking-widest text-text-muted mt-6 mb-3">Throughput / min</p>
+                <div className="flex items-end gap-1 h-12">
+                  {SPARK.map((h, i) => (
+                    <motion.span
+                      key={i}
+                      className="flex-1 rounded-sm bg-accent-blue-rest/30"
+                      initial={{ height: 0 }}
+                      whileInView={{ height: `${h}%` }}
+                      viewport={{ once: true }}
+                      transition={{ duration: 0.6, delay: i * 0.03, ease: easing.outExpo }}
+                    />
                   ))}
                 </div>
               </div>
 
+              {/* Live task stream — the dominant pane */}
               <div className="p-5">
-                <p className="text-[10px] font-mono uppercase tracking-widest text-text-muted mb-4">Active Tasks</p>
-                <div className="space-y-2.5 overflow-hidden">
+                <div className="flex items-center justify-between mb-4">
+                  <p className="text-[10px] font-mono uppercase tracking-widest text-text-muted">Live Task Stream</p>
+                  <span className="text-[10px] font-mono text-accent-blue-rest/70">tail -f</span>
+                </div>
+                <div className="space-y-3 overflow-hidden">
                   {visibleTasks.map((task, i) => (
                     <motion.div
                       key={`${task}-${i}`}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.4, ease: easing.outExpo }}
-                      className="flex items-start gap-2"
+                      className="flex items-start gap-2.5 rounded-lg border border-border-muted bg-background-faint px-3 py-2"
                     >
                       <span className="text-accent-blue-rest font-mono text-[10px] mt-0.5 shrink-0">&gt;</span>
                       <span className="text-xs text-text-secondary leading-relaxed">{task}</span>
                     </motion.div>
                   ))}
-                  <div className="flex items-center gap-1 mt-1">
+                  <div className="flex items-center gap-1 mt-1 pl-1">
                     <span className="w-1.5 h-3 bg-accent-blue-rest animate-[type-cursor_1s_step-end_infinite]" />
                   </div>
                 </div>
               </div>
 
+              {/* Decision log */}
               <div className="p-5">
                 <p className="text-[10px] font-mono uppercase tracking-widest text-text-muted mb-4">Decision Log</p>
-                <div className="space-y-3">
+                <div className="relative space-y-4 pl-4">
+                  <span aria-hidden className="absolute left-[3px] top-1 bottom-1 w-px bg-border-muted" />
                   {DECISION_LOG.slice(0, 5).map((d, i) => (
                     <motion.div
                       key={i}
@@ -147,8 +215,9 @@ export function MissionControlPlanner() {
                       whileInView={{ opacity: 1 }}
                       viewport={{ once: true }}
                       transition={{ delay: i * 0.1 }}
-                      className="group"
+                      className="relative"
                     >
+                      <span aria-hidden className="absolute -left-4 top-1 size-1.5 rounded-full bg-accent-blue-rest" />
                       <div className="flex items-center gap-2 mb-0.5">
                         <span className="text-[9px] font-mono text-text-muted">{d.time}</span>
                         <span className="text-[9px] font-mono text-accent-blue-rest opacity-60">{d.agent}</span>

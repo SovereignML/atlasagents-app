@@ -19,7 +19,7 @@ export default async function ByosConnectPage() {
     <PageContainer>
       <PageHeader
         title="Connect your server"
-        description="Bring your own server — we install, run, and manage the OpenClaw agent on it for a flat $9/mo."
+        description="Bring your own server. We install, run, and manage the OpenClaw agent on it for a flat $9/mo."
       />
       <ByosConnectForm
         fleetPublicKey={fleetPublicKey}

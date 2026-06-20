@@ -64,14 +64,14 @@ export function PricingMarketingSection({ compact = false }: Props) {
                 <h3 className="text-xl font-bold">{BYOS_PLAN.name}</h3>
               </div>
               <p className="mt-2 text-text-secondary">
-                Already have a server? We act as your management panel — deploy,
+                Already have a server? We act as your management panel: deploy,
                 monitor, restart, and configure your agent on infrastructure you
                 own. Flat fee, no compute charges.
               </p>
               <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:gap-6 text-sm text-text-loud">
                 <span className="flex items-center gap-2">
-                  <Wallet className="w-4 h-4 text-primary" /> Use our OpenRouter
-                  credits (pay-as-you-go)
+                  <Wallet className="w-4 h-4 text-primary" /> Use our managed AI
+                  model credits (pay-as-you-go)
                 </span>
                 <span className="flex items-center gap-2">
                   <KeyRound className="w-4 h-4 text-primary" /> Or bring your own

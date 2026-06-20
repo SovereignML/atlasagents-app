@@ -16,6 +16,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db, instances, agentEvents, and, eq, desc, lt } from "@/db"
 import { auth } from "@/auth"
+import { getEffectiveUserId } from "@/lib/effective-user"
 import { timingSafeBearerEquals } from "@/lib/cron-auth"
 import { decryptSecret } from "@/lib/crypto-secret"
 import { agentEventsBatchSchema } from "@/lib/validations"
@@ -39,10 +40,11 @@ export async function GET(
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
+  const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
   const { instanceId } = await params
 
   const visible = await db.query.instances.findFirst({
-    where: whereUserInstanceVisible(session.user.id, instanceId),
+    where: whereUserInstanceVisible(effectiveUserId, instanceId),
     columns: { id: true },
   })
   if (!visible) return NextResponse.json({ error: "Not found" }, { status: 404 })

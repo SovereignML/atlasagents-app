@@ -139,7 +139,7 @@ export default function AdminNotificationsPage() {
                         <TableCell>
                           <div>
                             <div className="font-medium text-foreground">
-                              {n.user.name || "—"}
+                              {n.user.name || "-"}
                             </div>
                             <div className="text-xs text-muted-foreground">
                               {n.user.email}

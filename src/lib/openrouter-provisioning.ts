@@ -1,9 +1,12 @@
 // Thin wrapper around OpenRouter's Provisioning API.
 //
 // Used by the provisioner to mint a runtime API key per OpenClaw instance
-// (label `sovereign-<instanceId>`), and by the reconciler to revoke
-// orphaned keys. Mirrors the shape of src/lib/cloudflare.ts: a single
-// authenticated fetch helper plus typed verbs.
+// (label `Sovereign-OpenClaw-<slug>`, human-readable in the OpenRouter
+// dashboard), and by the reconciler to revoke orphaned keys. The reconciler
+// matches keys by their persisted keyId (`instances.openRouterKeyId`), not by
+// the label, so the label is free to be a cosmetic, human-friendly string.
+// Mirrors the shape of src/lib/cloudflare.ts: a single authenticated fetch
+// helper plus typed verbs.
 //
 // The OPENROUTER_PROVISIONING_KEY env var is the parent account key with
 // provisioning scope. It is the ONLY OpenRouter credential that stays on
@@ -57,7 +60,8 @@ async function orFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export type MintArgs = {
-  /** Human-readable label; we use `sovereign-<instanceId>` so the reconciler can find ours. */
+  /** Human-readable label shown in the OpenRouter dashboard; we use
+   *  `Sovereign-OpenClaw-<slug>`. The reconciler matches ours by keyId, not this. */
   label: string
   /** Optional USD spend cap enforced on OpenRouter's side. Belt-and-suspenders only; wallet remains authoritative. */
   limitUsd?: number
@@ -218,12 +222,15 @@ export type ListedKey = {
   /** Cumulative USD spend cap, or null if uncapped. Lets the reconciler
    *  detect cap drift without a per-key GET. */
   limitUsd?: number | null
+  /** Key creation time as epoch ms, or null if OpenRouter omitted it. Lets the
+   *  reconciler skip revoking freshly-minted keys during the mint→persist race. */
+  createdAtMs?: number | null
 }
 
 /**
  * List all runtime keys under the parent provisioning key. Used by the
- * reconciler to find OpenRouter-side orphans (keys labelled `sovereign-<id>`
- * with no matching non-deleted instance row) and to self-heal cap drift.
+ * reconciler to find OpenRouter-side orphans (our keys whose keyId matches no
+ * non-deleted instance row) and to self-heal cap drift.
  */
 export async function listRuntimeKeys(): Promise<ListedKey[]> {
   type RawKey = {
@@ -232,12 +239,17 @@ export async function listRuntimeKeys(): Promise<ListedKey[]> {
     label?: string
     disabled?: boolean
     limit?: number | null
+    created_at?: string | null
   }
   const data = await orFetch<RawKey[]>(`/keys`)
-  return data.map((k) => ({
-    keyId: k.hash,
-    label: k.label ?? k.name,
-    disabled: k.disabled,
-    limitUsd: typeof k.limit === "number" ? k.limit : null,
-  }))
+  return data.map((k) => {
+    const created = k.created_at ? Date.parse(k.created_at) : NaN
+    return {
+      keyId: k.hash,
+      label: k.label ?? k.name,
+      disabled: k.disabled,
+      limitUsd: typeof k.limit === "number" ? k.limit : null,
+      createdAtMs: Number.isNaN(created) ? null : created,
+    }
+  })
 }

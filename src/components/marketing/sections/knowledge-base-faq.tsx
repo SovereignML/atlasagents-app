@@ -8,11 +8,15 @@ import { ChevronDown } from "lucide-react";
 const faqs = [
   {
     q: "What is SovereignML?",
-    a: "An AI operations platform. You deploy intelligent agents that handle real work — support, sales, devops, content, research. You own the infrastructure and the data.",
+    a: "An AI operations platform. You deploy intelligent agents that handle real work: support, sales, devops, content, research. Your agents run in your own isolated, managed instance, with your configuration and data under your control.",
+  },
+  {
+    q: "What are OpenClaw and Hermes?",
+    a: "The two open, general-purpose agent runtimes your agents run on. Both handle the full range of work. Pick whichever fits your model preferences, or run both. Because they're open, you're never locked in: take your agents and your setup with you anytime.",
   },
   {
     q: "What types of agents can I deploy?",
-    a: "Eight categories: Automation, DevOps, Support, Research, Content, Sales, Social, and Custom. Each configurable to your exact requirements.",
+    a: "Agents run on two open runtimes, OpenClaw and Hermes, across eight categories: Automation, DevOps, Support, Research, Content, Sales, Social, and Custom. Each configurable to your exact requirements.",
   },
   {
     q: "Do I need AI expertise?",
@@ -24,7 +28,7 @@ const faqs = [
   },
   {
     q: "Can you build a custom AI system for my business?",
-    a: "Yes. Book a strategy call. We design, build, and deploy multi-agent systems tailored to your workflows — with dedicated engineering support and production SLAs.",
+    a: "Yes. Book a strategy call. We design, build, and deploy multi-agent systems tailored to your workflows, with dedicated engineering support and production SLAs.",
   },
 ];
 

@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Suspense, useState } from "react"
+import { CircleAlert } from "lucide-react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -79,12 +80,12 @@ function ResetPasswordForm() {
       const data = await res.json()
 
       if (!res.ok) {
-        setError(data.error || "Something went wrong")
+        setError(data.error || "We couldn't reset your password. Please try again.")
       } else {
         router.push("/login?reset=true")
       }
     } catch {
-      setError("Something went wrong")
+      setError("We couldn't reach the server. Check your connection and try again.")
     } finally {
       setLoading(false)
     }
@@ -99,8 +100,9 @@ function ResetPasswordForm() {
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
           {error && (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
+            <Alert variant="destructive" className="flex items-center justify-center gap-2 text-center">
+              <CircleAlert className="shrink-0" />
+              <AlertDescription className="text-center">{error}</AlertDescription>
             </Alert>
           )}
           <FieldGroup>

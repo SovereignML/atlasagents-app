@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import crypto from "node:crypto"
 import { auth } from "@/auth"
+import { getEffectiveUserId } from "@/lib/effective-user"
 import { db, instances, instanceLogs, eq } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { canOperateInstance } from "@/lib/instance-access"
@@ -12,14 +13,15 @@ async function requireOwner(instanceId: string) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
   }
   const isAdmin = (session.user as { role?: string }).role === "admin"
+  const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
   const instance = await db.query.instances.findFirst({
-    where: isAdmin ? eq(instances.id, instanceId) : whereUserInstanceVisible(session.user.id, instanceId),
+    where: isAdmin ? eq(instances.id, instanceId) : whereUserInstanceVisible(effectiveUserId, instanceId),
   })
   if (!instance) {
     return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) }
   }
   // The bot token is a secret — Operator+ on the agent.
-  if (!isAdmin && !(await canOperateInstance(session.user.id, instance.id))) {
+  if (!isAdmin && !(await canOperateInstance(effectiveUserId, instance.id))) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) }
   }
   if (instance.status === "deleted") {

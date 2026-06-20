@@ -281,9 +281,9 @@ export async function runReconciler(): Promise<ReconcileReport> {
   //   (a) Instance was deleted but the inline revoke in deleteBot failed
   //       (network blip, OpenRouter 5xx). The row has status=deleted and
   //       still holds openRouterKeyId. Revoke and clear.
-  //   (b) An OpenRouter-side key labelled `sovereign-<id>` exists with no
-  //       matching non-deleted instance row (hard-deleted instance, dev
-  //       cleanup, etc.). Revoke.
+  //   (b) An OpenRouter-side key of ours (label prefix `sovereign-`, case-
+  //       insensitive) whose keyId matches no non-deleted instance row
+  //       (hard-deleted instance, dev cleanup, etc.). Revoke.
   //
   // Skipped silently if OPENROUTER_PROVISIONING_KEY is not set — keeps the
   // reconciler usable for fleets that haven't enabled per-instance keys yet.
@@ -326,31 +326,45 @@ export async function runReconciler(): Promise<ReconcileReport> {
     //     (`openRouterLimitUsd`) → a deposit-time PATCH that failed; re-PATCH.
     try {
       const orKeys = await listRuntimeKeys()
-      // Map of live instance id → intended cap. We accept anything not in
+      // Map of OpenRouter keyId → intended cap, for every instance not in
       // `deleted` state — including failed_provisioning, which legitimately
-      // retains its key for a retry.
-      const liveById = new Map<
+      // retains its key for a retry. We match on the persisted keyId rather than
+      // parsing the label, because the label is now a human-readable string
+      // (`Sovereign-OpenClaw-<slug>`) that no longer encodes the instance id.
+      const liveByKeyId = new Map<
         string,
         { openRouterLimitUsd: number | null; byosLlmMode: string | null }
       >()
       const liveRows = await db.query.instances.findMany({
-        where: sql`${instances.status} != 'deleted'`,
-        columns: { id: true, openRouterLimitUsd: true, byosLlmMode: true },
+        where: sql`${instances.status} != 'deleted' and ${instances.openRouterKeyId} is not null`,
+        columns: { openRouterKeyId: true, openRouterLimitUsd: true, byosLlmMode: true },
       })
       for (const r of liveRows) {
-        liveById.set(r.id, {
+        if (!r.openRouterKeyId) continue
+        liveByKeyId.set(r.openRouterKeyId, {
           openRouterLimitUsd: r.openRouterLimitUsd ?? null,
           byosLlmMode: r.byosLlmMode ?? null,
         })
       }
 
       const LIMIT_EPSILON = 1e-6
+      // Don't revoke very fresh keys: there's a sub-second window between
+      // OpenRouter creating a key and us persisting its keyId on the instance
+      // row. A key minted inside this window has no DB match yet but is NOT an
+      // orphan. Skip revoking anything younger than the grace period.
+      const MINT_GRACE_MS = 15 * 60 * 1000
       for (const key of orKeys) {
-        if (!key.label.startsWith(OR_LABEL_PREFIX)) continue
-        const instanceId = key.label.slice(OR_LABEL_PREFIX.length)
-        const live = liveById.get(instanceId)
+        // Case-insensitive so both the new `Sovereign-OpenClaw-*` labels and any
+        // legacy lowercase `sovereign-<id>` keys are recognized as ours.
+        if (!key.label.toLowerCase().startsWith(OR_LABEL_PREFIX)) continue
+        const live = liveByKeyId.get(key.keyId)
 
         if (!live) {
+          // No DB row owns this key. Treat recently-minted keys as in-flight
+          // (mint→persist race) rather than orphans.
+          if (key.createdAtMs != null && Date.now() - key.createdAtMs < MINT_GRACE_MS) {
+            continue
+          }
           // Orphan — revoke.
           try {
             await revokeRuntimeKey(key.keyId)

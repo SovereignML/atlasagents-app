@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { redirect } from "next/navigation"
+import { Download } from "lucide-react"
 
 import { auth } from "@/auth"
 import { db, auditLogs, eq, desc, and, like } from "@/db"
@@ -16,24 +17,19 @@ import {
 } from "@/components/ui/table"
 import { getEffectiveUserId } from "@/lib/effective-user"
 
-const ACTION_STYLES: Record<string, string> = {
-  "instance.deploy": "text-primary",
-  "instance.delete": "text-destructive",
-  "instance.restart": "text-amber-500",
-  "instance.stop": "text-amber-500",
-  "team.invite": "text-primary",
-  "team.accept": "text-primary",
-  "team.member_remove": "text-destructive",
-  "team.role_change": "text-amber-500",
-  "team.switch": "text-muted-foreground",
-  "account.login": "text-muted-foreground",
-  "account.password_change": "text-amber-500",
-  "account.profile_update": "text-muted-foreground",
-  "billing.subscription.create": "text-primary",
-  "billing.subscription.cancel": "text-destructive",
-  "admin.impersonate": "text-amber-500",
-  "admin.ban": "text-destructive",
-  "admin.unban": "text-primary",
+const ACTION_PILL_BASE =
+  "inline-flex items-center rounded-full px-2.5 py-0.5 font-mono text-[11px] border"
+
+// Color a pill by the action string. Deploy-family actions are green,
+// billing/topup actions are lime (primary), everything else is neutral.
+function actionPillClass(action: string): string {
+  if (action.startsWith("deploy") || action.includes(".deploy")) {
+    return "bg-emerald-500/12 text-emerald-500 border-emerald-500/28"
+  }
+  if (action.startsWith("billing") || action.startsWith("topup")) {
+    return "bg-primary/12 text-primary border-primary/30"
+  }
+  return "bg-muted text-muted-foreground border-border"
 }
 
 const FILTERS = [
@@ -85,7 +81,13 @@ export default async function AuditLogPage({
           <Button
             size="sm"
             variant="outline"
-            render={<a href="/api/audit-log/export">Download CSV</a>}
+            className="gap-1.5 rounded-[10px] border-border bg-secondary"
+            render={
+              <a href="/api/audit-log/export">
+                <Download className="size-3.5" />
+                Export
+              </a>
+            }
           />
         }
       >
@@ -95,6 +97,7 @@ export default async function AuditLogPage({
               key={f.value}
               size="sm"
               variant={filter === f.value ? "default" : "outline"}
+              className="rounded-full"
               render={
                 <Link
                   href={f.value ? `/dashboard/audit-log?filter=${f.value}` : "/dashboard/audit-log"}
@@ -109,11 +112,19 @@ export default async function AuditLogPage({
         <Card className="overflow-hidden p-0">
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead className="pl-5">Time</TableHead>
-                <TableHead>Action</TableHead>
-                <TableHead>Target</TableHead>
-                <TableHead className="pr-5 text-right">IP</TableHead>
+              <TableRow className="bg-sidebar hover:bg-sidebar">
+                <TableHead className="pl-5 font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+                  Time
+                </TableHead>
+                <TableHead className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+                  Action
+                </TableHead>
+                <TableHead className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+                  Target
+                </TableHead>
+                <TableHead className="pr-5 text-right font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+                  IP
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -129,16 +140,16 @@ export default async function AuditLogPage({
                     <TableCell className="pl-5 font-mono text-xs text-muted-foreground">
                       {e.createdAt.toISOString().replace("T", " ").slice(0, 19)}
                     </TableCell>
-                    <TableCell
-                      className={`font-mono text-xs ${ACTION_STYLES[e.action] || "text-foreground"}`}
-                    >
-                      {e.action}
+                    <TableCell>
+                      <span className={`${ACTION_PILL_BASE} ${actionPillClass(e.action)}`}>
+                        {e.action}
+                      </span>
                     </TableCell>
                     <TableCell className="font-mono text-xs text-foreground">
-                      {e.targetLabel || e.targetId || "—"}
+                      {e.targetLabel || e.targetId || "-"}
                     </TableCell>
                     <TableCell className="pr-5 text-right font-mono text-xs text-muted-foreground">
-                      {e.ipAddress || "—"}
+                      {e.ipAddress || "-"}
                     </TableCell>
                   </TableRow>
                 ))

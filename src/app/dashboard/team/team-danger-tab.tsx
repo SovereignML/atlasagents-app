@@ -30,7 +30,7 @@ export type TeamDangerInfo = {
 /** First blocking reason, or null when the team can be deleted. */
 function blockReason(info: TeamDangerInfo): string | null {
   if (info.ownedTeams <= 1) {
-    return "You can't delete your only team — create another team first."
+    return "You can't delete your only team. Create another team first."
   }
   if (info.childOrgs > 0) {
     const n = info.childOrgs

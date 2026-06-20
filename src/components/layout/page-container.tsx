@@ -10,7 +10,7 @@ function PageContainer({
   return (
     <div
       data-slot="page-container"
-      className={cn("w-full max-w-6xl space-y-10", className)}
+      className={cn("w-full max-w-7xl space-y-10", className)}
       {...props}
     >
       {children}

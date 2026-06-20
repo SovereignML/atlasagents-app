@@ -40,7 +40,9 @@ import {
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { SidebarTrigger } from "@/components/ui/sidebar"
-import { ThemeToggle } from "@/components/ui/theme-toggle"
+import { ConsoleThemeToggle } from "@/components/layout/console-theme-toggle"
+import type { ConsoleTheme } from "@/lib/console-theme"
+import { DashboardBreadcrumbs } from "@/components/layout/dashboard-breadcrumbs"
 import { NotificationBell } from "@/components/notifications/notification-bell"
 import { signOutAction } from "@/app/actions/auth"
 import { cn } from "@/lib/utils"
@@ -84,16 +86,31 @@ export function DashboardTopbar({
   brandName = "SovereignML",
   teams = [],
   activeTeamId,
+  impersonating = null,
+  consoleTheme = "dark",
 }: {
   brandName?: string
   teams?: TeamOption[]
   activeTeamId?: string
+  impersonating?: { name: string | null; email: string; image: string | null } | null
+  consoleTheme?: ConsoleTheme
 }) {
   const { data: session } = useSession()
   const router = useRouter()
   const isAdmin = (session?.user as { role?: string })?.role === "admin"
-  const initials = getInitials(session?.user?.name, session?.user?.email)
-  const displayName = session?.user?.name || session?.user?.email || "Account"
+
+  // While impersonating, the chrome should reflect the user being viewed — the
+  // account avatar, name, and email all switch to them. The admin's real session
+  // still backs Log Out (the Impersonation banner owns the "stop" action).
+  const account = impersonating
+    ? { name: impersonating.name, email: impersonating.email, image: impersonating.image }
+    : {
+        name: session?.user?.name ?? null,
+        email: session?.user?.email ?? null,
+        image: session?.user?.image ?? null,
+      }
+  const initials = getInitials(account.name, account.email)
+  const displayName = account.name || account.email || "Account"
 
   const [switching, setSwitching] = useState(false)
   const activeTeam = teams.find((t) => t.teamId === activeTeamId) ?? teams[0]
@@ -142,11 +159,12 @@ export function DashboardTopbar({
   }
 
   return (
-    <header className="flex h-16 shrink-0 items-center gap-3 border-b bg-sidebar/80 px-6 backdrop-blur supports-[backdrop-filter]:bg-sidebar/60 lg:px-8">
+    <header className="sticky top-0 z-30 flex h-[60px] shrink-0 items-center gap-3 border-b bg-background/80 px-6 backdrop-blur-[14px] supports-[backdrop-filter]:bg-background/60 lg:px-8">
       <SidebarTrigger />
       <Link href="/" className="text-sm font-semibold tracking-tight md:hidden">
         {brandName}
       </Link>
+      <DashboardBreadcrumbs />
       <div className="flex-1" />
       <div className="flex items-center gap-2">
         <Button
@@ -161,11 +179,12 @@ export function DashboardTopbar({
           }
         />
         <NotificationBell />
-        <ThemeToggle className="size-8" />
+        <ConsoleThemeToggle theme={consoleTheme} className="size-8" />
         {isAdmin && (
           <Button
             size="sm"
-            variant="secondary"
+            variant="ghost"
+            className="gap-1.5 rounded-full border border-primary/35 bg-primary/10 font-medium text-primary hover:bg-primary/15 hover:text-primary"
             render={
               <Link href="/admin">
                 <ShieldCheck data-icon="inline-start" />
@@ -178,8 +197,8 @@ export function DashboardTopbar({
           <DropdownMenuTrigger
             render={
               <Button variant="ghost" size="sm" className="gap-2 px-2">
-                <Avatar size="sm">
-                  <AvatarImage src={session?.user?.image ?? undefined} alt="" />
+                <Avatar size="sm" className={cn(impersonating && "ring-2 ring-amber-500")}>
+                  <AvatarImage src={account.image ?? undefined} alt="" />
                   <AvatarFallback>{initials}</AvatarFallback>
                 </Avatar>
                 <span className="hidden max-w-[160px] truncate text-sm sm:inline">
@@ -190,20 +209,25 @@ export function DashboardTopbar({
             }
           />
           <DropdownMenuContent align="end" className="w-64">
-            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-              Signed in as
+            <DropdownMenuLabel
+              className={cn(
+                "text-xs font-normal text-muted-foreground",
+                impersonating && "font-medium text-amber-600 dark:text-amber-400"
+              )}
+            >
+              {impersonating ? "Impersonating" : "Signed in as"}
             </DropdownMenuLabel>
             <div className="flex items-center gap-2 px-2 pb-2">
-              <Avatar size="default">
-                <AvatarImage src={session?.user?.image ?? undefined} alt="" />
+              <Avatar size="default" className={cn(impersonating && "ring-2 ring-amber-500")}>
+                <AvatarImage src={account.image ?? undefined} alt="" />
                 <AvatarFallback>{initials}</AvatarFallback>
               </Avatar>
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold text-foreground">
-                  {session?.user?.name || "User"}
+                  {account.name || "User"}
                 </div>
                 <div className="truncate text-xs text-muted-foreground">
-                  {session?.user?.email}
+                  {account.email}
                 </div>
               </div>
             </div>

@@ -25,8 +25,10 @@ import {
 } from "@/components/ui/breadcrumb"
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
 import { PageContainer } from "@/components/layout/page-container"
+import { RuntimeLogo } from "@/components/dashboard/runtime-logo"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
+import { getEffectiveUserId } from "@/lib/effective-user"
 import { getInstanceAccessLevel, levelAtLeast } from "@/lib/instance-access"
 import { getRuntime } from "@/lib/runtimes"
 import { InstanceTabs } from "./instance-tabs"
@@ -58,6 +60,8 @@ export default async function InstanceDetailPage({
 }) {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
+  // Resolve through impersonation so an admin viewing-as a user can open their agents.
+  const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
 
   const { id } = await params
   const { tab } = await searchParams
@@ -67,7 +71,7 @@ export default async function InstanceDetailPage({
   await maybeRunUptimeSync()
 
   const instance = await db.query.instances.findFirst({
-    where: whereUserInstanceVisible(session.user.id, id),
+    where: whereUserInstanceVisible(effectiveUserId, id),
     with: {
       region: true,
       serverConfig: true,
@@ -115,7 +119,7 @@ export default async function InstanceDetailPage({
   }
 
   // The viewer's effective access level drives which controls/tabs render.
-  const myAccess = await getInstanceAccessLevel(session.user.id, instance.id)
+  const myAccess = await getInstanceAccessLevel(effectiveUserId, instance.id)
   const accessControl = {
     level: myAccess.level,
     canOperate: levelAtLeast(myAccess.level, "operator"),
@@ -150,8 +154,24 @@ export default async function InstanceDetailPage({
             </BreadcrumbList>
           </Breadcrumb>
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-3xl font-bold tracking-tight">{instance.name}</h1>
-            <Badge variant={statusBadgeVariant(instance.status)}>{instance.status}</Badge>
+            <h1 className="text-[34px] font-semibold tracking-tight">{instance.name}</h1>
+            {instance.status === "running" ? (
+              <Badge
+                variant="default"
+                className="inline-flex items-center gap-1.5 px-3 py-1 text-[13px]"
+              >
+                <span className="size-1.5 rounded-full bg-primary-foreground" />
+                {instance.status}
+              </Badge>
+            ) : (
+              <Badge variant={statusBadgeVariant(instance.status)}>{instance.status}</Badge>
+            )}
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1">
+              <RuntimeLogo runtime={instance.runtime} size={13} className="size-[13px]" />
+              <span className="font-mono text-xs text-muted-foreground">
+                {getRuntime(instance.runtime).displayName}
+              </span>
+            </span>
           </div>
           <p className="font-mono text-xs text-muted-foreground">{instance.slug}</p>
         </div>
@@ -177,7 +197,7 @@ export default async function InstanceDetailPage({
               </a>
               {access.scheme === "http" && instance.domain && (
                 <p className="mt-2 font-mono text-xs text-amber-500">
-                  TLS certificate pending — accessed over HTTP until Let&apos;s Encrypt completes.
+                  TLS certificate pending. Accessed over HTTP until Let&apos;s Encrypt completes.
                 </p>
               )}
               {access.scheme === "http" && !instance.domain && !instance.managedSubdomain && (
@@ -189,7 +209,7 @@ export default async function InstanceDetailPage({
                 <p className="mt-2 text-xs text-muted-foreground">
                   {instance.tlsStatus === "issued"
                     ? "Served with Let's Encrypt certificate."
-                    : "TLS certificate pending — check DNS for your custom domain."}
+                    : "TLS certificate pending. Check DNS for your custom domain."}
                 </p>
               )}
               {access.scheme === "https" && instance.managedSubdomain && !instance.domain && (

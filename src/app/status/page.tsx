@@ -7,8 +7,8 @@ const SERVICES = [
   { name: "Dashboard", status: "operational", uptime: 99.98 },
   { name: "Deploy Orchestrator", status: "operational", uptime: 99.95 },
   { name: "Gateway", status: "operational", uptime: 99.97 },
-  { name: "Stripe Billing", status: "operational", uptime: 100.0 },
-  { name: "Auth (NextAuth)", status: "operational", uptime: 99.99 },
+  { name: "Stripe Billing", status: "operational", uptime: 99.99 }, // {{TODO: confirm / wire live}}
+  { name: "Authentication", status: "operational", uptime: 99.99 },
 ]
 
 const INCIDENTS = [
@@ -54,7 +54,7 @@ export default function StatusPage() {
                 {allOk ? "All systems operational" : "Incident in progress"}
               </h1>
               <p className="text-sm text-[var(--text-secondary)] mt-1">
-                Live from Uptime Kuma probes, every 60 seconds.
+                Live from our monitoring probes, every 60 seconds.
               </p>
             </div>
           </Reveal>
@@ -139,7 +139,7 @@ export default function StatusPage() {
           </section>
 
           <p className="text-[10px] font-mono text-amber-400/80">
-            Warning: live Uptime Kuma integration pending — current values are placeholder
+            Warning: live monitoring integration pending. Current values are placeholder
           </p>
         </div>
       </div>

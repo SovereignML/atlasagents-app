@@ -3,6 +3,7 @@ import { asc, eq } from "drizzle-orm"
 import { db, allowedModels } from "@/db"
 import {
   ALLOWED_OPENROUTER_MODELS,
+  OPENROUTER_BASE_URL,
   isValidOpenRouterSlug,
   type AllowedModelKind,
 } from "@/lib/model-router"
@@ -14,6 +15,13 @@ const KINDS: AllowedModelKind[] = ["chat", "image", "moderation"]
 export function isAllowedModelKind(value: string): value is AllowedModelKind {
   return (KINDS as string[]).includes(value)
 }
+
+/**
+ * Minimum context window Hermes tolerates — it rejects (crash-loops on) any model
+ * below this at startup, so the per-instance Hermes picker only offers models at or
+ * above it. Kept here next to the selectable-models filter that enforces it.
+ */
+export const HERMES_MIN_CONTEXT = 64_000
 
 /**
  * The DB is the runtime source of truth for the account allowlist; the code
@@ -53,20 +61,84 @@ export async function addAllowedModel(args: {
   slug: string
   label: string
   kind: AllowedModelKind
+  /** Context window from the catalog, when known — gates Hermes-compatibility. */
+  contextLength?: number | null
 }): Promise<AllowedModelRow> {
   const slug = args.slug.trim()
   if (!isValidOpenRouterSlug(slug)) {
     throw new Error("slug must be a valid OpenRouter <author>/<slug>")
   }
+  const label = args.label.trim() || slug
+  const contextLength = args.contextLength ?? null
   const [row] = await db
     .insert(allowedModels)
-    .values({ slug, label: args.label.trim() || slug, kind: args.kind })
+    .values({ slug, label, kind: args.kind, contextLength })
     .onConflictDoUpdate({
       target: allowedModels.slug,
-      set: { label: args.label.trim() || slug, kind: args.kind, enabled: true },
+      // Don't clobber a known contextLength with null on a bare re-enable.
+      set: {
+        label,
+        kind: args.kind,
+        enabled: true,
+        ...(contextLength != null ? { contextLength } : {}),
+      },
     })
     .returning()
   return row
+}
+
+/**
+ * Backfill/refresh `contextLength` for every allowlisted model from the public
+ * OpenRouter catalog (no key needed). Idempotent — safe to re-run; rows whose slug
+ * isn't in the catalog are left untouched. Returns how many rows were updated.
+ */
+export async function syncModelMetadata(): Promise<{ updated: number }> {
+  const res = await fetch(`${OPENROUTER_BASE_URL}/models`, { cache: "no-store" })
+  if (!res.ok) throw new Error(`OpenRouter /models ${res.status}`)
+  const json = (await res.json()) as {
+    data?: { id: string; context_length?: number }[]
+  }
+  const ctxBySlug = new Map<string, number>()
+  for (const m of json.data ?? []) {
+    if (typeof m.context_length === "number") ctxBySlug.set(m.id, m.context_length)
+  }
+
+  const rows = await listAllowedModels()
+  let updated = 0
+  for (const row of rows) {
+    const ctx = ctxBySlug.get(row.slug)
+    if (ctx != null && ctx !== row.contextLength) {
+      await db
+        .update(allowedModels)
+        .set({ contextLength: ctx })
+        .where(eq(allowedModels.slug, row.slug))
+      updated++
+    }
+  }
+  return { updated }
+}
+
+/** True for a chat model that satisfies the runtime's constraints. */
+function isSelectableForRuntime(row: AllowedModelRow, runtimeId: string): boolean {
+  if (!row.enabled || row.kind !== "chat") return false
+  // Hermes needs a known ≥64k context; OpenClaw has no floor.
+  if (runtimeId === "hermes") {
+    return row.contextLength != null && row.contextLength >= HERMES_MIN_CONTEXT
+  }
+  return true
+}
+
+/**
+ * Models a user may pick for an instance's runtime: enabled chat models, further
+ * filtered to ≥64k context for Hermes. Single source of truth for both the
+ * per-instance picker UI and its PATCH validation. `runtimeId` NULL → OpenClaw.
+ */
+export async function selectableModelsForRuntime(
+  runtimeId: string | null,
+): Promise<AllowedModelRow[]> {
+  const runtime = runtimeId ?? "openclaw"
+  const rows = await listAllowedModels()
+  return rows.filter((r) => isSelectableForRuntime(r, runtime))
 }
 
 export async function updateAllowedModel(

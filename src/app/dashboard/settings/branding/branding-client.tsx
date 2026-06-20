@@ -195,7 +195,7 @@ function CustomDomainCard() {
         toast.error(data?.error ?? "Failed to connect domain")
         return
       }
-      toast.success("Domain connected — add the DNS records below")
+      toast.success("Domain connected. Add the DNS records below.")
       await refresh()
     })
   }
@@ -205,7 +205,7 @@ function CustomDomainCard() {
       const res = await fetch("/api/team/branding/domain/verify", { method: "POST" })
       const data = await res.json().catch(() => null)
       if (data?.verified) toast.success("Domain ownership verified")
-      else toast.error(data?.reason ?? "Verification failed — check the TXT record")
+      else toast.error(data?.reason ?? "Verification failed. Check the TXT record.")
       await refresh()
     })
   }

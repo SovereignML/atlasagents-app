@@ -50,7 +50,7 @@ type Settings = {
 }
 
 function formatBytes(n: number | null): string {
-  if (!n) return "—"
+  if (!n) return "-"
   const units = ["B", "KB", "MB", "GB", "TB"]
   let v = n
   let i = 0
@@ -62,7 +62,7 @@ function formatBytes(n: number | null): string {
 }
 
 function formatDate(iso: string | null): string {
-  if (!iso) return "—"
+  if (!iso) return "-"
   return new Date(iso).toLocaleString()
 }
 

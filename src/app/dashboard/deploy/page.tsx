@@ -3,7 +3,18 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Check } from "lucide-react"
+import {
+  Check,
+  MessageSquare,
+  PenTool,
+  Search,
+  Settings,
+  Share2,
+  Terminal,
+  TrendingUp,
+  Zap,
+  type LucideIcon,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -16,6 +27,7 @@ import {
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
+import { RuntimeLogo } from "@/components/dashboard/runtime-logo"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { AGENT_CATEGORIES } from "@/configs/agent-categories"
 import { BRANDING } from "@/configs/branding"
@@ -52,6 +64,19 @@ const RUNTIME_OPTIONS: { value: Runtime; label: string; hint: string; enabled: b
   { value: "openclaw", label: "OpenClaw", hint: "Default agent runtime", enabled: true },
   { value: "hermes", label: "Hermes", hint: "Nous Research Hermes (Python)", enabled: true },
 ]
+
+// Map the lucide icon names referenced in agent-categories.ts to their
+// components so the use-case cards can render an icon per category.
+const CATEGORY_ICONS: Record<string, LucideIcon> = {
+  Zap,
+  Terminal,
+  MessageSquare,
+  Search,
+  PenTool,
+  TrendingUp,
+  Share2,
+  Settings,
+}
 
 type Step = "agent" | "project" | "plan" | "billing"
 const ALL_STEPS: Step[] = ["agent", "project", "plan", "billing"]
@@ -181,11 +206,11 @@ export default function DeployPage() {
   return (
     <PageContainer>
       <PageHeader
-        title="Deploy AI Agent"
-        description="Configure and launch your AI agent infrastructure."
+        title="Deploy a new agent"
+        description="No code, no DevOps. Three steps to launch into your own private instance."
       />
 
-      <div className="flex items-center gap-1 overflow-x-auto pb-2">
+      <div className="flex items-center gap-1 overflow-x-auto px-0.5 pb-2 pt-1">
         {STEPS.map((s, i) => {
           const isActive = s === step
           const isComplete = i < stepIdx
@@ -198,10 +223,10 @@ export default function DeployPage() {
               disabled={isFuture}
               className={
                 isActive
-                  ? "flex items-center gap-2 whitespace-nowrap rounded-lg border border-ring bg-ring/5 px-3 py-2 text-sm font-medium text-foreground ring-1 ring-ring"
+                  ? "flex items-center gap-2 whitespace-nowrap rounded-full border border-ring bg-ring/5 px-3 py-2 text-sm font-medium text-foreground ring-1 ring-ring"
                   : isComplete
-                    ? "flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-                    : "flex cursor-default items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm text-muted-foreground/50"
+                    ? "flex items-center gap-2 whitespace-nowrap rounded-full px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                    : "flex cursor-default items-center gap-2 whitespace-nowrap rounded-full px-3 py-2 text-sm text-muted-foreground/50"
               }
             >
               <span
@@ -255,32 +280,48 @@ export default function DeployPage() {
                   className="grid w-full grid-cols-1 gap-2 md:grid-cols-2"
                   spacing={1}
                 >
-                  {RUNTIME_OPTIONS.map((r) => (
-                    <ToggleGroupItem
-                      key={r.value}
-                      value={r.value}
-                      disabled={!r.enabled}
-                      variant="outline"
-                      className={cn(
-                        "h-auto flex-col items-start whitespace-normal p-4 text-left",
-                        SELECTED_GLOW
-                      )}
-                    >
-                      <div className="flex w-full items-center justify-between">
-                        <p className="text-sm font-medium text-foreground">{r.label}</p>
-                        {!r.enabled && (
-                          <Badge variant="outline" className="text-[10px]">
-                            Coming soon
-                          </Badge>
+                  {RUNTIME_OPTIONS.map((r) => {
+                    const isSelected = runtime === r.value
+                    return (
+                      <ToggleGroupItem
+                        key={r.value}
+                        value={r.value}
+                        disabled={!r.enabled}
+                        variant="outline"
+                        className={cn(
+                          "relative h-auto flex-col items-start gap-3 whitespace-normal p-4 text-left",
+                          SELECTED_GLOW
                         )}
-                      </div>
-                      <p className="text-xs text-muted-foreground">{r.hint}</p>
-                    </ToggleGroupItem>
-                  ))}
+                      >
+                        {isSelected && (
+                          <span className="absolute top-3 right-3 grid size-5 place-items-center rounded-full bg-primary text-primary-foreground">
+                            <Check className="size-3" />
+                          </span>
+                        )}
+                        <div className="grid size-[52px] place-items-center rounded-[13px] border border-border bg-muted">
+                          <RuntimeLogo
+                            runtime={r.value}
+                            alt={`${r.label} logo`}
+                            size={30}
+                            className="size-[30px]"
+                          />
+                        </div>
+                        <div className="flex w-full items-center justify-between gap-2">
+                          <p className="text-base font-semibold text-foreground">{r.label}</p>
+                          {!r.enabled && (
+                            <Badge variant="outline" className="text-[10px]">
+                              Coming soon
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">{r.hint}</p>
+                      </ToggleGroupItem>
+                    )
+                  })}
                 </ToggleGroup>
                 {runtime === "hermes" && (
                   <p className="text-xs text-muted-foreground">
-                    Hermes ships with the Open WebUI chat interface bundled — you&apos;ll get a web
+                    Hermes ships with the Open WebUI chat interface bundled: you&apos;ll get a web
                     chat UI at <span className="font-mono">/</span> and the OpenAI-compatible API at{" "}
                     <span className="font-mono">/v1</span> on the same public URL. Requires a plan
                     with at least 2GB RAM.
@@ -309,9 +350,6 @@ export default function DeployPage() {
                       projectName.trim().length >= 2 && "border-ring ring-1 ring-ring"
                     )}
                   />
-                  {projectName.trim().length > 0 && (
-                    <FieldDescription className="font-mono">slug: {slugPreview || "—"}</FieldDescription>
-                  )}
                   {projectName.trim().length > 0 && projectName.trim().length < 2 && (
                     <FieldDescription className="text-amber-500">
                       Enter at least 2 characters to continue.
@@ -328,22 +366,33 @@ export default function DeployPage() {
                   className="grid w-full grid-cols-2 gap-2 md:grid-cols-4"
                   spacing={1}
                 >
-                  {AGENT_CATEGORIES.map((cat) => (
-                    <ToggleGroupItem
-                      key={cat.slug}
-                      value={cat.slug}
-                      variant="outline"
-                      className={cn(
-                        "h-auto flex-col items-start whitespace-normal p-3 text-left",
-                        SELECTED_GLOW
-                      )}
-                    >
-                      <p className="text-sm font-medium text-foreground">{cat.name}</p>
-                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                        {cat.description}
-                      </p>
-                    </ToggleGroupItem>
-                  ))}
+                  {AGENT_CATEGORIES.map((cat) => {
+                    const Icon = CATEGORY_ICONS[cat.icon] ?? Settings
+                    return (
+                      <ToggleGroupItem
+                        key={cat.slug}
+                        value={cat.slug}
+                        variant="outline"
+                        className={cn(
+                          "h-auto flex-col items-start gap-2 whitespace-normal p-3 text-left",
+                          SELECTED_GLOW
+                        )}
+                      >
+                        <span className="grid size-9 place-items-center rounded-lg border border-border bg-muted text-foreground">
+                          <Icon className="size-4" />
+                        </span>
+                        <div>
+                          <p className="text-sm font-medium text-foreground">{cat.name}</p>
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">
+                            Runs on {RUNTIME_OPTIONS.find((r) => r.value === runtime)?.label ?? runtime}
+                          </p>
+                        </div>
+                        <p className="line-clamp-2 text-xs text-muted-foreground">
+                          {cat.description}
+                        </p>
+                      </ToggleGroupItem>
+                    )
+                  })}
                 </ToggleGroup>
               </div>
             </div>
@@ -543,16 +592,33 @@ export default function DeployPage() {
 
               <Card className="border-ring ring-1 ring-ring bg-ring/5">
                 <CardHeader>
-                  <CardDescription className="font-mono text-xs uppercase tracking-wide text-primary">
-                    Agent
-                  </CardDescription>
-                  <p className="font-medium text-foreground">
-                    {selectedCategoryObj?.name ?? "—"}
-                  </p>
+                  <div className="flex items-center gap-4">
+                    <div className="grid size-14 shrink-0 place-items-center rounded-[13px] border border-border bg-muted">
+                      <RuntimeLogo
+                        runtime={runtime}
+                        alt={`${RUNTIME_OPTIONS.find((r) => r.value === runtime)?.label ?? runtime} logo`}
+                        size={32}
+                        className="size-8"
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <CardDescription className="font-mono text-xs uppercase tracking-wide text-primary">
+                        Agent
+                      </CardDescription>
+                      <p className="truncate text-base font-semibold text-foreground">
+                        {projectName || selectedCategoryObj?.name || "-"}
+                      </p>
+                      <p className="truncate font-mono text-xs text-muted-foreground">
+                        slug: {slugPreview || "-"}
+                      </p>
+                    </div>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <p className="text-xs text-muted-foreground">
-                    Runtime:{" "}
+                    Use case:{" "}
+                    <span className="text-foreground">{selectedCategoryObj?.name ?? "-"}</span>
+                    {"  ·  Runtime: "}
                     <span className="text-foreground">
                       {RUNTIME_OPTIONS.find((r) => r.value === runtime)?.label ?? runtime}
                     </span>
@@ -579,7 +645,7 @@ export default function DeployPage() {
                   </CardHeader>
                   <CardContent>
                     <p className="font-mono text-xs text-muted-foreground">
-                      slug: {slugPreview || "—"}
+                      slug: {slugPreview || "-"}
                     </p>
                   </CardContent>
                 </Card>
@@ -588,7 +654,7 @@ export default function DeployPage() {
                     <CardDescription className="text-xs uppercase tracking-wide">
                       Plan
                     </CardDescription>
-                    <p className="font-medium text-foreground">{selectedPlan?.name ?? "—"}</p>
+                    <p className="font-medium text-foreground">{selectedPlan?.name ?? "-"}</p>
                   </CardHeader>
                 </Card>
                 {selectedPlan && selectedPlan.tier !== "free" && selectedServer && (
@@ -627,12 +693,12 @@ export default function DeployPage() {
                           ? "Free"
                           : planPrice
                             ? formatUsd(planPrice.price)
-                            : "—"}
+                            : "-"}
                       </span>
                     </div>
                     <div className="flex justify-between border-t pt-3">
-                      <span className="font-semibold text-foreground">Total</span>
-                      <span className="text-xl font-bold text-foreground">
+                      <span className="font-semibold text-foreground">Est. cost</span>
+                      <span className="text-xl font-bold text-primary">
                         {selectedPlan.tier === "free" ? (
                           "$0.00"
                         ) : planPrice ? (
@@ -643,7 +709,7 @@ export default function DeployPage() {
                             </span>
                           </>
                         ) : (
-                          "—"
+                          "-"
                         )}
                       </span>
                     </div>

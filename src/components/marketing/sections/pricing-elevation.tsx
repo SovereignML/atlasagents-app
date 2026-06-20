@@ -56,12 +56,12 @@ export function PricingElevation() {
           transition={{ duration: 0.8, ease: easing.outExpo }}
           className="text-center mb-10"
         >
-          <p className="text-xs text-accent-blue-rest uppercase tracking-[0.2em] mb-4 font-medium">Investment</p>
+          <p className="text-xs text-accent-blue-rest uppercase tracking-[0.2em] mb-4 font-medium">Pricing</p>
           <h2 className="text-[clamp(2rem,4vw,48px)] font-bold text-text-loud tracking-[-1.5px] mb-5">
-            Choose your operating layer.
+            Free to start. Built to scale.
           </h2>
           <p className="text-text-secondary text-lg max-w-[440px] mx-auto">
-            Start free. Scale when your agents prove their value.
+            Upgrade when your agents are pulling their weight, not before.
           </p>
         </motion.div>
 
@@ -129,10 +129,10 @@ export function PricingElevation() {
                     className={`block text-center py-3 text-sm font-bold uppercase rounded-xl transition-all ${
                       plan.highlight
                         ? "btn-green"
-                        : "border border-border-ghost text-text-loud hover:border-accent-blue-rest hover:text-accent-blue-rest"
+                        : "border border-accent-blue-rest text-text-loud hover:border-accent-blue-hover hover:text-accent-blue-rest"
                     }`}
                   >
-                    Get Started
+                    Deploy Now
                   </Link>
                 </motion.div>
               ))}
@@ -167,7 +167,7 @@ export function PricingElevation() {
                 </div>
                 <Link
                   href="/login?deploy=true"
-                  className="shrink-0 inline-flex items-center justify-center px-5 py-2.5 text-xs font-bold uppercase rounded-xl border border-border-ghost text-text-loud hover:border-accent-blue-rest hover:text-accent-blue-rest transition-all"
+                  className="shrink-0 inline-flex items-center justify-center px-5 py-2.5 text-xs font-bold uppercase rounded-xl border border-accent-blue-rest text-text-loud hover:border-accent-blue-hover hover:text-accent-blue-rest transition-all"
                 >
                   Start Free
                 </Link>
@@ -199,7 +199,7 @@ export function PricingElevation() {
                   href={BRANDING.demoUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="relative shrink-0 inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase rounded-xl border border-border-ghost text-text-loud hover:border-accent-blue-rest hover:text-accent-blue-rest transition-all"
+                  className="relative shrink-0 inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase rounded-xl border border-accent-blue-rest text-text-loud hover:border-accent-blue-hover hover:text-accent-blue-rest transition-all"
                 >
                   Contact Sales <ArrowRight className="w-3 h-3" />
                 </a>

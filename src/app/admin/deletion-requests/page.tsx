@@ -77,7 +77,7 @@ export default function AdminDeletionRequestsPage() {
     <PageContainer>
       <PageHeader
         title="Deletion Requests"
-        description="Account deletion requests submitted by users. Approving records the decision and emails the user — perform the actual deletion from the Users page."
+        description="Account deletion requests submitted by users. Approving records the decision and emails the user. Perform the actual deletion from the Users page."
       />
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -129,7 +129,7 @@ export default function AdminDeletionRequestsPage() {
                     return (
                       <TableRow key={r.id}>
                         <TableCell>
-                          <div className="font-medium text-foreground">{r.user.name || "—"}</div>
+                          <div className="font-medium text-foreground">{r.user.name || "-"}</div>
                           <div className="text-xs text-muted-foreground">{r.user.email}</div>
                         </TableCell>
                         <TableCell className="max-w-xs whitespace-normal text-sm text-muted-foreground">
@@ -178,7 +178,7 @@ export default function AdminDeletionRequestsPage() {
                               render={<Link href="/admin/users">Delete in Users</Link>}
                             />
                           ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
+                            <span className="text-xs text-muted-foreground">-</span>
                           )}
                         </TableCell>
                       </TableRow>

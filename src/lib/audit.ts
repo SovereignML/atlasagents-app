@@ -22,6 +22,7 @@ export type AuditAction =
   | "instance.delete"
   | "instance.agent_type_change"
   | "instance.tools_change"
+  | "instance.model_change"
   | "instance.backup.create"
   | "instance.backup.restore"
   | "instance.backup.delete"

@@ -15,6 +15,9 @@ const eslintConfig = defineConfig([
     // CJS config and one-off scripts not subject to strict TS linting:
     "deploy/**",
     "scripts/**",
+    // Generated/vendored design-sync artifacts (git-ignored; not linted in CI):
+    "ds-bundle/**",
+    ".ds-sync/**",
   ]),
 ]);
 

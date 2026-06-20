@@ -2,6 +2,7 @@ import { ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Reveal, RevealGroup, RevealItem } from "@/components/marketing/motion/reveal"
 import { spring } from "@/lib/motion"
+import { BRANDING } from "@/configs/branding"
 
 export default function CommunityPage() {
   return (
@@ -35,7 +36,12 @@ export default function CommunityPage() {
           <p className="text-[var(--text-secondary)] text-sm leading-relaxed mb-6">
             Get instant product updates, agent deployment tips, and connect directly with our team and community members.
           </p>
-          <Button variant="gradient" size="lg" render={<a href="#" />}>
+          {/* {{TODO: set BRANDING.telegram to the real Telegram invite URL}} */}
+          <Button
+            variant="gradient"
+            size="lg"
+            render={<a href={BRANDING.telegram} target="_blank" rel="noopener noreferrer" />}
+          >
             Join Telegram <ArrowRight />
           </Button>
         </RevealItem>
@@ -56,7 +62,11 @@ export default function CommunityPage() {
           <p className="text-[var(--text-secondary)] text-sm leading-relaxed mb-6">
             Follow us for AI operations insights, product announcements, and tips from the SovereignML team.
           </p>
-          <Button variant="outline" size="lg" render={<a href="#" />}>
+          <Button
+            variant="outline"
+            size="lg"
+            render={<a href={BRANDING.twitter} target="_blank" rel="noopener noreferrer" />}
+          >
             Follow on X <ArrowRight />
           </Button>
         </RevealItem>
@@ -65,7 +75,7 @@ export default function CommunityPage() {
       {/* Community stat */}
       <Reveal className="text-center border-t border-[var(--border-color)] pt-12">
         <p className="text-[var(--text-secondary)] text-sm">
-          Join <span className="text-primary font-bold">200+</span> AI builders in our growing community.
+          Join a growing community of AI builders.
         </p>
       </Reveal>
     </div>

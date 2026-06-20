@@ -220,3 +220,33 @@ const OPENROUTER_SLUG_RE = /^~?[A-Za-z0-9._-]+\/[A-Za-z0-9._:-]+$/
 export function isValidOpenRouterSlug(slug: string): boolean {
   return OPENROUTER_SLUG_RE.test(slug.trim())
 }
+
+/**
+ * Resolve the OpenRouter model slug an instance should actually run, applying the
+ * per-instance override (`instances.modelSlug`) when present and falling back to the
+ * tier default otherwise. This is the single place provisioning consults so both the
+ * first-provision and reprovision paths stay consistent.
+ *
+ * - The override only applies to OpenRouter-primary bots — NVIDIA-primary bots use a
+ *   different account/allowlist, so they always take the routed NVIDIA model.
+ * - With no override: Hermes pins its own ≥64k slug (`hermesModel`), every other
+ *   runtime keeps the routed model (`routedModel`, i.e. `routeModel(tier).model`).
+ *
+ * The override is validated against the runtime's selectable allowlist at the API
+ * layer (see selectableModelsForRuntime); `isValidOpenRouterSlug` still guards the
+ * final value before provisioning.
+ */
+export function effectiveModel(args: {
+  runtimeId: string
+  llmProvider: LlmProvider
+  tier: BudgetTier
+  modelSlug?: string | null
+  /** The routed default for non-Hermes runtimes — `routeModel(tier, provider).model`. */
+  routedModel: string
+}): string {
+  const override = args.modelSlug?.trim()
+  if (args.llmProvider === "openrouter" && override) return override
+  return args.runtimeId === "hermes" && args.llmProvider === "openrouter"
+    ? hermesModel(args.tier)
+    : args.routedModel
+}

@@ -21,7 +21,7 @@ export const CATEGORY_LABELS: Record<NotificationCategory, string> = {
 
 export const CATEGORY_DESCRIPTIONS: Record<NotificationCategory, string> = {
   billing: "Payments, credits, and subscription changes",
-  provisioning: "Agent deployments — success and failure",
+  provisioning: "Agent deployments: success and failure",
   security: "Password and two-factor changes",
   monitoring: "Agent health, latency, and spend alerts",
 }

@@ -83,7 +83,7 @@ export function ResellerOpsClient({ initial }: { initial: ResellerOpsState }) {
           </CardTitle>
           <CardDescription>
             Your customers pay you directly on your own Stripe account. We take no cut of their
-            payments — only your platform plan.
+            payments, only your platform plan.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex gap-2">

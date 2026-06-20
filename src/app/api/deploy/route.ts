@@ -181,7 +181,7 @@ async function handleDeploy(req: NextRequest) {
           userId,
           planConfig.creditsPerPeriod,
           planPeriodEnd(billingInterval),
-          `Free tier grant — ${planConfig.name}`,
+          `Free tier grant: ${planConfig.name}`,
           instanceId,
         )
       } catch (err) {
@@ -229,7 +229,7 @@ async function handleDeploy(req: NextRequest) {
           price_data: {
             currency: "usd",
             product_data: {
-              name: `${BRANDING.name} — ${planConfig.name} Plan`,
+              name: `${BRANDING.name} ${planConfig.name} Plan`,
               description: `${serverConfig.vcpu} vCPU, ${serverConfig.ramGb} GB RAM, ${serverConfig.storageGb} GB storage · ${planConfig.creditsPerPeriod.toLocaleString()} credits/${billingInterval === "year" ? "yr" : "mo"}`,
             },
             unit_amount: unitAmount,
@@ -299,7 +299,7 @@ async function handleDeploy(req: NextRequest) {
         userId,
         planConfig.creditsPerPeriod,
         planPeriodEnd(billingInterval),
-        `Dev mode grant — ${planConfig.name} (${billingInterval})`,
+        `Dev mode grant: ${planConfig.name} (${billingInterval})`,
         instanceId,
       )
     } catch (err) {

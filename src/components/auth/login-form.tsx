@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useCallback, useState } from "react"
 import { signIn } from "next-auth/react"
+import { CircleAlert } from "lucide-react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -72,11 +73,11 @@ export function LoginForm({ showGoogleOAuth = false, providers }: LoginFormProps
         return
       }
       if (result.code === "TwoFactorInvalid") {
-        setError("Invalid 2FA code. Try again.")
+        setError("That code didn't match. Enter a fresh code from your authenticator app, or use a backup code.")
         return
       }
       if (result.code === "TurnstileFailed") {
-        setError("Verification failed. Please try again.")
+        setError("We couldn't confirm you're human. Please try again.")
         setTurnstileToken("")
         return
       }
@@ -133,12 +134,13 @@ export function LoginForm({ showGoogleOAuth = false, providers }: LoginFormProps
         <CardContent>
           <form onSubmit={on2faSubmit} className="space-y-4">
             {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
+              <Alert variant="destructive" className="flex items-center justify-center gap-2 text-center">
+                <CircleAlert className="shrink-0" />
+                <AlertDescription className="text-center">{error}</AlertDescription>
               </Alert>
             )}
             <Field>
-              <FieldLabel htmlFor="totp">Authentication code</FieldLabel>
+              <FieldLabel htmlFor="totp">2FA code</FieldLabel>
               <Input
                 id="totp"
                 name="totp"
@@ -196,8 +198,9 @@ export function LoginForm({ showGoogleOAuth = false, providers }: LoginFormProps
 
           <form onSubmit={onCredentialsSubmit} className="space-y-4">
             {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
+              <Alert variant="destructive" className="flex items-center justify-center gap-2 text-center">
+                <CircleAlert className="shrink-0" />
+                <AlertDescription className="text-center">{error}</AlertDescription>
               </Alert>
             )}
             <Field>
