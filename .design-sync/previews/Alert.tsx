@@ -22,7 +22,7 @@ export function Variants() {
         <TriangleAlert />
         <AlertTitle>Approaching quota</AlertTitle>
         <AlertDescription>
-          You've used 82% of your monthly token allowance.
+          You&apos;ve used 82% of your monthly token allowance.
         </AlertDescription>
       </Alert>
       <Alert variant="destructive">
