@@ -14,14 +14,16 @@ export type RegionConfig = {
 }
 
 export const REGIONS: readonly RegionConfig[] = [
-  // Frankfurt-only for now (DigitalOcean fra1). The other locations are kept in
-  // the catalog but disabled so they don't appear in the region picker.
+  // US-only for now: OVH (primary VPS provider) serves only US datacenters
+  // (US-EAST-VA / US-WEST-OR). The other locations are kept in the catalog but
+  // disabled so they don't appear in the region picker or get picked as the
+  // default region.
   {
     slug: "us-east-1",
     name: "Newark",
     country: "United States (East)",
     flag: "\u{1F1FA}\u{1F1F8}",
-    available: false,
+    available: true,
     sortOrder: 10,
     providerRegion: "us-east",
   },
@@ -30,7 +32,7 @@ export const REGIONS: readonly RegionConfig[] = [
     name: "Fremont",
     country: "United States (West)",
     flag: "\u{1F1FA}\u{1F1F8}",
-    available: false,
+    available: true,
     sortOrder: 20,
     providerRegion: "us-west",
   },
@@ -39,7 +41,7 @@ export const REGIONS: readonly RegionConfig[] = [
     name: "Frankfurt",
     country: "Germany",
     flag: "\u{1F1E9}\u{1F1EA}",
-    available: true,
+    available: false,
     sortOrder: 30,
     providerRegion: "fra1",
   },

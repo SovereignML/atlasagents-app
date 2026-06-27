@@ -71,6 +71,31 @@ describe("scoring", () => {
     expect(ranked[0].score).toBeLessThan(ranked[1].score)
   })
 
+  it("ranks OVH first as the primary provider (priority 120 + cheapest VPS)", () => {
+    const ovh = candidate({
+      providerId: "ovh",
+      providerSlug: "ovh",
+      providerName: "OVHcloud",
+      priority: 120,
+      providerPlanCode: "vps-2025-model1",
+      monthlyCostUsd: 4.54,
+    })
+    const akamai = candidate({
+      providerId: "akamai",
+      providerSlug: "linode",
+      priority: 110,
+      monthlyCostUsd: 24,
+    })
+    const digitalocean = candidate({
+      providerId: "do",
+      providerSlug: "digitalocean",
+      priority: 100,
+      monthlyCostUsd: 18,
+    })
+    const ranked = scoreCandidates([akamai, digitalocean, ovh], ROUTING_WEIGHTS)
+    expect(ranked[0].providerSlug).toBe("ovh")
+  })
+
   it("scores stay within [0,1] and breakdown matches the weighted sum", () => {
     const [c] = scoreCandidates([candidate()], ROUTING_WEIGHTS)
     expect(c.score).toBeGreaterThanOrEqual(0)

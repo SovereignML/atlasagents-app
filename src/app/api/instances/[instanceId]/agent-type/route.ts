@@ -66,6 +66,7 @@ export async function PATCH(
     deployment_target: prevConfig.deployment_target ?? "shared",
     knowledge_source: prevConfig.knowledge_source ?? "none",
     budget_tier: prevConfig.budget_tier ?? "mid",
+    custom_instructions: prevConfig.custom_instructions ?? "",
     runtime: prevConfig.runtime ?? "openclaw",
     webui_enabled: prevConfig.webui_enabled ?? false,
   }

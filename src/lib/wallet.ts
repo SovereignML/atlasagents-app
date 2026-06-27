@@ -240,6 +240,91 @@ export async function depositPlanCredits(
   )
 }
 
+/** The later of two (possibly null) dates; null means "no expiry set on that side". */
+function laterDate(a: Date | null, b: Date | null): Date | null {
+  if (!a) return b
+  if (!b) return a
+  return a.getTime() >= b.getTime() ? a : b
+}
+
+/**
+ * ADD a plan allotment to the existing plan bucket WITHOUT expiring it, inside a
+ * transaction. Unlike {@link depositPlanCreditsWithinTx} (which expires the prior
+ * bucket and replaces it — correct for a subscription RENEWAL), this stacks the
+ * allotment on top of whatever is already there and pushes the bucket's expiry
+ * out to the later of the current and the new period end.
+ *
+ * Use this for a NEW grant that should increase the total: a second/third
+ * instance's first invoice, free-tier and dev-mode deploys. Without it, deploying
+ * another agent would wipe the prior agent's remaining plan credits and reset the
+ * bucket to one plan's worth — i.e. credits never increase for a new instance.
+ *
+ * Use-it-or-lose-it is preserved by the period-end sweep (see credit-expiry.ts),
+ * which expires the bucket once `planCreditsExpireAt` passes.
+ *
+ * NOTE (known limitation): the bucket is per-WALLET, not per-subscription, so a
+ * single subscription's RENEWAL still expire-replaces the shared bucket. Fully
+ * isolating each subscription's credits + expiry needs a per-subscription ledger
+ * (tracked separately). This function fixes the new-instance case, which is the
+ * reported bug.
+ */
+export async function addPlanCreditsWithinTx(
+  tx: WalletTx,
+  userId: string,
+  credits: number,
+  expireAt: Date | null,
+  description?: string,
+  instanceId?: string,
+): Promise<number> {
+  const amount = Math.round(credits)
+  if (amount <= 0) {
+    throw new Error(`addPlanCredits requires a positive credit amount, got ${credits}`)
+  }
+
+  const wallet = await getOrCreateWalletTx(tx, userId, { forUpdate: true })
+  const nextExpiry = laterDate(wallet.planCreditsExpireAt ?? null, expireAt)
+
+  const [updated] = await tx
+    .update(wallets)
+    .set({
+      balance: sql`${wallets.balance} + ${amount}`,
+      balanceCents: sql`COALESCE(${wallets.balanceCents}, ROUND(${wallets.balance})::bigint) + ${amount}`,
+      lifetimeFundedCredits: sql`${wallets.lifetimeFundedCredits} + ${amount}`,
+      // Stack onto the existing plan bucket instead of replacing it.
+      planCredits: sql`${wallets.planCredits} + ${amount}`,
+      planCreditsCents: sql`COALESCE(${wallets.planCreditsCents}, ROUND(${wallets.planCredits})::bigint) + ${amount}`,
+      planCreditsExpireAt: nextExpiry,
+    })
+    .where(eq(wallets.id, wallet.id))
+    .returning({ balance: wallets.balance })
+
+  if (!updated) throw new Error(`addPlanCredits: wallet not found for user ${userId}`)
+
+  await tx.insert(walletTransactions).values({
+    walletId: wallet.id,
+    amount,
+    type: "plan_deposit",
+    description: description ?? null,
+    instanceId: instanceId ?? null,
+    balanceAfter: updated.balance,
+  })
+
+  return Math.round(updated.balance)
+}
+
+/** Standalone wrapper for {@link addPlanCreditsWithinTx}. */
+export async function addPlanCredits(
+  userId: string,
+  credits: number,
+  expireAt: Date | null,
+  description?: string,
+  instanceId?: string,
+): Promise<number> {
+  return db.transaction((tx) =>
+    addPlanCreditsWithinTx(tx, userId, credits, expireAt, description, instanceId),
+  )
+}
+
 /**
  * Expire a user's plan bucket NOW (period-end sweep for cancelled/lapsed subs
  * that get no renewal deposit). Locks the wallet, removes the unspent plan

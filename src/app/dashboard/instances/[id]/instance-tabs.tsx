@@ -41,6 +41,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Card,
   CardContent,
@@ -60,6 +61,7 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { cn } from "@/lib/utils"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
 import Plan from "@/components/ui/agent-plan"
 import { buildDeploymentTasks } from "@/lib/deployment-stages"
@@ -67,6 +69,7 @@ import { AutoRefresh } from "@/components/dashboard/auto-refresh"
 import { HeartbeatBar, type HeartbeatSample } from "@/components/dashboard/heartbeat-bar"
 import { AccessTab } from "./instance-access-tab"
 import { ToolsTab } from "./instance-tools-tab"
+import { SkillsTab } from "./instance-skills-tab"
 
 type InstanceLite = {
   id: string
@@ -90,6 +93,7 @@ type InstanceLite = {
   deploymentTarget: string | null
   provisionStage: string | null
   agentType: string | null
+  customInstructions: string
   runtime: string | null
   runtimeLabel: string
   webuiEnabled: boolean
@@ -168,6 +172,7 @@ const TABS = [
   { id: "monitoring", label: "Monitoring" },
   { id: "controls", label: "Controls" },
   { id: "tools", label: "Tools" },
+  { id: "skills", label: "Skills" },
   { id: "interfaces", label: "Interfaces" },
   { id: "backup", label: "Backup" },
   { id: "logs", label: "Logs" },
@@ -340,6 +345,13 @@ export function InstanceTabs({
       </TabsContent>
       <TabsContent value="tools" className="mt-0">
         <ToolsTab
+          instanceId={instance.id}
+          runtime={instance.runtime}
+          status={instance.status}
+        />
+      </TabsContent>
+      <TabsContent value="skills" className="mt-0">
+        <SkillsTab
           instanceId={instance.id}
           runtime={instance.runtime}
           status={instance.status}
@@ -1499,6 +1511,7 @@ function ControlsTab({
         </div>
       </SectionCard>
       <AgentTypeCard instance={instance} />
+      <CustomInstructionsCard instance={instance} />
       <ModelSelectCard instance={instance} />
       {!isVps && (
         <SectionCard
@@ -1600,10 +1613,76 @@ function AgentTypeCard({ instance }: { instance: InstanceLite }) {
   )
 }
 
+/* ───────────── CUSTOM INSTRUCTIONS CARD ───────────── */
+const MAX_CUSTOM_INSTRUCTIONS = 4000
+
+function CustomInstructionsCard({ instance }: { instance: InstanceLite }) {
+  const [value, setValue] = useState(instance.customInstructions ?? "")
+  const [saving, setSaving] = useState(false)
+  const router = useRouter()
+  const initial = instance.customInstructions ?? ""
+  const isDirty = value.trim() !== initial.trim()
+  const tooLong = value.length > MAX_CUSTOM_INSTRUCTIONS
+
+  async function save() {
+    setSaving(true)
+    try {
+      const r = await fetch(`/api/instances/${instance.id}/custom-instructions`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customInstructions: value.trim() }),
+      })
+      const j = await r.json()
+      if (!r.ok) {
+        toast.error(j.error || "Failed to update custom instructions")
+        return
+      }
+      if (j.warning) toast.warning(j.warning)
+      else toast.success("Custom instructions saved. Persona updated.")
+      router.refresh()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <SectionCard
+      title="Custom Instructions"
+      description="Freeform guidance added to this agent's persona at the highest priority — shape its behavior beyond its role defaults."
+    >
+      <Textarea
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        rows={6}
+        placeholder="e.g. Always reply in Spanish. Escalate billing questions to the #finance channel. Never promise refunds."
+        className="resize-y font-mono text-xs"
+      />
+      <p className="mt-1.5 font-mono text-[10px] text-muted-foreground">
+        <span className={cn(tooLong && "text-destructive")}>
+          {value.length.toLocaleString()}
+        </span>
+        {" / "}
+        {MAX_CUSTOM_INSTRUCTIONS.toLocaleString()} characters
+      </p>
+      {isDirty && (
+        <Button size="sm" className="mt-3" onClick={save} disabled={saving || tooLong}>
+          {saving ? "Saving…" : "Save & Apply"}
+        </Button>
+      )}
+    </SectionCard>
+  )
+}
+
 /* ───────────── MODEL SELECT CARD ───────────── */
 const DEFAULT_MODEL = "__default__"
 
-type ModelOption = { slug: string; label: string; contextLength: number | null }
+type ModelTag = "cheap" | "quality" | "allrounder"
+type ModelOption = {
+  slug: string
+  label: string
+  contextLength: number | null
+  tag: ModelTag | null
+}
 type ModelInfo = {
   current: string | null
   tierDefault: string
@@ -1614,6 +1693,32 @@ type ModelInfo = {
 function formatContext(ctx: number | null): string | null {
   if (ctx == null) return null
   return ctx >= 1000 ? `${Math.round(ctx / 1000)}k ctx` : `${ctx} ctx`
+}
+
+// At-a-glance positioning for the model picker — label + accent color per tag.
+const MODEL_TAG_META: Record<ModelTag, { label: string; className: string }> = {
+  cheap: {
+    label: "Cheap",
+    className: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  },
+  quality: {
+    label: "Best output",
+    className: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  },
+  allrounder: {
+    label: "All-rounder",
+    className: "border-sky-500/40 bg-sky-500/10 text-sky-600 dark:text-sky-400",
+  },
+}
+
+function ModelTagBadge({ tag }: { tag: ModelTag | null }) {
+  if (!tag) return null
+  const meta = MODEL_TAG_META[tag]
+  return (
+    <Badge variant="outline" className={cn("ml-1 px-1.5 py-0 text-[10px]", meta.className)}>
+      {meta.label}
+    </Badge>
+  )
 }
 
 function ModelSelectCard({ instance }: { instance: InstanceLite }) {
@@ -1698,6 +1803,7 @@ function ModelSelectCard({ instance }: { instance: InstanceLite }) {
                     {formatContext(m.contextLength)
                       ? ` · ${formatContext(m.contextLength)}`
                       : ""}
+                    <ModelTagBadge tag={m.tag} />
                   </SelectItem>
                 ))}
               </SelectGroup>

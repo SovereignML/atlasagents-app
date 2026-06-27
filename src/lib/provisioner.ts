@@ -1,6 +1,6 @@
 import crypto from "node:crypto"
 import type { InferSelectModel } from "drizzle-orm"
-import { db, instances, instanceLogs, regions, serverConfigs, providerHealthLogs, eq } from "@/db"
+import { db, instances, instanceLogs, instanceKnowledge, regions, serverConfigs, providerHealthLogs, eq } from "@/db"
 import {
   logInstanceEvent,
   transitionInstance,
@@ -38,8 +38,9 @@ import {
   renderEnvFile,
 } from "@/lib/runtimes/shared"
 import { getRuntime, type RuntimeEngine, type RuntimeId } from "@/lib/runtimes"
+import { FREE_DEMO_TTL_MS } from "@/configs/plans"
 import { PROVISION_EVENT } from "@/lib/provision-events"
-import { getVmProvider, describeVmError, type VmProvider } from "@/lib/vm-provider"
+import { getVmProvider, describeVmError, type VmProvider, type VpsProvider } from "@/lib/vm-provider"
 import {
   getVmProviderById,
   getVmProviderBySlug,
@@ -61,11 +62,37 @@ import {
   nvidiaKeyForSlot,
   type LlmProvider,
 } from "@/lib/model-router"
-import type { BudgetTier } from "@/lib/agent-config"
-import { generateAgentsMd, generateIdentityMd } from "@/lib/agent-identity"
-import { enabledToolsForRuntime, type AgentTool } from "@/configs/agent-tools"
+import { parseAgentConfig, type BudgetTier } from "@/lib/agent-config"
+import { generateIdentityMd } from "@/lib/agent-identity"
+import { generateSoul } from "@/lib/soul"
+import { defaultSkillsForCategory } from "@/configs/agent-skills"
+import { enabledToolsForRuntime, knowledgeBaseEnabled, type AgentTool } from "@/configs/agent-tools"
 
 type Instance = InferSelectModel<typeof instances>
+
+/**
+ * The role-first persona written to the runtime's workspace `AGENTS.md` (the
+ * file the gateway reads on boot). It IS the canonical persona — regenerated
+ * from the live config + skills + Knowledge Base flag via `generateSoul`, so the
+ * VPS/BYOS agent presents as its role, not as the OpenClaw/Hermes framework.
+ * Falls back to the stored `soulMd` (or a minimal default) if the config can't
+ * be parsed, so legacy instances still get a persona.
+ */
+function buildWorkspaceAgentsMd(
+  instance: Instance,
+  skills: string[] | null,
+  hasKnowledgeBase: boolean,
+): string {
+  const parsed = instance.agentConfig ? parseAgentConfig(instance.agentConfig) : null
+  if (parsed?.ok) {
+    const skillIds =
+      skills && skills.length > 0
+        ? skills
+        : defaultSkillsForCategory(instance.agentType ?? "custom")
+    return generateSoul(parsed.data, skillIds, { hasKnowledgeBase })
+  }
+  return instance.soulMd ?? "You are a helpful assistant."
+}
 
 const BOT_RUNTIME_IMAGE = () =>
   process.env.BOT_RUNTIME_IMAGE || "ghcr.io/sovereignml/sovereign-bot-runtime:latest"
@@ -720,6 +747,9 @@ async function provisionBotLocked(
   })
 
   try {
+    // #region agent log
+    fetch('http://127.0.0.1:7305/ingest/880804f1-30d2-40e6-a578-5c94bee7e97e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'52ccd5'},body:JSON.stringify({sessionId:'52ccd5',runId:'pre-fix-2',hypothesisId:'A2,F',location:'src/lib/provisioner.ts:provisionBotLocked',message:'provision branch',data:{target,liveMode:isLiveMode(),hasOvhAppKey:!!process.env.OVH_APP_KEY,hasDoToken:!!process.env.DIGITALOCEAN_API_TOKEN,hasLinodeToken:!!process.env.LINODE_API_TOKEN,hasFleetKey:!!process.env.SSH_FLEET_PRIVATE_KEY},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     let result: ProvisionResult
     if (!isLiveMode()) {
       await logInstanceEvent({
@@ -746,6 +776,21 @@ async function provisionBotLocked(
       result = await provisionByosBot(instance)
     } else {
       result = await provisionSharedBot(instance)
+    }
+
+    // Demo agents (Free tier) carry a non-null expiresAt seeded at creation.
+    // Re-base the clock to go-live so the user gets the full TTL of running
+    // time rather than TTL-minus-provisioning. Best-effort — a failed re-stamp
+    // just leaves the create-time deadline in place.
+    if (instance.expiresAt) {
+      try {
+        await db
+          .update(instances)
+          .set({ expiresAt: new Date(Date.now() + FREE_DEMO_TTL_MS) })
+          .where(eq(instances.id, instance.id))
+      } catch {
+        /* keep the create-time expiry */
+      }
     }
 
     // Register the agent in Uptime Kuma now that it's running and has a public
@@ -1024,6 +1069,19 @@ type AcquiredVm = {
   vmId: string
   ipAddress: string
   useGoldenImage: boolean
+  /**
+   * Whether the provider booted the VM from cloud-init. When false (OVH VPS),
+   * the runtime bootstrap is run over SSH after boot instead of polling for a
+   * cloud-init completion marker that will never arrive.
+   */
+  supportsCloudInit: boolean
+}
+
+/** Cloud-init capability for a provider — defaults true for the legacy VmProvider. */
+function providerSupportsCloudInit(provider: VmProvider): boolean {
+  return "supportsCloudInit" in provider
+    ? (provider as VpsProvider).supportsCloudInit
+    : true
 }
 
 type AcquireOpts = {
@@ -1112,6 +1170,9 @@ async function handleFailedAttempt(
   err: unknown,
 ): Promise<void> {
   const reason = await describeProviderError(candidate.providerSlug, err)
+  // #region agent log
+  fetch('http://127.0.0.1:7305/ingest/880804f1-30d2-40e6-a578-5c94bee7e97e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'52ccd5'},body:JSON.stringify({sessionId:'52ccd5',runId:'pre-fix',hypothesisId:'F',location:'src/lib/provisioner.ts:handleFailedAttempt',message:'provider attempt failed',data:{provider:candidate.providerSlug,plan:candidate.providerPlanCode,region:candidate.providerRegionCode,reason:String(reason).slice(0,300)},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   await logInstanceEvent({
     instanceId: instance.id,
     level: "warn",
@@ -1173,6 +1234,7 @@ async function acquireBootedVm(
       vmId: instance.vmId,
       ipAddress,
       useGoldenImage: shouldUseGoldenImage(null, runtime),
+      supportsCloudInit: providerSupportsCloudInit(provider),
     }
   }
 
@@ -1182,6 +1244,10 @@ async function acquireBootedVm(
     instanceId: instance.id,
   }
   const decision = await routeDeployment(input)
+
+  // #region agent log
+  fetch('http://127.0.0.1:7305/ingest/880804f1-30d2-40e6-a578-5c94bee7e97e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'52ccd5'},body:JSON.stringify({sessionId:'52ccd5',runId:'pre-fix',hypothesisId:'F',location:'src/lib/provisioner.ts:acquireBootedVm',message:'routing decision',data:{chosen:decision.chosen?.providerSlug??null,ranked:decision.ranked.map((c)=>c.providerSlug),rejected:decision.rejected.map((r)=>({slug:r.providerSlug,reason:r.reason}))},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
   // Backward-compat: no provider mapping yet → legacy env-default provider.
   if (decision.ranked.length === 0) {
@@ -1208,7 +1274,14 @@ async function acquireBootedVm(
       providerRegion,
       { ...opts, useGoldenImage },
     )
-    return { provider, providerId: null, vmId, ipAddress, useGoldenImage }
+    return {
+      provider,
+      providerId: null,
+      vmId,
+      ipAddress,
+      useGoldenImage,
+      supportsCloudInit: providerSupportsCloudInit(provider),
+    }
   }
 
   const attempts = decision.ranked.slice(0, MAX_FAILOVER_ATTEMPTS)
@@ -1237,7 +1310,14 @@ async function acquireBootedVm(
         .set({ providerId: candidate.providerId })
         .where(eq(instances.id, instance.id))
       await logRoutingDecision(input, decision, { outcome: "succeeded", chosen: candidate })
-      return { provider, providerId: candidate.providerId, vmId, ipAddress, useGoldenImage }
+      return {
+        provider,
+        providerId: candidate.providerId,
+        vmId,
+        ipAddress,
+        useGoldenImage,
+        supportsCloudInit: providerSupportsCloudInit(provider),
+      }
     } catch (err) {
       lastErr = err
       await handleFailedAttempt(instance, candidate, err)
@@ -1290,6 +1370,7 @@ async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
     ipAddress = acquired.ipAddress
     providerId = acquired.providerId
     const useGoldenImage = acquired.useGoldenImage
+    const supportsCloudInit = acquired.supportsCloudInit
 
     /* --- 2b. Cloudflare managed subdomain --------------------------- */
     let managedSubdomainForProvision: string | null = instance.managedSubdomain ?? null
@@ -1338,7 +1419,9 @@ async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
     })
     await sshWaitReady(target)
 
-    /* --- 4. Wait for cloud-init bootstrap to complete ---------------- */
+    /* --- 4. Bootstrap: golden image (skip), cloud-init (poll), or run  */
+    /*        the bootstrap over SSH for providers without cloud-init     */
+    /*        (OVH VPS).                                                  */
     if (useGoldenImage) {
       currentStage = "bootstrap"
       await setProvisionStage(instance.id, currentStage)
@@ -1349,7 +1432,7 @@ async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
         result: "ok",
         message: "Golden image — bootstrap already complete. Skipping cloud-init.",
       })
-    } else {
+    } else if (supportsCloudInit) {
       currentStage = "bootstrap"
       await setProvisionStage(instance.id, currentStage)
       await logInstanceEvent({
@@ -1358,6 +1441,44 @@ async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
         message: PROVISION_EVENT.bootstrapping,
       })
       await sshPollBootstrap(target)
+      await logInstanceEvent({
+        instanceId: instance.id,
+        stage: currentStage,
+        action: "bootstrap_complete",
+        result: "ok",
+        message: PROVISION_EVENT.bootstrapComplete,
+      })
+    } else {
+      // No cloud-init (OVH VPS): run the runtime bootstrap over SSH, mirroring
+      // the BYOS path. The VM booted a clean Ubuntu image with our fleet key.
+      currentStage = "bootstrap"
+      await setProvisionStage(instance.id, currentStage)
+      await logInstanceEvent({
+        instanceId: instance.id,
+        stage: currentStage,
+        message: PROVISION_EVENT.bootstrapping,
+      })
+      const bootstrapScript = runtime.renderBootstrap({
+        gatewayPort: runtime.gatewayPort,
+        cfOriginCertPem,
+        cfOriginKeyPem,
+        webuiEnabled: Boolean(instance.webuiEnabled) && Boolean(runtime.sidecar),
+      })
+      const bootstrapStep = await sshRunScriptLogged(
+        target,
+        bootstrapScript,
+        currentStage,
+        "vps:bootstrap (install node/caddy/runtime)",
+        { timeoutMs: 600_000 },
+      )
+      await logSshStep(instance.id, bootstrapStep)
+      if (bootstrapStep.exitCode !== 0 && bootstrapStep.exitCode !== null) {
+        throw new Error(
+          `OVH VPS bootstrap failed (exit ${bootstrapStep.exitCode}): ${
+            bootstrapStep.stderr || bootstrapStep.stdout
+          }`,
+        )
+      }
       await logInstanceEvent({
         instanceId: instance.id,
         stage: currentStage,
@@ -1561,8 +1682,15 @@ async function configureRuntimeOverSsh(
 
   /* Phase A — write .env + openclaw.json + identity files (batch, ~5s) */
   const agentType = instance.agentType ?? "custom"
-  const agentsMdB64 = Buffer.from(generateAgentsMd(agentType), "utf8").toString("base64")
-  const identityMdB64 = Buffer.from(generateIdentityMd(agentType), "utf8").toString("base64")
+  const identityOpts = {
+    skills: (instance.skills as string[] | null) ?? null,
+    hasKnowledgeBase: knowledgeBaseEnabled(instance.enabledTools ?? []),
+  }
+  const agentsMdB64 = Buffer.from(
+    buildWorkspaceAgentsMd(instance, identityOpts.skills, identityOpts.hasKnowledgeBase),
+    "utf8",
+  ).toString("base64")
+  const identityMdB64 = Buffer.from(generateIdentityMd(agentType, identityOpts), "utf8").toString("base64")
   const phaseAScript = buildPhaseWriteConfig({
     runtime,
     envB64,
@@ -2456,6 +2584,83 @@ export async function installToolDependencies(
   }
 }
 
+/** Filesystem-safe, unique `.md` filename for a knowledge source. */
+function knowledgeFileName(name: string, used: Set<string>): string {
+  const base =
+    name
+      .replace(/^.*[\\/]/, "") // strip any path
+      .replace(/\.[^.]+$/, "") // strip extension (we always emit .md)
+      .replace(/[^A-Za-z0-9._-]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 80) || "source"
+  let candidate = `${base}.md`
+  let n = 2
+  while (used.has(candidate)) candidate = `${base}-${n++}.md`
+  used.add(candidate)
+  return candidate
+}
+
+/**
+ * Rebuild the agent's `workspace/knowledge/` directory from `instanceKnowledge`
+ * rows, over an already-resolved SSH target. Idempotent: wipes and recreates the
+ * dir so deletes propagate. Each source becomes a markdown file (title + optional
+ * source URL header + extracted text). Caller owns restart semantics.
+ */
+async function writeKnowledgeFiles(
+  target: ReturnType<typeof sshTargetFor>,
+  workspaceDir: string,
+  owner: string,
+  instanceId: string,
+): Promise<void> {
+  const { sshWriteFile } = await import("@/lib/ssh")
+  const knowledgeDir = `${workspaceDir}/knowledge`
+  const rows = await db
+    .select()
+    .from(instanceKnowledge)
+    .where(eq(instanceKnowledge.instanceId, instanceId))
+
+  await sshRun(target, `rm -rf '${knowledgeDir}' && mkdir -p '${knowledgeDir}'`)
+  const used = new Set<string>()
+  for (const row of rows) {
+    const fileName = knowledgeFileName(row.name, used)
+    const header =
+      row.type === "url" && row.sourceUrl
+        ? `# ${row.name}\nSource: ${row.sourceUrl}\n\n`
+        : `# ${row.name}\n\n`
+    await sshWriteFile(target, `${knowledgeDir}/${fileName}`, header + (row.textContent ?? ""))
+  }
+  await sshRun(target, `chown -R ${owner} '${knowledgeDir}'`)
+}
+
+/**
+ * Sync the Knowledge Base corpus to a live instance WITHOUT restarting it.
+ * Called by the knowledge API after a source is added/removed — the agent reads
+ * workspace files per session, so a restart isn't needed for content changes
+ * (enabling/disabling the KB tool itself goes through reprovisionBotEnv, which
+ * regenerates the identity files and restarts). No-op in mock / non-systemd.
+ */
+export async function syncKnowledgeBase(instance: Instance): Promise<void> {
+  if (!isLiveMode() || !instance.ipAddress) {
+    await db.insert(instanceLogs).values({
+      instanceId: instance.id,
+      level: "info",
+      message: "Knowledge base sync signalled (mock).",
+    })
+    return
+  }
+  if (!usesSystemd(instance)) return
+  const runtime = getRuntime(instance.runtime)
+  const { workspaceDir, systemUser } = runtime.paths
+  const owner = `${systemUser}:${systemUser}`
+  const target = sshTargetFor(instance)
+  await writeKnowledgeFiles(target, workspaceDir, owner, instance.id)
+  await db.insert(instanceLogs).values({
+    instanceId: instance.id,
+    level: "info",
+    message: "Knowledge base synced to the agent workspace.",
+  })
+}
+
 export async function reprovisionBotEnv(instance: Instance): Promise<void> {
   if (!isLiveMode() || !instance.ipAddress) {
     await db.insert(instanceLogs).values({
@@ -2593,7 +2798,6 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
           managedSubdomain: instance.managedSubdomain,
           ipAddress: instance.ipAddress,
           tlsStatus: instance.tlsStatus,
-          soulMd: instance.soulMd,
           enabledToolIds: instance.enabledTools ?? [],
         }),
       )
@@ -2601,18 +2805,30 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
     }
 
     const reprovAgentType = instance.agentType ?? "custom"
+    const reprovIdentityOpts = {
+      skills: (instance.skills as string[] | null) ?? null,
+      hasKnowledgeBase: knowledgeBaseEnabled(instance.enabledTools ?? []),
+    }
     await sshRun(target, `mkdir -p '${workspaceDir}'`)
     await sshWriteFile(
       target,
       `${workspaceDir}/AGENTS.md`,
-      generateAgentsMd(reprovAgentType),
+      buildWorkspaceAgentsMd(
+        instance,
+        reprovIdentityOpts.skills,
+        reprovIdentityOpts.hasKnowledgeBase,
+      ),
     )
     await sshWriteFile(
       target,
       `${workspaceDir}/IDENTITY.md`,
-      generateIdentityMd(reprovAgentType),
+      generateIdentityMd(reprovAgentType, reprovIdentityOpts),
     )
     await sshRun(target, `chown -R ${owner} '${workspaceDir}'`)
+
+    // Sync the Knowledge Base corpus into workspace/knowledge/ so the agent can
+    // read/cite it. Idempotent (rebuilds the dir from the DB each time).
+    await writeKnowledgeFiles(target, workspaceDir, owner, instance.id)
 
     await sshSystemctlRestart(target, runtime.serviceName)
 

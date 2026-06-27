@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import type { AgentTool } from "@/configs/agent-tools"
+import { KnowledgeManager } from "./instance-knowledge-manager"
 
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Globe,
@@ -199,6 +200,9 @@ export function ToolsTab({
           {saving ? "Applying…" : "Save & Apply"}
         </Button>
       )}
+
+      {/* Knowledge Base sources — shown once the KB tool is saved/enabled. */}
+      {initial.includes("knowledge_base") && <KnowledgeManager instanceId={instanceId} />}
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import type { AgentConfig } from "@/lib/agent-config"
+import { defaultSkillsForCategory } from "@/configs/agent-skills"
 
 /**
  * Canonical skill sets per agent category. Keys match the `slug` field of
@@ -67,8 +68,12 @@ export const SKILL_MAP: Record<string, readonly string[]> = {
   ],
 } as const
 
-/** Returns the skill list for a config, falling back to "custom" if the use_case isn't mapped. */
+/**
+ * Default skill ids for a new agent, from the AGENT_SKILLS catalog (the
+ * user-editable Skills section). Seeds `instances.skills` at create time; the
+ * user can then toggle skills in the Skills tab. Legacy `SKILL_MAP` above is
+ * retained only for reference — it's no longer the source of truth.
+ */
 export function selectSkills(cfg: AgentConfig): string[] {
-  const list = SKILL_MAP[cfg.use_case] ?? SKILL_MAP.custom
-  return [...list]
+  return defaultSkillsForCategory(cfg.use_case)
 }

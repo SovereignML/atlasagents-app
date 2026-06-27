@@ -130,7 +130,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
             brandName={branding.brandName}
             teams={teamList}
             activeTeamId={activeTeamId}
-            consoleTheme={consoleTheme}
             impersonating={
               impersonatedUser
                 ? {

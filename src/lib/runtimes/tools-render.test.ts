@@ -41,8 +41,28 @@ describe("OpenClaw renderConfig — tools", () => {
 
   it("ignores comingSoon catalog tools (no config drift)", () => {
     const empty = openclawRuntime.renderConfig({ ...base, enabledToolIds: [] })
-    const coming = openclawRuntime.renderConfig({ ...base, enabledToolIds: ["web_search"] })
+    // `code` is still comingSoon → must not affect the rendered config.
+    const coming = openclawRuntime.renderConfig({ ...base, enabledToolIds: ["code"] })
     expect(coming).toBe(empty)
+  })
+
+  it("grants web_search in tools.alsoAllow when enabled", () => {
+    const out = openclawRuntime.renderConfig({ ...base, enabledToolIds: ["web_search"] })
+    expect(out).toContain('"alsoAllow"')
+    expect(out).toContain('"web_search"')
+    expect(out).not.toContain("browser")
+  })
+
+  it("knowledge_base is host-side: no tools/browser sections (== empty)", () => {
+    const empty = openclawRuntime.renderConfig({ ...base, enabledToolIds: [] })
+    const kb = openclawRuntime.renderConfig({ ...base, enabledToolIds: ["knowledge_base"] })
+    expect(kb).toBe(empty)
+  })
+
+  it("image_gen no-ops on OpenClaw (unsupported → == empty)", () => {
+    const empty = openclawRuntime.renderConfig({ ...base, enabledToolIds: [] })
+    const img = openclawRuntime.renderConfig({ ...base, enabledToolIds: ["image_gen"] })
+    expect(img).toBe(empty)
   })
 })
 
@@ -70,5 +90,21 @@ describe("Hermes renderInitScript — toolsets", () => {
     })!
     expect(out).toContain(`["hermes-cli","browser"]`)
     expect(out).toContain("config set browser.provider local")
+  })
+
+  it("maps web_search → web and image_gen → image_gen toolsets", () => {
+    const out = hermesRuntime.renderInitScript!({
+      ...initBase,
+      enabledToolIds: ["web_search", "image_gen"],
+    })!
+    expect(out).toContain(`["hermes-cli","web","image_gen"]`)
+  })
+
+  it("knowledge_base adds no toolset (host-side capability)", () => {
+    const out = hermesRuntime.renderInitScript!({
+      ...initBase,
+      enabledToolIds: ["knowledge_base"],
+    })!
+    expect(out).toContain(`config set toolsets '["hermes-cli"]'`)
   })
 })

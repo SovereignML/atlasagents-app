@@ -17,6 +17,7 @@ import {
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
 import { whereUserInstancesVisible } from "@/lib/instance-queries"
 import { getEffectiveUserId } from "@/lib/effective-user"
+import { maybeReapDemoInstances } from "@/lib/demo-reaper"
 import { InstancesFilter } from "./instances-filter"
 
 export default async function InstancesPage() {
@@ -24,6 +25,10 @@ export default async function InstancesPage() {
   if (!session?.user?.id) redirect("/login")
   // Resolve through impersonation so an admin viewing-as a user sees their agents.
   const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
+
+  // Best-effort: reap Free demos past their 30-min trial on list view too, so
+  // expired agents drop out without needing an external cron (throttled ~60s).
+  void maybeReapDemoInstances().catch(() => {})
 
   const rows = await db.query.instances.findMany({
     where: whereUserInstancesVisible(effectiveUserId),
@@ -48,6 +53,7 @@ export default async function InstancesPage() {
       ipAddress: i.ipAddress,
       runtime: i.runtime,
       deploymentTarget: i.deploymentTarget,
+      expiresAt: i.expiresAt?.toISOString() ?? null,
       serverLabel: i.serverConfig.label,
       vcpu: i.serverConfig.vcpu,
       ramGb: i.serverConfig.ramGb,

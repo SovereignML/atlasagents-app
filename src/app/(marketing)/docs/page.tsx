@@ -36,7 +36,7 @@ const faqItems = [
   {
     question: "How does billing work?",
     answer:
-      "Billing is monthly or yearly via Stripe. Plans include Free (100 credits), Builder ($79/mo), Operator ($199/mo), Scale ($399/mo), and Enterprise (from $1,000+/mo). Credits cover AI usage, workflows, automations, and vector search; you can buy overage packs. Annual billing includes about two months free vs. monthly. Manage subscriptions from your dashboard.",
+      "Billing is monthly or yearly via Stripe. Plans include Free (100 credits), Lite ($9/mo), Builder ($19/mo), Operator ($69/mo), Scale ($179/mo), and Enterprise (from $499/mo). Credits cover AI usage, workflows, automations, and vector search; you can buy overage packs. Annual billing includes about two months free vs. monthly. Manage subscriptions from your dashboard.",
   },
   {
     question: "Can I deploy multiple agents?",

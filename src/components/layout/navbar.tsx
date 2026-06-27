@@ -1,10 +1,12 @@
 "use client"
 
 import { useState } from "react"
+import Image from "next/image"
 import Link from "next/link"
+import { useSession } from "next-auth/react"
 import { motion, AnimatePresence, useScroll, useMotionValueEvent } from "framer-motion"
+import { BRANDING } from "@/configs/branding"
 import { easing, staggerDelay } from "@/lib/motion"
-import { ThemeToggle } from "@/components/ui/theme-toggle"
 
 const NAV_LINKS = [
   { href: "/#features", label: "Features" },
@@ -17,8 +19,16 @@ export default function Navbar({ isAuthenticated = false }: { isAuthenticated?: 
   const [mobileOpen, setMobileOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
 
-  const accountHref = isAuthenticated ? "/dashboard" : "/login"
-  const accountLabel = isAuthenticated ? "Dashboard" : "Log In"
+  // The home page ("/") renders this client navbar without the server-resolved
+  // `isAuthenticated` prop (only (marketing)/layout passes it), so the bar would
+  // always read "Log In" on reload. Fall back to the client session so the
+  // Dashboard link renders once auth rehydrates. The prop is kept as an SSR
+  // hint to avoid a flash where it's available.
+  const { status } = useSession()
+  const authed = isAuthenticated || status === "authenticated"
+
+  const accountHref = authed ? "/dashboard" : "/login"
+  const accountLabel = authed ? "Dashboard" : "Log In"
 
   // Solidify the bar once the user scrolls past the hero's top edge.
   const { scrollY } = useScroll()
@@ -40,8 +50,16 @@ export default function Navbar({ isAuthenticated = false }: { isAuthenticated?: 
         }}
       >
         <div className="flex justify-between items-center w-full px-6">
-          <Link href="/" className="text-xl font-bold text-white">
-            SovereignML
+          <Link href="/" className="flex items-center gap-2.5 text-xl font-bold text-white">
+            <Image
+              src="/assets/icons/SovereignML-logo-white.svg"
+              alt=""
+              width={28}
+              height={28}
+              className="shrink-0"
+              priority
+            />
+            {BRANDING.name}
           </Link>
 
           <div className="hidden md:flex gap-8">
@@ -69,8 +87,6 @@ export default function Navbar({ isAuthenticated = false }: { isAuthenticated?: 
             >
               Book Demo
             </a>
-            <div className="w-px h-6 bg-white/10 mx-1" />
-            <ThemeToggle className="w-8 h-8" />
           </div>
 
           <button

@@ -132,12 +132,24 @@ export function routeModel(
 
 export type AllowedModelKind = "chat" | "image" | "moderation"
 
+/**
+ * At-a-glance positioning shown in the per-instance model picker so users don't
+ * need to read pricing/benchmark tables:
+ *   cheap      — best value / lowest cost
+ *   quality    — best output quality (premium)
+ *   allrounder — balanced default-grade pick
+ * Curated, not derived — tweak freely as the lineup changes.
+ */
+export type ModelTag = "cheap" | "quality" | "allrounder"
+
 export type AllowedOpenRouterModel = {
   /** Live OpenRouter slug (verified against /api/v1/models on 2026-06-12). */
   slug: string
   label: string
   /** Only `chat` models are usable as agent brains for OpenClaw/Hermes. */
   kind: AllowedModelKind
+  /** Picker positioning hint (chat models only). */
+  tag?: ModelTag
 }
 
 /**
@@ -148,28 +160,38 @@ export type AllowedOpenRouterModel = {
  * the OpenRouter account settings whenever the allowlist changes there.
  */
 export const ALLOWED_OPENROUTER_MODELS: AllowedOpenRouterModel[] = [
-  { slug: "anthropic/claude-sonnet-4.6", label: "Claude Sonnet 4.6", kind: "chat" },
-  { slug: "deepseek/deepseek-v4-flash", label: "DeepSeek V4 Flash", kind: "chat" },
-  { slug: "deepseek/deepseek-v4-pro", label: "DeepSeek V4 Pro", kind: "chat" },
-  { slug: "google/gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite", kind: "chat" },
-  { slug: "google/gemini-3.5-flash", label: "Gemini 3.5 Flash", kind: "chat" },
-  { slug: "google/gemma-4-26b-a4b-it:free", label: "Gemma 4 26B A4B (free)", kind: "chat" },
-  { slug: "google/gemma-4-31b-it:free", label: "Gemma 4 31B (free)", kind: "chat" },
-  { slug: "minimax/minimax-m2.5", label: "MiniMax M2.5", kind: "chat" },
-  { slug: "mistralai/mistral-medium-3-5", label: "Mistral Medium 3.5", kind: "chat" },
-  { slug: "mistralai/mistral-small-2603", label: "Mistral Small 4", kind: "chat" },
-  { slug: "moonshotai/kimi-k2.6", label: "Kimi K2.6", kind: "chat" },
-  { slug: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", label: "Nemotron 3 Nano Omni (free)", kind: "chat" },
-  { slug: "nvidia/nemotron-3-ultra-550b-a55b:free", label: "Nemotron 3 Ultra (free)", kind: "chat" },
-  { slug: "openai/gpt-5.4-mini", label: "GPT-5.4 Mini", kind: "chat" },
-  { slug: "openai/gpt-5.4-nano", label: "GPT-5.4 Nano", kind: "chat" },
-  { slug: "openai/gpt-5.5", label: "GPT-5.5", kind: "chat" },
-  { slug: "qwen/qwen3.6-flash", label: "Qwen3.6 Flash", kind: "chat" },
-  { slug: "z-ai/glm-5.1", label: "GLM 5.1", kind: "chat" },
+  { slug: "anthropic/claude-sonnet-4.6", label: "Claude Sonnet 4.6", kind: "chat", tag: "quality" },
+  { slug: "deepseek/deepseek-v4-flash", label: "DeepSeek V4 Flash", kind: "chat", tag: "cheap" },
+  { slug: "deepseek/deepseek-v4-pro", label: "DeepSeek V4 Pro", kind: "chat", tag: "allrounder" },
+  { slug: "google/gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite", kind: "chat", tag: "cheap" },
+  { slug: "google/gemini-3.5-flash", label: "Gemini 3.5 Flash", kind: "chat", tag: "allrounder" },
+  { slug: "google/gemma-4-26b-a4b-it:free", label: "Gemma 4 26B A4B (free)", kind: "chat", tag: "cheap" },
+  { slug: "google/gemma-4-31b-it:free", label: "Gemma 4 31B (free)", kind: "chat", tag: "cheap" },
+  { slug: "minimax/minimax-m2.5", label: "MiniMax M2.5", kind: "chat", tag: "allrounder" },
+  { slug: "mistralai/mistral-medium-3-5", label: "Mistral Medium 3.5", kind: "chat", tag: "allrounder" },
+  { slug: "mistralai/mistral-small-2603", label: "Mistral Small 4", kind: "chat", tag: "cheap" },
+  { slug: "moonshotai/kimi-k2.6", label: "Kimi K2.6", kind: "chat", tag: "quality" },
+  { slug: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", label: "Nemotron 3 Nano Omni (free)", kind: "chat", tag: "cheap" },
+  { slug: "nvidia/nemotron-3-ultra-550b-a55b:free", label: "Nemotron 3 Ultra (free)", kind: "chat", tag: "quality" },
+  { slug: "openai/gpt-5.4-mini", label: "GPT-5.4 Mini", kind: "chat", tag: "allrounder" },
+  { slug: "openai/gpt-5.4-nano", label: "GPT-5.4 Nano", kind: "chat", tag: "cheap" },
+  { slug: "openai/gpt-5.5", label: "GPT-5.5", kind: "chat", tag: "quality" },
+  { slug: "qwen/qwen3.6-flash", label: "Qwen3.6 Flash", kind: "chat", tag: "cheap" },
+  { slug: "z-ai/glm-5.1", label: "GLM 5.1", kind: "chat", tag: "allrounder" },
   { slug: "google/gemini-3.1-flash-image-preview", label: "Nano Banana 2 (Gemini 3.1 Flash Image)", kind: "image" },
   { slug: "openai/gpt-5.4-image-2", label: "GPT-5.4 Image 2", kind: "image" },
   { slug: "nvidia/nemotron-3.5-content-safety:free", label: "Nemotron 3.5 Content Safety (free)", kind: "moderation" },
 ]
+
+/** Curated picker positioning by slug (see {@link ModelTag}). */
+const MODEL_TAG_BY_SLUG: Map<string, ModelTag> = new Map(
+  ALLOWED_OPENROUTER_MODELS.flatMap((m) => (m.tag ? [[m.slug, m.tag] as const] : [])),
+)
+
+/** The picker positioning tag for a model slug, or null if untagged. */
+export function modelTag(slug: string): ModelTag | null {
+  return MODEL_TAG_BY_SLUG.get(slug) ?? null
+}
 
 const ALLOWED_SLUGS = new Set(ALLOWED_OPENROUTER_MODELS.map((m) => m.slug))
 

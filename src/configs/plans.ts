@@ -3,6 +3,7 @@
 
 export type PlanTier =
   | "free"
+  | "lite"
   | "builder"
   | "operator"
   | "scale"
@@ -26,17 +27,31 @@ export type PlanConfig = {
   sortOrder: number
   /** Credits granted each billing period (seed + product logic) */
   creditsPerPeriod: number
-  /** Monthly list price (0 for Free) — this is the all-in customer-facing price */
+  /** Monthly list price (0 for Free) — this is the all-in customer-facing price (promo/live) */
   displayPriceMonthly: number
-  /** Annual list price (0 for Free; Enterprise may omit use of this) */
+  /** Annual list price (0 for Free; Enterprise may omit use of this) — promo/live */
   displayPriceYearly: number
+  /** Full (after-launch) monthly price; shown struck-through when > displayPriceMonthly */
+  fullPriceMonthly: number
+  /** Full (after-launch) yearly price; shown struck-through when > displayPriceYearly */
+  fullPriceYearly: number
   highlight?: boolean
   cta: PlanCTA
-  /** Enterprise custom price line */
+  /** Enterprise custom price line (promo/live) */
   enterprisePriceLabel?: string
+  /** Enterprise full (after-launch) price line; shown struck-through above the promo label */
+  enterpriseFullPriceLabel?: string
   /** Server config slug that this plan provisions (null = custom / contact sales) */
   serverConfigSlug: string | null
 }
+
+/**
+ * How long a Free-tier (demo) agent stays live after it provisions before the
+ * reaper tears it down. `instances.expiresAt` carries the deadline; a non-null
+ * value is the single "this is a demo agent" signal used by the reaper + the
+ * dashboard countdown. See src/lib/demo-reaper.ts.
+ */
+export const FREE_DEMO_TTL_MS = 30 * 60 * 1000 // 30 minutes
 
 export const PLANS: readonly PlanConfig[] = [
   {
@@ -58,8 +73,37 @@ export const PLANS: readonly PlanConfig[] = [
     creditsPerPeriod: 100,
     displayPriceMonthly: 0,
     displayPriceYearly: 0,
+    fullPriceMonthly: 0,
+    fullPriceYearly: 0,
     cta: "start-free",
-    serverConfigSlug: "shared-1g",
+    // Free is a time-boxed demo (auto-reaped after FREE_DEMO_TTL_MS), so it
+    // runs on the same machine as Builder for a representative experience.
+    serverConfigSlug: "shared-4g",
+  },
+  {
+    slug: "lite",
+    tier: "lite",
+    name: "Lite",
+    description: "For trying it for real",
+    features: [
+      "500 credits included",
+      "Deploy AI agents",
+      "Workflow automation",
+      "Email support",
+      "1 live agent included",
+    ],
+    stripePriceIdMonthly: process.env.STRIPE_PRICE_LITE_MONTHLY ?? "",
+    stripePriceIdYearly: process.env.STRIPE_PRICE_LITE_YEARLY ?? "",
+    isActive: true,
+    sortOrder: 5,
+    creditsPerPeriod: 500,
+    displayPriceMonthly: 9,
+    displayPriceYearly: 90,
+    fullPriceMonthly: 9,
+    fullPriceYearly: 90,
+    cta: "get-started",
+    // Smallest runtime-safe tier (>=2GB RAM) for the always-on agent.
+    serverConfigSlug: "shared-2g",
   },
   {
     slug: "builder",
@@ -79,8 +123,10 @@ export const PLANS: readonly PlanConfig[] = [
     isActive: true,
     sortOrder: 10,
     creditsPerPeriod: 1_000,
-    displayPriceMonthly: 79,
-    displayPriceYearly: 790,
+    displayPriceMonthly: 19,
+    displayPriceYearly: 190,
+    fullPriceMonthly: 29,
+    fullPriceYearly: 290,
     cta: "get-started",
     serverConfigSlug: "shared-4g",
   },
@@ -102,8 +148,10 @@ export const PLANS: readonly PlanConfig[] = [
     isActive: true,
     sortOrder: 20,
     creditsPerPeriod: 2_000,
-    displayPriceMonthly: 199,
-    displayPriceYearly: 1_990,
+    displayPriceMonthly: 69,
+    displayPriceYearly: 690,
+    fullPriceMonthly: 99,
+    fullPriceYearly: 990,
     highlight: true,
     cta: "get-started",
     serverConfigSlug: "shared-8g",
@@ -126,8 +174,10 @@ export const PLANS: readonly PlanConfig[] = [
     isActive: true,
     sortOrder: 30,
     creditsPerPeriod: 5_000,
-    displayPriceMonthly: 399,
-    displayPriceYearly: 3_990,
+    displayPriceMonthly: 179,
+    displayPriceYearly: 1_790,
+    fullPriceMonthly: 249,
+    fullPriceYearly: 2_490,
     cta: "get-started",
     serverConfigSlug: "shared-16g",
   },
@@ -149,9 +199,12 @@ export const PLANS: readonly PlanConfig[] = [
     isActive: true,
     sortOrder: 40,
     creditsPerPeriod: 0,
-    displayPriceMonthly: 999,
-    displayPriceYearly: 9_990,
-    enterprisePriceLabel: "$999/month",
+    displayPriceMonthly: 499,
+    displayPriceYearly: 4_990,
+    fullPriceMonthly: 999,
+    fullPriceYearly: 9_990,
+    enterprisePriceLabel: "From $499/mo",
+    enterpriseFullPriceLabel: "From $999/mo",
     cta: "contact-sales",
     serverConfigSlug: "shared-16g",
   },
@@ -180,6 +233,8 @@ export const PLANS: readonly PlanConfig[] = [
     creditsPerPeriod: 0,
     displayPriceMonthly: 9,
     displayPriceYearly: 99,
+    fullPriceMonthly: 9,
+    fullPriceYearly: 99,
     cta: "get-started",
     serverConfigSlug: "byos-managed",
   },

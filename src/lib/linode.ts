@@ -86,6 +86,7 @@ function linodeClassToCategory(klass: string): NormalizedCategory | null {
 
 export class LinodeProvider implements VpsProvider {
   readonly name = "linode"
+  readonly supportsCloudInit = true
 
   async createVM(opts: CreateVmOpts): Promise<VmInfo> {
     ensureToken()

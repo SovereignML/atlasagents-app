@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useSession } from "next-auth/react"
-import { useTheme } from "next-themes"
 import { X } from "lucide-react"
 
 import {
@@ -13,6 +12,21 @@ import {
 
 type WidgetConfig = { baseUrl: string; websiteToken: string }
 
+// Chatwoot sets `window.$chatwoot` as soon as its SDK script runs, but the
+// bubble/iframe DOM isn't mounted until slightly later. Calling SDK methods in
+// that gap makes the SDK reach for elements that don't exist yet and throw
+// `Cannot read properties of null (reading 'classList')`. Swallow those — the
+// `chatwoot:ready` listeners re-apply everything once the widget is mounted.
+function safeChatwoot(fn: (cw: NonNullable<typeof window.$chatwoot>) => void) {
+  const cw = window.$chatwoot
+  if (!cw) return
+  try {
+    fn(cw)
+  } catch {
+    /* widget not mounted yet — re-applied on chatwoot:ready */
+  }
+}
+
 /**
  * Loads the Chatwoot live-chat widget and keeps the chat contact in sync with
  * the NextAuth session. Which Chatwoot loads is resolved server-side per team /
@@ -22,13 +36,12 @@ type WidgetConfig = { baseUrl: string; websiteToken: string }
  */
 export function ChatwootWidget() {
   const { data: session, status } = useSession()
-  const { resolvedTheme } = useTheme()
   const identifiedRef = useRef<string | null>(null)
   const [cfg, setCfg] = useState<WidgetConfig | null>(null)
   // The authenticated console is a theme island driven by the `console-theme`
-  // cookie (mirrored onto `<html data-console-theme>` by ConsoleThemePortalSync),
-  // independent of next-themes. Prefer it when present so the widget matches the
-  // console; fall back to next-themes on the marketing site.
+  // cookie (mirrored onto `<html data-console-theme>` by ConsoleThemePortalSync).
+  // Prefer it when present so the widget matches the console; off the console the
+  // app is dark-only, so the fallback is dark.
   const [consoleTheme, setConsoleTheme] = useState<string | null>(null)
   // Lazy init is SSR-safe (returns false on the server). The first render emits
   // null regardless — `cfg` is null until the config fetch resolves — so reading
@@ -116,15 +129,15 @@ export function ChatwootWidget() {
   }, [])
 
   // Effective dark state: the console theme wins when on a console surface,
-  // otherwise the global next-themes value.
-  const isDark = consoleTheme ? consoleTheme === "dark" : resolvedTheme === "dark"
+  // otherwise dark (the marketing site is dark-only).
+  const isDark = consoleTheme ? consoleTheme === "dark" : true
 
   // Keep the widget's light/dark appearance in sync with the app theme. The
   // iframe may not be ready on first render, so re-apply on `chatwoot:ready`.
   useEffect(() => {
     if (!cfg) return
     const apply = () =>
-      window.$chatwoot?.setColorScheme(isDark ? "dark" : "light")
+      safeChatwoot((cw) => cw.setColorScheme(isDark ? "dark" : "light"))
     apply()
     window.addEventListener("chatwoot:ready", apply)
     return () => window.removeEventListener("chatwoot:ready", apply)
@@ -139,7 +152,7 @@ export function ChatwootWidget() {
   useEffect(() => {
     if (!cfg) return
     const apply = () =>
-      window.$chatwoot?.toggleBubbleVisibility(hidden ? "hide" : "show")
+      safeChatwoot((cw) => cw.toggleBubbleVisibility(hidden ? "hide" : "show"))
     apply()
     window.addEventListener("chatwoot:ready", apply)
     return () => window.removeEventListener("chatwoot:ready", apply)

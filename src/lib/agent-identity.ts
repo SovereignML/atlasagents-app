@@ -1,120 +1,77 @@
-import { AGENT_CATEGORIES, type AgentCategory } from "@/configs/agent-categories"
-import { SKILL_MAP } from "@/configs/skill-map"
+import {
+  findCategory,
+  roleTitleForSlug,
+  directiveForSlug,
+} from "@/configs/agent-categories"
+import { getSkill, defaultSkillsForCategory } from "@/configs/agent-skills"
 
-function findCategory(slug: string): AgentCategory {
-  return (
-    AGENT_CATEGORIES.find((c) => c.slug === slug) ??
-    AGENT_CATEGORIES.find((c) => c.slug === "custom")!
-  )
+/**
+ * Per-agent identity inputs. `skills` are the instance's enabled catalog skill
+ * ids (`instances.skills`); when null/undefined we fall back to the category's
+ * default set so legacy agents render unchanged. `hasKnowledgeBase` notes that
+ * the agent has a synced `knowledge/` corpus in its workspace.
+ */
+export type IdentityOpts = {
+  skills?: string[] | null
+  hasKnowledgeBase?: boolean
 }
 
-function skillsForSlug(slug: string): readonly string[] {
-  return SKILL_MAP[slug] ?? SKILL_MAP.custom
+/** Resolve the skill ids to render: explicit instance selection, else category defaults. */
+function resolveSkillIds(slug: string, opts?: IdentityOpts): string[] {
+  if (opts?.skills && opts.skills.length > 0) return opts.skills
+  if (opts?.skills) return [] // explicit empty selection — render no skills
+  return defaultSkillsForCategory(slug)
 }
 
-const CATEGORY_DIRECTIVES: Record<string, string> = {
-  automation:
-    "You specialize in automating workflows, processing structured data, and orchestrating multi-step business operations without human intervention. Prefer deterministic execution over exploratory reasoning.",
-  devops:
-    "You specialize in infrastructure monitoring, CI/CD pipelines, incident triage, and operational reliability. Communicate in terse, actionable language. When diagnosing issues, start with the most recent error and work backwards.",
-  support:
-    "You specialize in customer-facing support: triaging tickets, drafting empathetic replies, and escalating to humans when confidence is low. Always acknowledge the user's frustration before proposing a fix.",
-  research:
-    "You specialize in information retrieval, source comparison, and synthesis. Cite sources when available. Distinguish facts from inferences. Summarize first, then offer to expand.",
-  content:
-    "You specialize in content creation, editing, and SEO optimization across blogs, social media, and newsletters. Match the brand voice. Propose structure before drafting long-form content.",
-  sales:
-    "You specialize in lead qualification, outreach sequencing, and CRM data enrichment. Keep messages concise and outcome-driven. Always end with a clear call to action.",
-  social:
-    "You specialize in social media management: generating platform-native captions, scheduling posts, analyzing engagement metrics, and proposing content calendars. Adapt tone per platform (LinkedIn vs Twitter vs Instagram).",
-  custom:
-    "You are a general-purpose assistant. Adapt your approach to the user's domain and instructions. Ask clarifying questions when the task is ambiguous.",
+/** A skill id's display label: catalog name when known, else the raw id (legacy). */
+function skillLabel(id: string): string {
+  return getSkill(id)?.name ?? id
 }
 
 /**
- * Generate AGENTS.md — the high-level persona and behavioral rules that
- * OpenClaw reads from /opt/openclaw/.openclaw/workspace/AGENTS.md on boot.
+ * Generate IDENTITY.md — a short, **role-first** identity card that the runtime
+ * reads from its workspace on boot. It reinforces the canonical persona
+ * (AGENTS.md, produced by `generateSoul`): the agent is its *role* (a Support
+ * Specialist, a DevOps Engineer), not the underlying OpenClaw/Hermes framework.
  */
-export function generateAgentsMd(agentType: string): string {
+export function generateIdentityMd(agentType: string, opts?: IdentityOpts): string {
   const cat = findCategory(agentType)
-  const skills = skillsForSlug(agentType)
-  const directive =
-    CATEGORY_DIRECTIVES[agentType] ?? CATEGORY_DIRECTIVES.custom
+  const roleTitle = roleTitleForSlug(agentType)
+  const skillIds = resolveSkillIds(agentType, opts)
 
   const lines: string[] = []
 
-  lines.push(`# ${cat.name}`)
+  lines.push("# Identity Card")
   lines.push("")
-  lines.push(`> ${cat.description}`)
-  lines.push("")
-
-  lines.push("## Directive")
-  lines.push("")
-  lines.push(directive)
-  lines.push("")
-
-  lines.push("## Core Tasks")
-  lines.push("")
-  for (const ex of cat.examples) {
-    lines.push(`- ${ex}`)
-  }
-  lines.push("")
-
-  lines.push("## Available Skills")
-  lines.push("")
-  for (const skill of skills) {
-    lines.push(`- \`${skill}\``)
-  }
-  lines.push("")
-
-  lines.push("## Rules")
-  lines.push("")
-  lines.push("- Stay within your category scope. If a request falls outside your specialty, say so.")
-  lines.push("- Never fabricate credentials, API keys, secrets, or internal URLs.")
-  lines.push("- When uncertain, ask a clarifying question rather than guessing.")
-  lines.push("- Prefer structured output (lists, tables, code blocks) over walls of text.")
-  lines.push("")
-
-  return lines.join("\n")
-}
-
-/**
- * Generate IDENTITY.md — the detailed identity card that OpenClaw reads from
- * /opt/openclaw/.openclaw/workspace/IDENTITY.md on boot.
- */
-export function generateIdentityMd(agentType: string): string {
-  const cat = findCategory(agentType)
-  const skills = skillsForSlug(agentType)
-
-  const lines: string[] = []
-
-  lines.push("# Agent Identity Card")
+  lines.push(`You are the **${roleTitle}** for this team.`)
   lines.push("")
   lines.push(`| Field | Value |`)
   lines.push(`|-------|-------|`)
-  lines.push(`| **Name** | ${cat.name} |`)
-  lines.push(`| **Category** | ${agentType} |`)
-  lines.push(`| **Platform** | SovereignML |`)
-  lines.push(`| **Skills** | ${skills.map((s) => `\`${s}\``).join(", ")} |`)
-  lines.push("")
-
-  lines.push("## Description")
-  lines.push("")
-  lines.push(cat.description)
-  lines.push("")
-
-  lines.push("## Specialization")
-  lines.push("")
+  lines.push(`| **Role** | ${roleTitle} |`)
+  lines.push(`| **Specialty** | ${cat.description} |`)
   lines.push(
-    CATEGORY_DIRECTIVES[agentType] ?? CATEGORY_DIRECTIVES.custom,
+    `| **Skills** | ${skillIds.length > 0 ? skillIds.map((s) => skillLabel(s)).join(", ") : "—"} |`,
   )
+  lines.push(`| **Knowledge Base** | ${opts?.hasKnowledgeBase ? "enabled" : "—"} |`)
   lines.push("")
 
-  lines.push("## Example Workflows")
+  lines.push("## How you operate")
+  lines.push("")
+  lines.push(directiveForSlug(agentType))
+  lines.push("")
+
+  lines.push("## What you handle")
   lines.push("")
   for (let i = 0; i < cat.examples.length; i++) {
     lines.push(`${i + 1}. ${cat.examples[i]}`)
   }
+  lines.push("")
+
+  lines.push("## Remember")
+  lines.push("")
+  lines.push(
+    `Never present yourself as "OpenClaw", "Hermes", or "a platform agent" — you are the ${roleTitle}.`,
+  )
   lines.push("")
 
   return lines.join("\n")

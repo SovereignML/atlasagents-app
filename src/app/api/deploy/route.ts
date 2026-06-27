@@ -14,7 +14,7 @@ import { BRANDING } from "@/configs/branding"
 import { parseAgentConfig } from "@/lib/agent-config"
 import { provisionBot } from "@/lib/provisioner"
 import { describeVmError } from "@/lib/vm-provider"
-import { depositPlanCredits } from "@/lib/wallet"
+import { addPlanCredits } from "@/lib/wallet"
 import { planPeriodEnd } from "@/lib/plan-period"
 import { getUserTeam } from "@/lib/team"
 import { createInstanceFromAgentFields } from "@/lib/agent-create"
@@ -64,6 +64,10 @@ async function handleDeploy(req: NextRequest) {
   if (!planConfig.serverConfigSlug) {
     return NextResponse.json({ error: "Plan has no server configuration" }, { status: 400 })
   }
+
+  // #region agent log
+  fetch('http://127.0.0.1:7305/ingest/880804f1-30d2-40e6-a578-5c94bee7e97e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'52ccd5'},body:JSON.stringify({sessionId:'52ccd5',runId:'pre-fix-2',hypothesisId:'G,restart',location:'src/app/api/deploy/route.ts:handleDeploy',message:'deploy request branch',data:{planSlug,tier:planConfig.tier,regionSlug,serverConfigSlug:planConfig.serverConfigSlug,stripeConfigured:isStripeConfigured(),devBypass:isDevBypassAllowed()},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
   // ── Free tier: enforce 1 free instance per user ───────────────────
   if (planConfig.tier === "free") {
@@ -176,8 +180,9 @@ async function handleDeploy(req: NextRequest) {
 
     if (planConfig.creditsPerPeriod > 0) {
       try {
-        // Use-it-or-lose-it plan credits — expire at the (derived) period end.
-        await depositPlanCredits(
+        // New instance → ADD to the wallet (don't expire other agents' plan
+        // credits). Expiry still set so the period-end sweep reclaims unused.
+        await addPlanCredits(
           userId,
           planConfig.creditsPerPeriod,
           planPeriodEnd(billingInterval),
@@ -292,10 +297,11 @@ async function handleDeploy(req: NextRequest) {
   }
 
   // Dev mode: simulate the Stripe `invoice.paid` deposit so the user
-  // actually sees credits arrive when they deploy a paid plan.
+  // actually sees credits arrive when they deploy a paid plan. New instance →
+  // ADD (matches the subscription_create branch in handleInvoicePaid).
   if (planConfig.creditsPerPeriod > 0) {
     try {
-      await depositPlanCredits(
+      await addPlanCredits(
         userId,
         planConfig.creditsPerPeriod,
         planPeriodEnd(billingInterval),

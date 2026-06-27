@@ -9,7 +9,6 @@ import { SmoothScrollProvider } from "@/components/marketing/motion/smooth-scrol
 import { AgentWheel } from "@/components/marketing/sections/agent-wheel"
 import { MissionControlPlanner } from "@/components/marketing/sections/mission-control-planner"
 import { CapabilityTimeline } from "@/components/marketing/sections/capability-timeline"
-import TrustedCompanies from "@/components/ui/trusted-companies"
 import { Features } from "@/components/ui/features-8"
 import { Testimonials } from "@/components/marketing/sections/testimonials"
 import { CompetitorComparison } from "@/components/marketing/sections/competitor-comparison"
@@ -182,7 +181,7 @@ export default function Home() {
                 Deploy AI agents that
               </span>
               <span className="block text-[clamp(2rem,5vw,46px)] text-hero-white">
-                actually do the work.
+                actually work.
               </span>
             </motion.h1>
 
@@ -192,8 +191,8 @@ export default function Home() {
               className="text-[20px] leading-[26px] tracking-[-0.1px] text-hero-white/80 max-w-[526px] mt-7 mx-auto"
             >
               Pick a runtime, OpenClaw or Hermes, then customize your agent and
-              put support, sales, and ops on autopilot. No code. Your own private
-              instance. Zero vendor lock-in.
+              put support, sales, and ops on autopilot. Zero vendor lock-in; your
+              own private instance!
             </motion.p>
 
             <motion.div
@@ -207,14 +206,6 @@ export default function Home() {
                 Deploy Your First Agent
               </Link>
             </motion.div>
-
-            <motion.p
-              variants={heroContentVariants}
-              transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-              className="mt-4 text-sm text-hero-white/40"
-            >
-              Free plan available &middot; No credit card required
-            </motion.p>
 
             {/* Vision line — frames the long-term thesis, not a shipped feature. */}
             <motion.p
@@ -244,7 +235,6 @@ export default function Home() {
             confirmed (see backed-by.tsx). Intentionally left un-rendered. */}
         {/* <BackedBy /> */}
         <PricingElevation />
-        <TrustedCompanies />
         {/* Ecosystem strip — "powered by" infrastructure; see logo-cloud-section.tsx */}
         <LogoCloudSection />
         <KnowledgeBaseFAQ />

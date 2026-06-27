@@ -40,8 +40,6 @@ import {
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { SidebarTrigger } from "@/components/ui/sidebar"
-import { ConsoleThemeToggle } from "@/components/layout/console-theme-toggle"
-import type { ConsoleTheme } from "@/lib/console-theme"
 import { DashboardBreadcrumbs } from "@/components/layout/dashboard-breadcrumbs"
 import { NotificationBell } from "@/components/notifications/notification-bell"
 import { signOutAction } from "@/app/actions/auth"
@@ -87,13 +85,11 @@ export function DashboardTopbar({
   teams = [],
   activeTeamId,
   impersonating = null,
-  consoleTheme = "dark",
 }: {
   brandName?: string
   teams?: TeamOption[]
   activeTeamId?: string
   impersonating?: { name: string | null; email: string; image: string | null } | null
-  consoleTheme?: ConsoleTheme
 }) {
   const { data: session } = useSession()
   const router = useRouter()
@@ -179,7 +175,6 @@ export function DashboardTopbar({
           }
         />
         <NotificationBell />
-        <ConsoleThemeToggle theme={consoleTheme} className="size-8" />
         {isAdmin && (
           <Button
             size="sm"

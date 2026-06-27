@@ -66,6 +66,13 @@ export type ProviderHealth = {
  * `createVM` / `deleteVM` (no rename — avoids churn across the provisioner).
  */
 export interface VpsProvider extends VmProvider {
+  /**
+   * Whether this provider boots VMs from cloud-init `userData` (Linode/DO) or
+   * needs the runtime bootstrap run over SSH after boot (OVH VPS, which has no
+   * cloud-init). Drives the provisioner's bootstrap branch — see
+   * provisionVpsBot in src/lib/provisioner.ts.
+   */
+  readonly supportsCloudInit: boolean
   listPlans(): Promise<NormalizedPlan[]>
   getRegions(): Promise<ProviderRegionInfo[]>
   healthCheck(): Promise<ProviderHealth>

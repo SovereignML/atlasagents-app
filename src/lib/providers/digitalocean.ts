@@ -99,6 +99,7 @@ function doSizeCategory(slug: string): NormalizedCategory | null {
 
 export class DigitalOceanProvider implements VpsProvider {
   readonly name = "digitalocean"
+  readonly supportsCloudInit = true
 
   /** Register the fleet public key once; return its DO key id. Idempotent. */
   private async ensureFleetKey(publicKey: string): Promise<number> {

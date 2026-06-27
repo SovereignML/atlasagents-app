@@ -10,6 +10,7 @@ import {
   Search,
   Settings,
   Share2,
+  Shuffle,
   Terminal,
   TrendingUp,
   Zap,
@@ -35,6 +36,7 @@ import { DEPLOYABLE_PLANS, PLANS, type PlanConfig } from "@/configs/plans"
 import { SERVER_TYPES, type ServerTypeConfig } from "@/configs/server-types"
 import { calcPlanPrice, formatUsd } from "@/lib/pricing"
 import type { BillingInterval } from "@/lib/pricing"
+import { generateProjectName } from "@/lib/project-name"
 import { cn } from "@/lib/utils"
 
 type Interface = "web" | "telegram" | "discord" | "api"
@@ -110,7 +112,7 @@ export default function DeployPage() {
   const [step, setStep] = useState<Step>("agent")
   const [deploying, setDeploying] = useState(false)
 
-  const [projectName, setProjectName] = useState("")
+  const [projectName, setProjectName] = useState(() => generateProjectName())
   const [useCase, setUseCase] = useState<string>("")
   const [runtime, setRuntime] = useState<Runtime>("openclaw")
 
@@ -125,11 +127,12 @@ export default function DeployPage() {
 
   const coreActions = selectedCategoryObj?.examples ? [...selectedCategoryObj.examples] : []
 
-  // Hermes always boxes Open WebUI as a sidecar, which needs ≥2GB RAM. With the
-  // runtime now chosen before the plan, we gate plan selection instead: a
-  // sub-2GB plan (the Free Nanode) can't host Hermes.
+  // Hermes always boxes Open WebUI as a sidecar, so it needs a paid plan with
+  // ≥2GB RAM. The Free tier is a short-lived demo (excluded regardless of its
+  // underlying machine), and any sub-2GB plan can't host the sidecar.
   function planSupportsRuntime(plan: PlanConfig): boolean {
     if (runtime !== "hermes") return true
+    if (plan.tier === "free") return false
     const server = resolveServerForPlan(plan)
     return !!server && server.ramGb >= 2
   }
@@ -157,14 +160,16 @@ export default function DeployPage() {
   const planPrice = selectedPlan ? calcPlanPrice(selectedPlan, billingInterval) : null
 
   async function handleDeploy() {
-    if (!projectName.trim() || !selectedPlan) return
+    if (!selectedPlan) return
+    // A manually-cleared field still deploys with a valid auto-generated name.
+    const deployName = projectName.trim() || generateProjectName()
     setDeploying(true)
     try {
       const res = await fetch("/api/deploy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: projectName.trim(),
+          name: deployName,
           planSlug: selectedPlan.slug,
           billingInterval,
           agentConfig: {
@@ -267,14 +272,15 @@ export default function DeployPage() {
                     const next = v[0] as Runtime | undefined
                     if (!next) return
                     setRuntime(next)
-                    // Switching to Hermes invalidates a sub-2GB plan (Free) —
-                    // clear it so the form can't deploy an unsupported combo.
-                    if (
-                      next === "hermes" &&
-                      selectedPlan &&
-                      (resolveServerForPlan(selectedPlan)?.ramGb ?? 0) < 2
-                    ) {
-                      setSelectedPlan(null)
+                    // Switching to Hermes invalidates the Free tier and any
+                    // sub-2GB plan — clear it so the form can't deploy an
+                    // unsupported combo. (planSupportsRuntime reads the old
+                    // runtime state here, so check `next` explicitly.)
+                    if (next === "hermes" && selectedPlan) {
+                      const server = resolveServerForPlan(selectedPlan)
+                      if (selectedPlan.tier === "free" || !server || server.ramGb < 2) {
+                        setSelectedPlan(null)
+                      }
                     }
                   }}
                   className="grid w-full grid-cols-1 gap-2 md:grid-cols-2"
@@ -323,8 +329,8 @@ export default function DeployPage() {
                   <p className="text-xs text-muted-foreground">
                     Hermes ships with the Open WebUI chat interface bundled: you&apos;ll get a web
                     chat UI at <span className="font-mono">/</span> and the OpenAI-compatible API at{" "}
-                    <span className="font-mono">/v1</span> on the same public URL. Requires a plan
-                    with at least 2GB RAM.
+                    <span className="font-mono">/v1</span> on the same public URL. Requires a paid
+                    plan (Lite or higher).
                   </p>
                 )}
               </div>
@@ -341,15 +347,28 @@ export default function DeployPage() {
               <FieldGroup>
                 <Field>
                   <FieldLabel htmlFor="project-name">Project Name</FieldLabel>
-                  <Input
-                    id="project-name"
-                    value={projectName}
-                    onChange={(e) => setProjectName(e.target.value)}
-                    placeholder="my-ai-agent"
-                    className={cn(
-                      projectName.trim().length >= 2 && "border-ring ring-1 ring-ring"
-                    )}
-                  />
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="project-name"
+                      value={projectName}
+                      onChange={(e) => setProjectName(e.target.value)}
+                      placeholder="my-ai-agent"
+                      className={cn(
+                        "flex-1",
+                        projectName.trim().length >= 2 && "border-ring ring-1 ring-ring"
+                      )}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setProjectName(generateProjectName())}
+                      aria-label="Generate a new project name"
+                      title="Generate a new name"
+                    >
+                      <Shuffle className="size-4" />
+                    </Button>
+                  </div>
                   {projectName.trim().length > 0 && projectName.trim().length < 2 && (
                     <FieldDescription className="text-amber-500">
                       Enter at least 2 characters to continue.
@@ -424,6 +443,8 @@ export default function DeployPage() {
                   const price = plan.displayPriceMonthly
                   const showSpecs = plan.tier !== "free"
                   const runtimeBlocked = !planSupportsRuntime(plan)
+                  const blockedLabel =
+                    plan.tier === "free" ? "Not available on Free" : "Needs ≥2GB plan"
                   return (
                     <ToggleGroupItem
                       key={plan.slug}
@@ -445,7 +466,7 @@ export default function DeployPage() {
                             )}
                             {runtimeBlocked && (
                               <Badge variant="outline" className="text-[10px]">
-                                Needs ≥2GB plan
+                                {blockedLabel}
                               </Badge>
                             )}
                           </div>

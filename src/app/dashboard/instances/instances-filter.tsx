@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { DemoCountdown } from "@/components/instances/demo-countdown"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -75,6 +76,7 @@ type Item = {
   ipAddress: string | null
   runtime: string | null
   deploymentTarget: string | null
+  expiresAt: string | null
   serverLabel: string
   vcpu: number
   ramGb: number
@@ -114,6 +116,7 @@ function mapRowsToItems(
     ipAddress: string | null
     runtime?: string | null
     deploymentTarget?: string | null
+    expiresAt?: string | Date | null
     serverConfig: { label: string; vcpu: number; ramGb: number; priceMonthly?: number }
     logs?: Array<{ id: string; level: string; message: string; createdAt: string | Date }>
   }>,
@@ -128,6 +131,11 @@ function mapRowsToItems(
       ipAddress: row.ipAddress,
       runtime: row.runtime ?? null,
       deploymentTarget: row.deploymentTarget ?? null,
+      expiresAt: row.expiresAt
+        ? typeof row.expiresAt === "string"
+          ? row.expiresAt
+          : new Date(row.expiresAt).toISOString()
+        : null,
       serverLabel: row.serverConfig.label,
       vcpu: row.serverConfig.vcpu,
       ramGb: row.serverConfig.ramGb,
@@ -342,6 +350,9 @@ export function InstancesFilter({ items: initialItems }: { items: Item[] }) {
                           {runtimeLabel(instance.runtime)}
                         </span>
                       </span>
+                      {instance.expiresAt && instance.status !== "deleted" && (
+                        <DemoCountdown expiresAt={instance.expiresAt} />
+                      )}
                     </div>
                     <p className="mt-1.5 truncate font-mono text-xs text-muted-foreground">
                       {instance.slug}

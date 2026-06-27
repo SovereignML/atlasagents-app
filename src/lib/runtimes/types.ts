@@ -17,7 +17,6 @@ export type RenderConfigArgs = {
   managedSubdomain?: string | null
   ipAddress?: string | null
   tlsStatus?: string | null
-  soulMd?: string | null
   /** Catalog tool ids enabled on the instance (e.g. ["browser"]); see agent-tools.ts. */
   enabledToolIds?: string[]
 }

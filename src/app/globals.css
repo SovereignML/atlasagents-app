@@ -465,18 +465,19 @@ body {
 }
 
 /* ─── Custom Scrollbar ──────────────────────────────────────────── */
-::-webkit-scrollbar {
-  width: 6px;
+/* Use the standard scrollbar properties rather than `::-webkit-scrollbar`.
+   A fixed-width `::-webkit-scrollbar` forces an inset (space-consuming)
+   document scrollbar that defeats `scrollbar-gutter: stable`, which in turn
+   pushes Base UI's modal scroll-lock into its heavy <body>-rewriting path —
+   causing the page to jump when a Select/Dropdown/Dialog opens (worst when
+   scrolled to the bottom). Standard properties keep the gutter stable, so the
+   lock is shift-free. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted-foreground) transparent;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: var(--muted-foreground);
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--foreground);
+html {
+  scrollbar-gutter: stable;
 }
 
 /* ─── Selection ────────────────────────────────────────────────── */

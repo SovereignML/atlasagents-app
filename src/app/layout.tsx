@@ -28,7 +28,15 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className={`${inter.variable} ${geistMono.variable} h-full antialiased`} suppressHydrationWarning>
+    // Dark-only: the `dark` class (and matching color-scheme) is hard-coded here
+    // server-side instead of via next-themes. That renders the theme tokens from
+    // SSR with zero flash and no injected anti-FOUC script — see AppProviders.
+    <html
+      lang="en"
+      className={`dark ${inter.variable} ${geistMono.variable} h-full antialiased`}
+      style={{ colorScheme: "dark" }}
+      suppressHydrationWarning
+    >
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <AppProviders>{children}</AppProviders>
         <Toaster />

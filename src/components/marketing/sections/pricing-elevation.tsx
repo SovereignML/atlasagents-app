@@ -10,7 +10,7 @@ import { Check, X, ArrowRight } from "lucide-react";
 import { BillingIntervalToggle, type BillingInterval } from "@/components/marketing/pricing/billing-interval-toggle";
 import type { PlanConfig } from "@/configs/plans";
 
-const corePlans = PLANS.filter((p) => ["builder", "operator", "scale"].includes(p.tier));
+const corePlans = PLANS.filter((p) => ["lite", "builder", "operator", "scale"].includes(p.tier));
 const freePlan = PLANS.find((p) => p.tier === "free")!;
 const enterprisePlan = PLANS.find((p) => p.tier === "enterprise")!;
 
@@ -25,17 +25,31 @@ function PriceDisplay({ plan, interval }: { plan: PlanConfig; interval: BillingI
   }
   if (plan.tier === "enterprise" && plan.enterprisePriceLabel) {
     return (
-      <span className="text-2xl font-bold text-text-loud">{plan.enterprisePriceLabel}</span>
+      <div>
+        {plan.enterpriseFullPriceLabel &&
+          plan.enterpriseFullPriceLabel !== plan.enterprisePriceLabel && (
+            <span className="block text-sm text-text-secondary line-through">
+              {plan.enterpriseFullPriceLabel}
+            </span>
+          )}
+        <span className="text-2xl font-bold text-text-loud">{plan.enterprisePriceLabel}</span>
+      </div>
     );
   }
   const isYear = interval === "year";
   const amount = isYear ? plan.displayPriceYearly : plan.displayPriceMonthly;
+  const fullAmount = isYear ? plan.fullPriceYearly : plan.fullPriceMonthly;
+  const hasPromo = fullAmount > amount;
   return (
     <div>
-      <div className="flex items-baseline gap-1">
+      <div className="flex items-baseline gap-2">
+        {hasPromo && (
+          <span className="text-xl font-bold text-text-secondary line-through">{formatUsd(fullAmount)}</span>
+        )}
         <span className="text-4xl font-bold text-text-loud">{formatUsd(amount)}</span>
         <span className="text-text-secondary">{isYear ? "/year" : "/mo"}</span>
       </div>
+      {hasPromo && <p className="mt-1 text-xs font-mono text-accent-blue-rest">Launch pricing</p>}
       {isYear && <p className="mt-1 text-xs font-mono text-accent-blue-rest">2 months free</p>}
     </div>
   );
@@ -88,7 +102,7 @@ export function PricingElevation() {
             viewport={{ once: true, amount: 0.1 }}
             transition={spring.gentle}
           >
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
               {corePlans.map((plan, i) => (
                 <motion.div
                   key={plan.slug}
@@ -184,7 +198,7 @@ export function PricingElevation() {
                 <div className="relative flex-1 min-w-0">
                   <div className="flex items-center gap-3 mb-2">
                     <h3 className="text-lg font-bold text-text-loud">{enterprisePlan.name}</h3>
-                    <span className="text-sm font-bold text-text-secondary">From {enterprisePlan.enterprisePriceLabel}</span>
+                    <span className="text-sm font-bold text-text-secondary">{enterprisePlan.enterprisePriceLabel}</span>
                   </div>
                   <p className="text-xs text-text-secondary mb-3">{enterprisePlan.description}</p>
                   <div className="flex flex-wrap gap-x-4 gap-y-1">

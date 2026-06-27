@@ -331,25 +331,29 @@ export async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> 
     .set({ status: "active" })
     .where(eq(subscriptions.id, local.id))
 
-  // Deposit the plan's monthly credit allotment. ONE deposit per invoice —
-  // no more dual writes to User.credits + Wallet.balance. Plan credits are
-  // use-it-or-lose-it: they expire at the subscription's current period end
-  // (fundWallet routes plan_deposit through the expiring bucket). The renewal
-  // deposit itself expires the prior period's unspent plan credits.
+  // Deposit the plan's credit allotment. The FIRST invoice of a subscription
+  // (`billing_reason === "subscription_create"`) is a NEW grant that must stack
+  // on the wallet — otherwise deploying a second agent would expire the first
+  // agent's plan credits and reset the bucket, so credits never increase. A
+  // RENEWAL (`subscription_cycle`) keeps use-it-or-lose-it: expire the prior
+  // period's unspent plan credits, then add the new allotment.
   const credits = local.plan?.creditsPerPeriod ?? 0
   if (credits > 0) {
+    const isNewSubscription = invoice.billing_reason === "subscription_create"
+    const planMode = isNewSubscription ? "add" : "renew"
     const periodLabel = new Date().toISOString().slice(0, 7) // yyyy-mm
+    const action = isNewSubscription ? "grant" : "renewal"
     try {
       await fundWallet(
         local.userId,
         credits,
         "plan_deposit",
-        `Plan renewal: ${local.plan?.name ?? "unknown"} (${periodLabel})`,
+        `Plan ${action}: ${local.plan?.name ?? "unknown"} (${periodLabel})`,
         (local.instance as { id?: string } | null)?.id,
-        { planExpiry: local.currentPeriodEnd ?? null },
+        { planExpiry: local.currentPeriodEnd ?? null, planMode },
       )
       console.log(
-        `[stripe] Granted ${credits.toLocaleString()} credits to user ${local.userId} (invoice ${invoice.id})`,
+        `[stripe] Granted ${credits.toLocaleString()} credits to user ${local.userId} (invoice ${invoice.id}, ${planMode})`,
       )
     } catch (err) {
       console.error(`[stripe] depositToWallet failed for user ${local.userId}:`, err)

@@ -1,8 +1,8 @@
 import Link from "next/link"
-import { BRANDING } from "@/configs/branding"
 import { Reveal } from "@/components/marketing/motion/reveal"
 
-const LAST_UPDATED = "May 30, 2026" // {{TODO: confirm effective date on legal sign-off}}
+const LAST_UPDATED = "June 2026"
+const LEGAL_ENTITY = "SovereignML L.L.C., North Carolina"
 
 export const metadata = {
   title: "Service Level Agreement | SovereignML",
@@ -20,7 +20,7 @@ export default function SLAPage() {
           Service Level Agreement
         </h1>
         <p className="text-[var(--text-secondary)] text-sm">
-          Last updated: {LAST_UPDATED}
+          Last updated: {LAST_UPDATED} · {LEGAL_ENTITY}
         </p>
       </Reveal>
 
@@ -194,7 +194,7 @@ export default function SLAPage() {
       {/* Footer */}
       <div className="mt-16 pt-8 border-t border-[var(--border-color)] flex flex-col sm:flex-row gap-4 justify-between items-start">
         <p className="text-[var(--text-secondary)] text-sm">
-          &copy; {new Date().getFullYear()} {BRANDING.name}. All rights reserved.
+          &copy; {new Date().getFullYear()} {LEGAL_ENTITY}. All rights reserved.
         </p>
         <div className="flex gap-6 text-sm">
           <Link

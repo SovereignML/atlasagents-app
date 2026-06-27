@@ -26,7 +26,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       <SidebarProvider defaultOpen={defaultOpen} className="flex-1">
         <AdminSidebar />
         <SidebarInset>
-          <DashboardTopbar consoleTheme={consoleTheme} />
+          <DashboardTopbar />
           <main className="flex-1 overflow-auto bg-background px-8 pt-[30px] pb-[60px]">
             {children}
           </main>

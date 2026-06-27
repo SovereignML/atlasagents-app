@@ -1,8 +1,9 @@
 // Thin wrapper around OpenRouter's Provisioning API.
 //
 // Used by the provisioner to mint a runtime API key per OpenClaw instance
-// (label `Sovereign-OpenClaw-<slug>`, human-readable in the OpenRouter
-// dashboard), and by the reconciler to revoke orphaned keys. The reconciler
+// (name `Sovereign-OpenClaw-<slug>`, human-readable in the OpenRouter
+// dashboard — note OpenRouter calls this the key `name`; its `label` field is
+// the masked key string), and by the reconciler to revoke orphaned keys. The reconciler
 // matches keys by their persisted keyId (`instances.openRouterKeyId`), not by
 // the label, so the label is free to be a cosmetic, human-friendly string.
 // Mirrors the shape of src/lib/cloudflare.ts: a single authenticated fetch
@@ -181,8 +182,9 @@ export async function updateRuntimeKey(
 }
 
 export type RuntimeKeyState = {
-  keyId: string
+  /** Human-readable name we set at mint (e.g. `Sovereign-OpenClaw-<slug>`). */
   label: string
+  keyId: string
   /** Cumulative real USD spent on this key (lifetime). */
   usageUsd: number
   /** Cumulative USD spend cap, or null if uncapped. */
@@ -195,6 +197,12 @@ export type RuntimeKeyState = {
  * spend (`usage`) and cap (`limit`). Used by the usage-sync poller to charge
  * the wallet for real OpenRouter spend and by the reconciler to detect cap
  * drift.
+ *
+ * NOTE on OpenRouter's field naming: the API returns `name` as the
+ * human-readable name we set at mint, while `label` is the MASKED KEY STRING
+ * (`sk-or-v1-...`). We expose the human name as our `label`, so read it from
+ * `data.name` first (falling back to `data.label` only for legacy keys minted
+ * without a name).
  */
 export async function getRuntimeKey(keyId: string): Promise<RuntimeKeyState> {
   type RawKey = {
@@ -208,7 +216,7 @@ export async function getRuntimeKey(keyId: string): Promise<RuntimeKeyState> {
   const data = await orFetch<RawKey>(`/keys/${encodeURIComponent(keyId)}`)
   return {
     keyId: data.hash,
-    label: data.label ?? data.name,
+    label: data.name ?? data.label,
     usageUsd: typeof data.usage === "number" ? data.usage : 0,
     limitUsd: typeof data.limit === "number" ? data.limit : null,
     disabled: data.disabled ?? false,
@@ -217,6 +225,9 @@ export async function getRuntimeKey(keyId: string): Promise<RuntimeKeyState> {
 
 export type ListedKey = {
   keyId: string
+  /** Human-readable name we set at mint (from OpenRouter's `name` field, NOT
+   *  its `label`, which is the masked key string). The reconciler matches our
+   *  keys by the `sovereign-` prefix on this value. */
   label: string
   disabled?: boolean
   /** Cumulative USD spend cap, or null if uncapped. Lets the reconciler
@@ -246,7 +257,9 @@ export async function listRuntimeKeys(): Promise<ListedKey[]> {
     const created = k.created_at ? Date.parse(k.created_at) : NaN
     return {
       keyId: k.hash,
-      label: k.label ?? k.name,
+      // OpenRouter's `name` is the human name we set; `label` is the masked key
+      // string. Read `name` first so the reconciler's `sovereign-` prefix match works.
+      label: k.name ?? k.label,
       disabled: k.disabled,
       limitUsd: typeof k.limit === "number" ? k.limit : null,
       createdAtMs: Number.isNaN(created) ? null : created,
