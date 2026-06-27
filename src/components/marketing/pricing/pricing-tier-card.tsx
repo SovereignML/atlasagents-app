@@ -14,6 +14,12 @@ function PriceBlock({ plan, interval }: Props) {
   if (plan.tier === "enterprise" && plan.enterprisePriceLabel) {
     return (
       <div className="mt-6">
+        {plan.enterpriseFullPriceLabel &&
+          plan.enterpriseFullPriceLabel !== plan.enterprisePriceLabel && (
+            <span className="block text-sm text-text-secondary line-through">
+              {plan.enterpriseFullPriceLabel}
+            </span>
+          )}
         <span className="text-2xl sm:text-3xl font-bold text-text-loud leading-tight">
           {plan.enterprisePriceLabel}
         </span>
@@ -34,16 +40,28 @@ function PriceBlock({ plan, interval }: Props) {
 
   const isYear = interval === "year"
   const amount = isYear ? plan.displayPriceYearly : plan.displayPriceMonthly
+  const fullAmount = isYear ? plan.fullPriceYearly : plan.fullPriceMonthly
   const suffix = isYear ? "/year" : "/mo"
+  const hasPromo = fullAmount > amount
 
   return (
     <div className="mt-6">
-      <div className="flex items-baseline gap-1 flex-wrap">
+      <div className="flex items-baseline gap-2 flex-wrap">
+        {hasPromo && (
+          <span className="text-xl font-bold text-text-secondary line-through">
+            {formatUsd(fullAmount)}
+          </span>
+        )}
         <span className="text-4xl font-bold text-text-loud">
           {formatUsd(amount)}
         </span>
         <span className="text-text-secondary">{suffix}</span>
       </div>
+      {hasPromo && (
+        <p className="mt-1 text-xs font-mono text-primary">
+          Launch pricing
+        </p>
+      )}
       {isYear && (
         <p className="mt-1 text-xs font-mono text-primary">
           2 months free

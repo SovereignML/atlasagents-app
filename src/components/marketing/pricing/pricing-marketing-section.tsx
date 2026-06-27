@@ -41,7 +41,7 @@ export function PricingMarketingSection({ compact = false }: Props) {
       </section>
 
       <section className="max-w-[1400px] mx-auto px-8 pb-16">
-        <RevealGroup className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+        <RevealGroup className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           {PLANS.filter((plan) => plan.tier !== "byos").map((plan) => (
             <RevealItem
               key={plan.slug}

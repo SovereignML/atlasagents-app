@@ -185,7 +185,15 @@ export function AccessTab({
               <FieldGroup>
                 <Field>
                   <FieldLabel htmlFor="grantee">Teammate</FieldLabel>
-                  <Select value={granteeId} onValueChange={(v) => v && setGranteeId(v)}>
+                  <Select
+                    value={granteeId}
+                    onValueChange={(v) => v && setGranteeId(v)}
+                    // base-ui resolves the trigger label from `items`; without it
+                    // the trigger renders the raw value (the userId) after select.
+                    items={Object.fromEntries(
+                      candidates.map((m) => [m.userId, m.name || m.email]),
+                    )}
+                  >
                     <SelectTrigger id="grantee">
                       <SelectValue placeholder="Select a team member" />
                     </SelectTrigger>

@@ -37,8 +37,19 @@ export type AgentTool = {
   requiresChromium?: boolean
   /** Extra global npm package(s) the box needs, per runtime (e.g. agent-browser). */
   requiresNpmGlobal?: { hermes?: string; openclaw?: string }
-  /** Future cloud-provider variant needs an external API key (not used in v1). */
+  /**
+   * The tool's provider needs an external API key to function. Shown as a hint
+   * in the UI; the key itself is configured separately (platform/team env).
+   */
   requiresApiKey?: boolean
+  /**
+   * Host-side knowledge capability: the agent reads reference material synced
+   * into its `workspace/knowledge/` directory (see src/lib/provisioner.ts). This
+   * is runtime-agnostic — it adds no entry to the runtime's tool allowlist, so a
+   * tool with this flag is "supported" on every runtime even when both
+   * `support` entries are null. See `toolSupportedOn`.
+   */
+  providesKnowledge?: boolean
   support: ToolRuntimeSupport
 }
 
@@ -67,11 +78,38 @@ export const AGENT_TOOLS: readonly AgentTool[] = [
     id: "web_search",
     name: "Web Search",
     icon: "Search",
-    description: "Let the agent search the web for up-to-date information.",
-    comingSoon: true,
+    description:
+      "Let the agent search the web for up-to-date information. May require a search-provider API key.",
+    requiresApiKey: true,
     support: {
       openclaw: { toolName: "web_search" },
       hermes: { toolset: "web" },
+    },
+  },
+  {
+    id: "knowledge_base",
+    name: "Knowledge Base",
+    icon: "BookOpen",
+    description:
+      "Train the agent on your business: upload documents and add URLs the agent consults (and cites) when answering.",
+    providesKnowledge: true,
+    support: {
+      // Realized host-side (files synced into workspace/knowledge/ + prompt
+      // guidance), not via a runtime tool allowlist entry.
+      openclaw: null,
+      hermes: null,
+    },
+  },
+  {
+    id: "image_gen",
+    name: "Image Generation",
+    icon: "Image",
+    description:
+      "Let the agent generate images from text prompts (Hermes only). Requires an image-provider API key.",
+    requiresApiKey: true,
+    support: {
+      openclaw: null,
+      hermes: { toolset: "image_gen" },
     },
   },
   {
@@ -84,17 +122,6 @@ export const AGENT_TOOLS: readonly AgentTool[] = [
     support: {
       openclaw: { toolName: "exec" },
       hermes: { toolset: "terminal" },
-    },
-  },
-  {
-    id: "image_gen",
-    name: "Image Generation",
-    icon: "Image",
-    description: "Let the agent generate images from text prompts.",
-    comingSoon: true,
-    support: {
-      openclaw: null,
-      hermes: { toolset: "image_gen" },
     },
   },
   {
@@ -118,7 +145,14 @@ export function getTool(id: string): AgentTool | undefined {
 
 /** True when `tool` is realizable on the given runtime. */
 export function toolSupportedOn(tool: AgentTool, runtimeId: RuntimeId): boolean {
-  return tool.support[runtimeId] != null
+  // Host-side knowledge tools work on every runtime (they don't add a runtime
+  // allowlist entry), so they're "supported" even with both `support` null.
+  return tool.providesKnowledge === true || tool.support[runtimeId] != null
+}
+
+/** True when the given enabled-tool ids include a host-side Knowledge Base tool. */
+export function knowledgeBaseEnabled(ids: string[]): boolean {
+  return ids.some((id) => getTool(id)?.providesKnowledge === true)
 }
 
 /**

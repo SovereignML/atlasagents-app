@@ -14,7 +14,9 @@ import {
 import { isDriveConfigured } from "@/lib/google-drive"
 import { isKumaConfigured } from "@/lib/uptime-kuma"
 import { maybeRunUptimeSync } from "@/lib/uptime-monitoring"
+import { maybeReapDemoInstances } from "@/lib/demo-reaper"
 import { Badge } from "@/components/ui/badge"
+import { DemoCountdown } from "@/components/instances/demo-countdown"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -69,6 +71,9 @@ export default async function InstanceDetailPage({
   // Best-effort: freshen the Kuma snapshot/history before we read it (no-op when
   // Kuma is unconfigured or synced recently). Never throws.
   await maybeRunUptimeSync()
+  // Best-effort: tear down any Free demos past their 30-min trial so a viewer
+  // watching the dashboard reaps them without an external cron (throttled ~60s).
+  void maybeReapDemoInstances().catch(() => {})
 
   const instance = await db.query.instances.findFirst({
     where: whereUserInstanceVisible(effectiveUserId, id),
@@ -172,6 +177,9 @@ export default async function InstanceDetailPage({
                 {getRuntime(instance.runtime).displayName}
               </span>
             </span>
+            {instance.expiresAt && instance.status !== "deleted" && (
+              <DemoCountdown expiresAt={instance.expiresAt.toISOString()} />
+            )}
           </div>
           <p className="font-mono text-xs text-muted-foreground">{instance.slug}</p>
         </div>
@@ -252,6 +260,9 @@ export default async function InstanceDetailPage({
           deploymentTarget: instance.deploymentTarget,
           provisionStage: instance.provisionStage ?? null,
           agentType: instance.agentType ?? null,
+          customInstructions:
+            (instance.agentConfig as { custom_instructions?: string } | null)
+              ?.custom_instructions ?? "",
           runtime: instance.runtime ?? null,
           runtimeLabel: getRuntime(instance.runtime).displayName,
           webuiEnabled: Boolean(instance.webuiEnabled),

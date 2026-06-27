@@ -338,6 +338,13 @@ export const instances = pgTable(
     // mismatch = abort. See src/lib/ssh.ts connectAndPin().
     sshHostFingerprint: text(),
     lastActiveAt: timestamp({ mode: "date", withTimezone: false }),
+    /**
+     * Demo auto-expiry deadline. Set for Free-tier agents (now + FREE_DEMO_TTL_MS)
+     * at creation and re-stamped when the agent goes live. NULL = no auto-expiry
+     * (all paid plans). A non-null value is the "this is a demo agent" signal the
+     * reaper (src/lib/demo-reaper.ts) and the dashboard countdown key off of.
+     */
+    expiresAt: timestamp({ mode: "date", withTimezone: false }),
     /** Set when status becomes `deleted` — used for admin audit / sorting */
     deletedAt: timestamp({ mode: "date", withTimezone: false }),
     deploymentTarget: text(),
@@ -907,6 +914,35 @@ export const instanceLogs = pgTable(
     createdAt: now(),
   },
   (t) => [index("InstanceLog_instanceId_idx").on(t.instanceId)],
+)
+
+// InstanceKnowledge — per-agent Knowledge Base sources (the `knowledge_base`
+// tool; see src/configs/agent-tools.ts). Each row is one document or saved URL
+// whose extracted text is shipped into the agent's `workspace/knowledge/`
+// directory on provision/reprovision so the agent can consult and cite it. v1
+// stores extracted plain text (not binaries) directly in Postgres — sources are
+// small and the standalone deploy has no object store (same approach as
+// teamBrandingAssets). See src/lib/provisioner.ts for the file sync.
+export const instanceKnowledge = pgTable(
+  "InstanceKnowledge",
+  {
+    id: cuid().primaryKey(),
+    instanceId: text()
+      .notNull()
+      .references(() => instances.id, { onDelete: "cascade" }),
+    // "file" (uploaded document) | "url" (saved web page).
+    type: text().notNull(),
+    // Display name / filename (also the basename written into knowledge/).
+    name: text().notNull(),
+    // Extracted plain text the agent reads. Empty allowed (e.g. URL not yet fetched).
+    textContent: text().default("").notNull(),
+    // Original URL for type="url"; null for uploads.
+    sourceUrl: text(),
+    sizeBytes: integer(),
+    createdBy: text().references(() => users.id, { onDelete: "set null" }),
+    createdAt: now(),
+  },
+  (t) => [index("InstanceKnowledge_instanceId_idx").on(t.instanceId)],
 )
 
 // AgentEvent — the high-volume agent runtime stream (runs, tool calls,

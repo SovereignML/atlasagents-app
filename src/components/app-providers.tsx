@@ -1,28 +1,27 @@
 "use client"
 
 import { SessionProvider } from "next-auth/react"
-import { ThemeProvider } from "next-themes"
 import { ChatwootWidget } from "@/components/chatwoot-widget"
 import { PostHogProvider } from "@/components/posthog-provider"
 import { AdClickCapture } from "@/components/ad-click-capture"
 import { ConsentBanner } from "@/components/consent-banner"
 
 export function AppProviders({ children }: { children: React.ReactNode }) {
-  // Default to dark everywhere; ignore OS preference so the landing page is
-  // always dark unless the user explicitly toggles light (persisted).
+  // Dark-only for now: the `dark` class is hard-coded on <html> in the root
+  // layout, so we don't wrap the tree in next-themes' ThemeProvider. That
+  // provider always injects an inline anti-FOUC <script>, which React 19 warns
+  // about when it renders client-side — and with a fixed theme it buys nothing.
   return (
-    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
-      <SessionProvider refetchOnWindowFocus refetchWhenOffline={false}>
-        {/* Inside SessionProvider so PostHogIdentify can read useSession() */}
-        <PostHogProvider>
-          {children}
-          <ChatwootWidget />
-          {/* Capture ad click IDs on landing; show the consent gate that
-              governs server-side ad-conversion tracking. */}
-          <AdClickCapture />
-          <ConsentBanner />
-        </PostHogProvider>
-      </SessionProvider>
-    </ThemeProvider>
+    <SessionProvider refetchOnWindowFocus refetchWhenOffline={false}>
+      {/* Inside SessionProvider so PostHogIdentify can read useSession() */}
+      <PostHogProvider>
+        {children}
+        <ChatwootWidget />
+        {/* Capture ad click IDs on landing; show the consent gate that
+            governs server-side ad-conversion tracking. */}
+        <AdClickCapture />
+        <ConsentBanner />
+      </PostHogProvider>
+    </SessionProvider>
   )
 }

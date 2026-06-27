@@ -193,16 +193,17 @@ Public endpoint powering the landing page planner and third-party integrations.
 
 ## Pricing & Plans
 
-Six plans, defined in [`src/configs/plans.ts`](../src/configs/plans.ts). AI usage is metered in **credits** (1 credit = $0.01) granted per billing period — see [Billing & credits](BILLING.md).
+Seven plans, defined in [`src/configs/plans.ts`](../src/configs/plans.ts). AI usage is metered in **credits** (1 credit = $0.01) granted per billing period — see [Billing & credits](BILLING.md). Monthly/Yearly below are the current launch (promo) prices; full after-launch prices are noted where they differ.
 
-| Plan | Slug | Monthly | Yearly | Credits/period | Live agents | For |
-|------|------|--------:|-------:|---------------:|------------:|-----|
-| Free | `free` | $0 | $0 | 100 | — (no always-on) | Try and build |
-| Builder | `builder` | $79 | $790 | 3,000 | 1 | Solo builders |
-| Operator | `operator` | $199 | $1,990 | 12,000 | 3 | Growing operations |
-| Scale | `scale` | $399 | $3,990 | 35,000 | 10 | Agencies and teams |
-| Enterprise | `enterprise` | $999 | custom | custom | scalable | High-scale orgs (contact sales) |
-| Bring Your Own Server | `byos` | $29 | $290 | — | — | Manage your own server ([BYOS](BYOS.md)) |
+| Plan | Slug | Monthly | Yearly | Full (after launch) | Credits/period | Live agents | For |
+|------|------|--------:|-------:|--------------------:|---------------:|------------:|-----|
+| Free | `free` | $0 | $0 | $0 | 100 | — (no always-on) | Try and build |
+| Lite | `lite` | $9 | $90 | $9 | 500 | 1 | Trying it for real |
+| Builder | `builder` | $19 | $190 | $29 | 1,000 | 1 | Solo builders |
+| Operator | `operator` | $69 | $690 | $99 | 2,000 | 3 | Growing operations |
+| Scale | `scale` | $179 | $1,790 | $249 | 5,000 | 10 | Agencies and teams |
+| Enterprise | `enterprise` | From $499 | custom | From $999 | custom | scalable | High-scale orgs (contact sales) |
+| Bring Your Own Server | `byos` | $9 | $99 | $9 | — | — | Manage your own server ([BYOS](BYOS.md)) |
 
 Billing is monthly or yearly (yearly ≈ 2 months free, ~17% off).
 

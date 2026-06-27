@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import {
-  Server, Shield, LockOpen, Boxes, KeyRound, Layers, Workflow,
-  Rocket, RefreshCw, Wallet, LifeBuoy, Check, Minus,
+  Server, Shield, LockOpen, Boxes, KeyRound, Workflow,
+  Rocket, Wallet, Check, Minus,
 } from "lucide-react";
 import { easing } from "@/lib/motion";
 import { BRANDING } from "@/configs/branding";
@@ -72,11 +72,6 @@ const rows: Row[] = [
     values: { sovereign: true, sintra: false, worksbuddy: false, lindy: "partial", selfhost: true },
   },
   {
-    feature: "Build any custom agent type",
-    icon: Layers,
-    values: { sovereign: true, sintra: false, worksbuddy: false, lindy: true, selfhost: true },
-  },
-  {
     feature: "Native multi-agent orchestration",
     icon: Workflow,
     values: { sovereign: true, sintra: false, worksbuddy: false, lindy: "partial", selfhost: false },
@@ -87,24 +82,14 @@ const rows: Row[] = [
     values: { sovereign: true, sintra: true, worksbuddy: true, lindy: true, selfhost: false },
   },
   {
-    feature: "Auto-updates & maintenance handled",
-    icon: RefreshCw,
-    values: { sovereign: true, sintra: true, worksbuddy: true, lindy: true, selfhost: false },
-  },
-  {
     feature: "No per-seat or per-action credit metering",
     icon: Wallet,
     values: { sovereign: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
   },
-  {
-    feature: "Support & SLA included",
-    icon: LifeBuoy,
-    values: { sovereign: true, sintra: true, worksbuddy: true, lindy: true, selfhost: false },
-  },
 ];
 
 const cost: Record<ProductKey, string> = {
-  sovereign: "From $79/mo",
+  sovereign: "From $9/mo",
   sintra: "~$97/mo",
   worksbuddy: "~$99/mo",
   lindy: "~$20/mo",

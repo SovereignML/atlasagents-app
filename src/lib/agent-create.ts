@@ -10,7 +10,7 @@ import crypto from "node:crypto"
 import type { InferSelectModel } from "drizzle-orm"
 import { db, eq, and, asc, instances, instanceLogs, regions, serverConfigs, plans } from "@/db"
 import { createSlug } from "@/lib/instance"
-import { findPlanBySlug, type PlanConfig } from "@/configs/plans"
+import { findPlanBySlug, FREE_DEMO_TTL_MS, type PlanConfig } from "@/configs/plans"
 import type { AgentConfig } from "@/lib/agent-config"
 import { selectSkills } from "@/configs/skill-map"
 import { generateSoul } from "@/lib/soul"
@@ -111,19 +111,37 @@ export async function createInstanceFromAgentFields(
     return { ok: false, status: 400, error: "Invalid or unavailable region" }
   }
 
-  // Hermes always ships with the Open WebUI sidecar (mandatory native install).
-  // The sidecar needs ≥2GB RAM, so the 1GB Nanode can't host Hermes — block it
-  // server-side regardless of what the form sent.
-  if (args.agentConfig?.runtime === "hermes" && serverConfig.ramGb < 2) {
-    return {
-      ok: false,
-      status: 400,
-      error: "Hermes requires a plan with at least 2GB RAM. Choose Builder or higher.",
+  // Hermes always ships with the Open WebUI sidecar (mandatory native install),
+  // which needs a paid plan with ≥2GB RAM. The Free tier is a short-lived demo
+  // (excluded regardless of its machine) and any sub-2GB plan can't host the
+  // sidecar — block both server-side regardless of what the form sent.
+  if (args.agentConfig?.runtime === "hermes") {
+    if (planConfig.tier === "free") {
+      return {
+        ok: false,
+        status: 400,
+        error: "Hermes is not available on the Free plan. Choose Lite or higher.",
+      }
+    }
+    if (serverConfig.ramGb < 2) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Hermes requires a plan with at least 2GB RAM. Choose Builder or higher.",
+      }
     }
   }
 
   // ── Derive agent fields ───────────────────────────────────────────
   const agentFields = buildAgentFields(args.agentConfig)
+
+  // Free tier is a time-boxed demo: stamp an expiry deadline so the reaper
+  // tears it down. Seeded here (clock starts at create) so the dashboard
+  // countdown is visible during provisioning; re-stamped to the full TTL when
+  // the agent goes live (see provisionBot). A non-null expiresAt is the
+  // "demo agent" signal the reaper + countdown key off of.
+  const expiresAt =
+    planConfig.tier === "free" ? new Date(Date.now() + FREE_DEMO_TTL_MS) : null
 
   // The agent belongs to the owner's active team (created lazily if needed).
   const teamId = args.teamId ?? (await getUserTeam(args.userId))?.teamId
@@ -152,6 +170,7 @@ export async function createInstanceFromAgentFields(
           storageGb: serverConfig.storageGb,
           billingInterval,
           status: "pending",
+          expiresAt,
           rootPasswordEnc: args.rootPasswordEnc,
           ...agentFields,
         })

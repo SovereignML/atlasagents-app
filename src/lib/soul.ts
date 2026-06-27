@@ -1,4 +1,6 @@
 import type { AgentConfig, Tone, BudgetTier } from "@/lib/agent-config"
+import { getSkill } from "@/configs/agent-skills"
+import { roleTitleForSlug, directiveForSlug } from "@/configs/agent-categories"
 
 const TONE_COPY: Record<Tone, string> = {
   formal: "Respond with professional, measured language. Avoid slang; default to full sentences.",
@@ -20,71 +22,109 @@ const KNOWLEDGE_COPY: Record<AgentConfig["knowledge_source"], string> = {
 }
 
 /**
- * Generate a deterministic SOUL.md persona for a bot. Output is stable for a
- * given (cfg, skills) pair so it can be snapshot-tested and diffed across
- * deploys. Sections: Identity · Purpose · Audience · Tone · Capabilities ·
- * Constraints.
+ * Generate the canonical, **role-first** persona for an agent. This is the
+ * single source of truth for who the agent is — delivered both as the `SOUL_MD`
+ * env var (shared Docker) and as the workspace `AGENTS.md` the runtime reads on
+ * boot (VPS/BYOS), so the agent presents as its *role* (a Support Specialist, a
+ * DevOps Engineer) rather than as the underlying OpenClaw/Hermes framework.
+ *
+ * Output is deterministic for a given `(cfg, skills, opts)` tuple so it can be
+ * snapshot-tested and diffed across deploys. Sections: Identity · Mission · How
+ * you work · Capabilities · Operating rules · (optional) Custom instructions.
+ *
+ * `skills` are catalog skill ids (see agent-skills.ts) — each renders as its
+ * name + playbook guidance. Unknown ids (legacy free-form skills) fall back to
+ * a plain bullet so existing agents/backups keep rendering. `opts.hasKnowledgeBase`
+ * adds a rule telling the agent to consult its synced `knowledge/` files.
  */
-export function generateSoul(cfg: AgentConfig, skills: string[]): string {
+export function generateSoul(
+  cfg: AgentConfig,
+  skills: string[],
+  opts?: { hasKnowledgeBase?: boolean },
+): string {
+  const roleTitle = roleTitleForSlug(cfg.use_case)
+  const directive = directiveForSlug(cfg.use_case)
+  const audience = cfg.target_user.trim()
   const lines: string[] = []
 
-  lines.push("# Identity")
+  lines.push(`# You are a ${roleTitle}`)
   lines.push("")
   lines.push(
-    `You are an AI agent deployed by the SovereignML platform. Your category is **${cfg.use_case}**.`
+    audience
+      ? `You are a dedicated ${roleTitle} for ${audience}. You are a real, specialist member of this team — not a generic chatbot, a demo, or a framework.`
+      : `You are a dedicated ${roleTitle}. You are a real, specialist member of this team — not a generic chatbot, a demo, or a framework.`
   )
   lines.push("")
 
-  lines.push("## Purpose")
+  lines.push("## Your mission")
   lines.push("")
-  lines.push(
-    cfg.core_actions.length > 0
-      ? `You exist to help users accomplish the following, in priority order:`
-      : `You exist to help users with ${cfg.use_case}-related tasks.`
-  )
   if (cfg.core_actions.length > 0) {
+    lines.push("You own the following outcomes, in priority order:")
     lines.push("")
     for (const action of cfg.core_actions) {
       lines.push(`- ${action}`)
     }
+  } else {
+    lines.push(directive)
   }
   lines.push("")
 
-  lines.push("## Audience")
+  lines.push("## How you work")
   lines.push("")
-  lines.push(
-    cfg.target_user.trim()
-      ? `Your users are: ${cfg.target_user.trim()}. Tailor examples, vocabulary, and level of detail to them.`
-      : `Your users come from mixed backgrounds. Default to clear, accessible language unless asked to go deeper.`
-  )
-  lines.push("")
-
-  lines.push("## Tone")
-  lines.push("")
+  lines.push(directive)
   lines.push(TONE_COPY[cfg.tone])
   lines.push("")
 
-  lines.push("## Capabilities")
+  lines.push("## Your capabilities")
   lines.push("")
   if (skills.length === 0) {
     lines.push("You have no specialized skills installed. Lean on general reasoning.")
   } else {
     lines.push("You have the following skills available:")
     lines.push("")
-    for (const skill of skills) {
-      lines.push(`- \`${skill}\``)
+    for (const id of skills) {
+      const skill = getSkill(id)
+      if (skill) {
+        lines.push(`- **${skill.name}** — ${skill.promptGuidance}`)
+      } else {
+        // Legacy free-form skill id (pre-catalog agents / restored backups).
+        lines.push(`- \`${id}\``)
+      }
     }
   }
   lines.push("")
 
-  lines.push("## Constraints")
+  lines.push("## Operating rules")
   lines.push("")
+  lines.push(
+    `- You are the ${roleTitle}. Never describe yourself as "OpenClaw", "Hermes", "an AI model", "an AI assistant", "a language model", or "a platform agent". If asked who you are, answer as the ${roleTitle}.`,
+  )
+  lines.push(
+    "- Stay within your role. If a request falls outside your specialty, say so and offer the closest help you can.",
+  )
+  if (opts?.hasKnowledgeBase) {
+    lines.push(
+      "- A `knowledge/` directory in your workspace holds reference material for this deployment. Consult it before answering and cite the source file when you use it.",
+    )
+  }
   lines.push(`- ${KNOWLEDGE_COPY[cfg.knowledge_source]}`)
   lines.push(`- ${TIER_COPY[cfg.budget_tier]}`)
   lines.push(`- Primary interface: **${cfg.interface}**. Adapt formatting accordingly (e.g. plain text for Telegram; markdown for web).`)
   lines.push(`- Never fabricate credentials, API keys, or internal URLs.`)
   lines.push(`- If you cannot help with a request, say so clearly and briefly.`)
   lines.push("")
+
+  const custom = (cfg.custom_instructions ?? "").trim()
+  if (custom) {
+    lines.push("## Custom instructions")
+    lines.push("")
+    lines.push(
+      "These instructions come directly from your operator and take priority over the defaults above:",
+    )
+    lines.push("")
+    lines.push(custom)
+    lines.push("")
+  }
 
   return lines.join("\n")
 }

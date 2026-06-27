@@ -168,9 +168,13 @@ export function createRuntime(spec: RuntimeSpec): RuntimeEngine {
         profiles: { openclaw: { cdpPort: 18800, color: "#FF4500" } },
       }
     }
-    if (tools.length > 0) {
-      // Grant the enabled tools on top of the default profile allowlist.
-      config.tools = { alsoAllow: tools.map((t) => t.support.openclaw!.toolName) }
+    // Grant the enabled tools on top of the default profile allowlist. Skip
+    // host-side tools (e.g. Knowledge Base) that have no runtime allowlist entry.
+    const alsoAllow = tools
+      .map((t) => t.support.openclaw?.toolName)
+      .filter((n): n is string => !!n)
+    if (alsoAllow.length > 0) {
+      config.tools = { alsoAllow }
     }
 
     return JSON.stringify(config, null, 2) + "\n"

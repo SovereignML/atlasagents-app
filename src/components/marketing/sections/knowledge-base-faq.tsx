@@ -24,7 +24,7 @@ const faqs = [
   },
   {
     q: "How does pricing work?",
-    a: "Credit-based. Free tier to start, then Builder ($79/mo), Operator ($199/mo), Scale ($399/mo), and Enterprise ($1,000+/mo). Credits cover AI usage, workflows, automations, and vector search.",
+    a: "Credit-based. Free tier to start, then Lite ($9/mo), Builder ($19/mo), Operator ($69/mo), Scale ($179/mo), and Enterprise (from $499/mo). Credits cover AI usage, workflows, automations, and vector search.",
   },
   {
     q: "Can you build a custom AI system for my business?",
@@ -87,7 +87,7 @@ function FAQItem({ q, a, index }: { q: string; a: string; index: number }) {
 
 export function KnowledgeBaseFAQ() {
   return (
-    <section className="relative py-32 overflow-hidden">
+    <section className="relative pt-32 pb-8 overflow-hidden lg:pb-12">
       <div className="absolute inset-0 bg-gradient-to-b from-transparent via-background-faint/30 to-transparent" />
 
       <div className="max-w-[720px] mx-auto px-8 relative z-10">

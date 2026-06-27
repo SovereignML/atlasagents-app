@@ -30,7 +30,9 @@
     "wallets:migrate": "node --env-file=.env --import tsx scripts/migrate-wallets-to-credits.ts",
     "whitelabel:backfill-hostnames": "node --env-file=.env --import tsx scripts/backfill-custom-hostnames.ts",
     "seed:agent-events": "node --env-file=.env --import tsx scripts/seed-agent-events.ts",
-    "support:backfill-chatwoot": "node --env-file=.env --import tsx scripts/backfill-chatwoot-messages.ts"
+    "support:backfill-chatwoot": "node --env-file=.env --import tsx scripts/backfill-chatwoot-messages.ts",
+    "providers:enable-akamai": "node --env-file=.env --import tsx scripts/enable-akamai-default.ts",
+    "providers:enable-ovh": "node --env-file=.env --import tsx scripts/enable-ovh-primary.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.10.0",

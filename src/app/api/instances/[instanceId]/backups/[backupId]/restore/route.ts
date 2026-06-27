@@ -13,7 +13,7 @@ import { createInstanceFromAgentFields } from "@/lib/agent-create"
 import { reprovisionBotEnv, provisionBot } from "@/lib/provisioner"
 import { describeVmError } from "@/lib/vm-provider"
 import { findPlanBySlug } from "@/configs/plans"
-import { depositPlanCredits } from "@/lib/wallet"
+import { addPlanCredits } from "@/lib/wallet"
 import { planPeriodEnd } from "@/lib/plan-period"
 
 const BodySchema = z.object({
@@ -253,7 +253,9 @@ export async function POST(
   }
   if (createdPlan.creditsPerPeriod > 0) {
     try {
-      await depositPlanCredits(
+      // New instance from a restore → ADD to the wallet (don't expire the
+      // user's other agents' plan credits).
+      await addPlanCredits(
         ownerId,
         createdPlan.creditsPerPeriod,
         planPeriodEnd("month"),

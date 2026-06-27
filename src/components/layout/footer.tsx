@@ -25,31 +25,6 @@ function ExternalLinkArrow() {
   )
 }
 
-function StatusSpinner() {
-  return (
-    <svg
-      className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[14px] h-[12px] animate-spin"
-      fill="none"
-      height="12"
-      style={{ animationDuration: "2s" }}
-      viewBox="0 0 14 12"
-      width="14"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path
-        d="M2.40381 1.40381C1.80023 2.00739 1.32144 2.72394 0.994783 3.51256C0.668128 4.30117 0.5 5.14641 0.5 6C0.5 6.85359 0.668127 7.69883 0.994783 8.48744C1.32144 9.27606 1.80023 9.99261 2.40381 10.5962"
-        stroke="var(--color-hero)"
-        strokeOpacity="0.12"
-      />
-      <path
-        d="M11.5962 1.40381C12.1998 2.00739 12.6786 2.72394 13.0052 3.51256C13.3319 4.30117 13.5 5.14641 13.5 6C13.5 6.85359 13.3319 7.69883 13.0052 8.48744C12.6786 9.27606 12.1998 9.99261 11.5962 10.5962"
-        stroke="var(--color-hero)"
-        strokeOpacity="0.12"
-      />
-    </svg>
-  )
-}
-
 const footerSections = [
   {
     title: "Platform",
@@ -91,7 +66,7 @@ const footerSections = [
 
 export default function Footer() {
   return (
-    <footer className="relative overflow-x-clip pb-10 max-lg:pt-[188px] lg:pb-12 lg:-mt-[40px]">
+    <footer className="relative -mt-8 overflow-hidden pb-4 lg:-mt-16 lg:pb-6">
       {/* Footer background gradient layer */}
       <div className="footer-background pointer-events-none absolute bottom-0 left-0 h-[2709px] w-full">
         <div className="absolute top-[1183px] lg:top-[886px] left-1/2 -translate-x-1/2 w-[3088px] h-[960px] pointer-events-none dark:hidden">
@@ -121,17 +96,17 @@ export default function Footer() {
       </div>
 
       {/* CTA area */}
-      <div className="relative mx-auto mb-[84px] max-w-[1320px] pt-10 lg:mb-36 lg:pt-[200px]">
+      <div className="relative mx-auto mb-12 max-w-[1320px] pt-8 lg:mb-20 lg:pt-20">
         {/* Decorative vertical lines */}
-        <div className="footer-cta-line-1 pointer-events-none absolute top-[255px] h-[680px] w-full max-lg:hidden">
+        <div className="footer-cta-line-1 pointer-events-none absolute top-[120px] h-[480px] w-full max-lg:hidden">
           <div className="absolute top-0 left-0 h-full w-px" />
           <div className="absolute top-0 right-0 h-full w-px" />
         </div>
-        <div className="footer-cta-line-2 pointer-events-none absolute -top-[159px] h-[1096px] max-lg:hidden" style={{ width: "1120px", left: "calc(50% - 560px)" }}>
+        <div className="footer-cta-line-2 pointer-events-none absolute -top-[80px] h-[720px] max-lg:hidden" style={{ width: "1120px", left: "calc(50% - 560px)" }}>
           <div className="absolute top-0 left-0 h-full w-px" />
           <div className="absolute top-0 right-0 h-full w-px" />
         </div>
-        <div className="footer-cta-line-3 pointer-events-none absolute top-[228px] h-[593px] max-lg:hidden" style={{ width: "793px", left: "calc(50% - 396.5px)" }}>
+        <div className="footer-cta-line-3 pointer-events-none absolute top-[100px] h-[400px] max-lg:hidden" style={{ width: "793px", left: "calc(50% - 396.5px)" }}>
           <div className="absolute top-0 left-0 h-full w-px" />
           <div className="absolute top-0 right-0 h-full w-px" />
         </div>
@@ -163,7 +138,7 @@ export default function Footer() {
       </div>
 
       {/* Footer links — 4 column layout */}
-      <div className="relative mx-auto mb-8 flex max-w-[390px] gap-2 text-[15px] leading-5 max-lg:flex-wrap max-lg:gap-y-10 max-lg:px-[31px] lg:mb-20 lg:max-w-[976px] lg:gap-6">
+      <div className="relative mx-auto flex max-w-[390px] gap-2 text-[15px] leading-5 max-lg:flex-wrap max-lg:gap-y-10 max-lg:px-[31px] lg:max-w-[976px] lg:gap-6">
         {footerSections.map((section) => (
           <div key={section.title} className="flex-1 max-lg:min-w-[40%]">
             <h3 className="mb-6 text-hero/[0.56] lg:mb-4">{section.title}</h3>
@@ -201,23 +176,8 @@ export default function Footer() {
         ))}
       </div>
 
-      {/* Status pill + line */}
-      <div
-        className="relative mx-auto mb-10 flex max-w-[390px] items-center max-lg:px-[31px] lg:mb-[72px] lg:max-w-[976px] lg:gap-6"
-        style={{ "--color": "var(--color-hero)" } as React.CSSProperties}
-      >
-        <div className="relative flex gap-1.5 rounded-full p-1.5 pr-4 text-hero/90 text-[15px] leading-5 border border-hero/[0.06]">
-          <div className="relative w-5 h-5 flex items-center justify-center">
-            <div className="w-1 h-1 rounded-full bg-hero" />
-            <StatusSpinner />
-          </div>
-          <div>All systems normal</div>
-        </div>
-        <div className="h-px flex-1 lg:bg-hero/[0.06]" />
-      </div>
-
       {/* Bottom copyright */}
-      <div className="relative mx-auto text-center">
+      <div className="relative mx-auto mt-6 text-center lg:mt-8">
         <p className="text-hero/30 text-sm">
           &copy; {new Date().getFullYear()} {BRANDING.name}. All rights reserved.
         </p>

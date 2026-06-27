@@ -74,6 +74,8 @@ function statusBadgeVariant(
   }
 }
 
+// Must cover every WalletTransactionType (see src/lib/wallet.ts) or the History
+// tab renders the raw enum string for any unmapped type.
 const TX_LABEL: Record<string, string> = {
   plan_deposit: "Plan grant",
   topup: "Top-up",
@@ -81,6 +83,8 @@ const TX_LABEL: Record<string, string> = {
   api_usage: "API usage",
   admin_grant: "Admin grant",
   refund: "Refund",
+  plan_expiry: "Plan expiry",
+  compute_refund: "Compute refund",
 }
 
 function txLabel(t: string): string {

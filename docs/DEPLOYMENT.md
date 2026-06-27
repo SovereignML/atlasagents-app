@@ -266,17 +266,30 @@ The minimal `.env` in step 4 gets a single-Linode deploy working. The newer subs
 ### Multi-provider routing → [PROVIDERS.md](PROVIDERS.md)
 
 ```dotenv
-VM_PROVIDER=linode            # default provider; the router scores + fails over across all configured ones
-LINODE_API_TOKEN=...
-DIGITALOCEAN_API_TOKEN=...    # optional second provider
-# OVHcloud uses a multi-key credential set (not a single token):
+VM_PROVIDER=digitalocean      # legacy/fallback default only; the router ranks OVH first via priority
+LINODE_API_TOKEN=...          # Akamai (failover)
+DIGITALOCEAN_API_TOKEN=...    # DigitalOcean (failover)
+# OVHcloud (PRIMARY) uses a multi-key signing credential set (not a single token):
+OVH_ENDPOINT=ovh-us           # ovh-eu | ovh-ca | ovh-us  (default ovh-us)
 OVH_APP_KEY=...
 OVH_APP_SECRET=...
 OVH_CONSUMER_KEY=...
-OVH_CLOUD_PROJECT_ID=...
-# OVH_ENDPOINT=ovh-eu         # ovh-eu | ovh-ca | ovh-us
+# OVH_CLOUD_PROJECT_ID is NOT used by the VPS product — leave unset.
 ```
 Only providers with credentials are routed to. Budgets/priorities seed from `src/configs/providers.ts` and are then editable in the admin panel.
+
+#### OVHcloud US — the primary provider (OVH VPS product)
+
+OVH is ranked highest (`priority 120`) so the router prefers it, with Akamai and DigitalOcean as failover. It provisions the **OVH VPS product** (VPS-1/2/3), mapped to the `shared-4g` / `shared-8g` / `shared-16g` tiers. This is materially different from the Linode/DO flow:
+
+- **Credentials:** create a script token at <https://api.us.ovhcloud.com/createToken/> authorized for `GET/POST/PUT/DELETE` on `/order/*`, `/vps/*`, `/me/sshKey`, and `/me/order/*`. Set `OVH_ENDPOINT=ovh-us`.
+- **Payment method required:** OVH VPS has no instant-create API. The adapter **orders** a VPS through the cart API (cart → assign → add VPS → configure datacenter + Ubuntu → checkout with autopay). Checkout charges a **full prepaid month per deploy** against the account's **default payment method**, which must be configured up front or every deploy fails.
+- **Asynchronous delivery:** the VPS service name isn't known until OVH delivers it, so `createVM` snapshots `/vps`, checks out, then polls/diffs the list to find the new service. Delivery can take several minutes; the adapter absorbs this internally.
+- **No cloud-init:** OVH VPS can't run our cloud-init bootstrap. The adapter reinstalls Ubuntu with the fleet SSH key via `/vps/{name}/rebuild`, then the provisioner runs the runtime bootstrap **over SSH** (same path as BYOS). This is keyed off the provider's `supportsCloudInit=false` flag.
+- **Termination caveat:** OVH VPS can't be destroyed via API without an email-confirmed token. `deleteVM` therefore disables auto-renew + flags delete-at-expiration (best-effort) so the service lapses at the end of the prepaid month — it does **not** tear down immediately. Because ordering is committal and per-month-billed, OVH failover is costly; monitor the routing failure rate.
+- **Plan codes drift:** OVH renames the VPS range yearly (`vps-2025-model1` → `vps-2026-model1` …). The codes in `src/configs/providers.ts` are validated against the live catalog at order time and the adapter falls back to the same model number under any year; update them if OVH reports the configured code unavailable.
+
+On an existing database, run `npm run providers:enable-ovh` to flip the live `ovh` row to enabled/priority 120 and reconcile its plan rows (the seed never re-clobbers `enabled`/`priority`). A fresh `npm run db:seed` already picks up the new catalog.
 
 ### Credit billing & margin → [BILLING.md](BILLING.md)
 
@@ -324,6 +337,7 @@ Several subsystems are driven by cron hitting authenticated endpoints with a `Au
 | `POST /api/internal/alerts-eval` | `ALERTS_EVAL_CRON_TOKEN` | ~every 5–10 min | Evaluate team alert rules against recent agent events and fire notifications. Without this cron, alert rules never trigger. |
 | `POST /api/internal/uptime-sync` | `UPTIME_SYNC_CRON_TOKEN` | ~every 1–2 min | Scrape Uptime Kuma `/metrics` and write each agent's status/latency/uptime/cert snapshot + heartbeat history for the monitoring dashboard. The app **also self-syncs** on dashboard load (throttled ~60s), so this cron is only needed to keep badges fresh when nobody is viewing. |
 | `POST /api/internal/events-prune` | `EVENTS_RETENTION_CRON_TOKEN` | daily | Delete `AgentEvent` rows older than `EVENTS_RETENTION_DAYS` (default 30). Without this cron, the events table grows unbounded. |
+| `POST /api/internal/demo-reap` | `DEMO_REAP_CRON_TOKEN` | ~every 1 min | Tear down Free-tier demo agents whose 30-minute trial (`instances.expiresAt`) has elapsed — full `deleteBot()` teardown (VM, OpenRouter key, DNS, monitor). The dashboard **also self-sweeps** on load (throttled ~60s), so this cron only matters when nobody is viewing. |
 | `POST /api/admin/reconcile` | `RECONCILE_CRON_TOKEN` | daily | Orphan/state reconciliation; **also** runs provider health probes + budget/burn-rate sync so the router scores on fresh data ([PROVIDERS.md](PROVIDERS.md)). Allow ≥60s timeout. |
 | `POST /api/admin/backups/cron` | `BACKUP_CRON_TOKEN` | nightly | Full `pg_dump` of the database, streamed to Cloudflare R2, with retention pruning. Requires R2 creds configured in `/admin/backups` and a `postgresql-client` on the app host. Allow ≥120s timeout. |
 

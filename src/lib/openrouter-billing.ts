@@ -23,6 +23,7 @@ import { db, instances, eq, and, isNotNull, sql } from "@/db"
 import {
   depositToWallet,
   depositPlanCredits,
+  addPlanCredits,
   getWalletCredits,
   type WalletTransactionType,
 } from "@/lib/wallet"
@@ -109,10 +110,14 @@ export async function syncOpenRouterLimitsForUser(userId: string): Promise<void>
  * succeeds even if OpenRouter is unreachable — the reconciler self-heals).
  * Returns the new credit balance.
  *
- * `plan_deposit` is routed through the use-it-or-lose-it bucket: any unspent
- * plan credits from the prior period are expired and the new allotment expires
- * at `opts.planExpiry` (the subscription's current period end). All other
- * funding types are persistent.
+ * `plan_deposit` is routed through the use-it-or-lose-it bucket. `opts.planMode`
+ * controls how it lands:
+ *   "renew" (default) — expire the prior period's unspent plan credits, then add
+ *     the new allotment (a subscription RENEWAL of the same plan).
+ *   "add" — stack the allotment on the existing bucket without expiring it, and
+ *     push expiry out to the later period end (a NEW subscription/instance, so
+ *     credits genuinely increase). See {@link addPlanCredits}.
+ * All other funding types are persistent.
  */
 export async function fundWallet(
   userId: string,
@@ -120,11 +125,13 @@ export async function fundWallet(
   type: WalletTransactionType,
   description?: string,
   instanceId?: string,
-  opts: { planExpiry?: Date | null } = {},
+  opts: { planExpiry?: Date | null; planMode?: "renew" | "add" } = {},
 ): Promise<number> {
   const balance =
     type === "plan_deposit"
-      ? await depositPlanCredits(userId, credits, opts.planExpiry ?? null, description, instanceId)
+      ? opts.planMode === "add"
+        ? await addPlanCredits(userId, credits, opts.planExpiry ?? null, description, instanceId)
+        : await depositPlanCredits(userId, credits, opts.planExpiry ?? null, description, instanceId)
       : await depositToWallet(userId, credits, type, description, instanceId)
   try {
     await syncOpenRouterLimitsForUser(userId)

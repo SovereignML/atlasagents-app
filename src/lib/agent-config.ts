@@ -17,6 +17,10 @@ export const AgentConfigSchema = z.object({
   deployment_target: DeploymentTargetSchema.default("shared"),
   knowledge_source: KnowledgeSourceSchema.default("none"),
   budget_tier: BudgetTierSchema.default("mid"),
+  // Freeform, user-authored instructions appended verbatim to the persona at
+  // the highest priority. Lets an operator shape an agent beyond its role
+  // defaults without us building a full persona-authoring studio.
+  custom_instructions: z.string().default(""),
   // VPS-only: which agent runtime engine powers the bot.
   runtime: RuntimeSchema.default("openclaw"),
   // Hermes-only: provision Open WebUI as a Docker sidecar for a web chat UI.

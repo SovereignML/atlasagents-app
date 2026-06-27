@@ -642,7 +642,13 @@ WantedBy=multi-user.target
     // the provision, matching the config contract); the browser provider set is
     // best-effort like base_url since the exact key varies across versions.
     const toolsets = enabledToolsForRuntime(args.enabledToolIds ?? [], "hermes")
-    const toolsetIds = ["hermes-cli", ...toolsets.map((t) => t.support.hermes!.toolset)]
+    // Host-side tools (e.g. Knowledge Base) have no Hermes toolset — skip them.
+    const toolsetIds = [
+      "hermes-cli",
+      ...toolsets
+        .map((t) => t.support.hermes?.toolset)
+        .filter((s): s is string => !!s),
+    ]
     const toolsetsStep = `${run(`config set toolsets ${bashSingleQuote(JSON.stringify(toolsetIds))}`)} || exit 1\n`
     const browserStep = toolsets.some((t) => t.id === "browser")
       ? `${run("config set browser.provider local")} || echo "warn: could not set browser.provider" >&2\n`

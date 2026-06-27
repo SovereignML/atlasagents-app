@@ -9,6 +9,7 @@ import { logAuditEvent } from "@/lib/audit"
 import { selectableModelsForRuntime } from "@/lib/allowed-models"
 import {
   effectiveModel,
+  modelTag,
   resolveLlmProvider,
   routeModel,
 } from "@/lib/model-router"
@@ -71,6 +72,7 @@ export async function GET(
       slug: m.slug,
       label: m.label,
       contextLength: m.contextLength,
+      tag: modelTag(m.slug),
     })),
   })
 }
