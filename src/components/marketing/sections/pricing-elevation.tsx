@@ -4,9 +4,9 @@ import { useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { easing, spring } from "@/lib/motion";
-import { PLANS, formatUsd } from "@/configs/plans";
+import { PLANS, BYOS_PLAN, formatUsd } from "@/configs/plans";
 import { BRANDING } from "@/configs/branding";
-import { Check, X, ArrowRight } from "lucide-react";
+import { Check, X, ArrowRight, Server, KeyRound, Wallet } from "lucide-react";
 import { BillingIntervalToggle, type BillingInterval } from "@/components/marketing/pricing/billing-interval-toggle";
 import type { PlanConfig } from "@/configs/plans";
 
@@ -219,6 +219,44 @@ export function PricingElevation() {
                 </a>
               </motion.div>
             </div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20, filter: "blur(4px)" }}
+              whileInView={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+              viewport={{ once: true, amount: 0.15 }}
+              transition={{ duration: 0.6, delay: 0.5, ease: easing.outExpo }}
+              className="glass-subtle rounded-2xl p-6 mt-4 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between"
+            >
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-2">
+                  <Server className="w-4 h-4 text-accent-blue-rest shrink-0" />
+                  <h3 className="text-lg font-bold text-text-loud">{BYOS_PLAN.name}</h3>
+                  <span className="text-sm font-bold text-text-secondary">
+                    {formatUsd(interval === "year" ? BYOS_PLAN.displayPriceYearly : BYOS_PLAN.displayPriceMonthly)}
+                    {interval === "year" ? "/yr" : "/mo"} per server
+                  </span>
+                </div>
+                <p className="text-xs text-text-secondary mb-3">
+                  Management only. We run and manage the agent on a server you own.
+                </p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  <span className="flex items-center gap-1.5 text-xs text-text-secondary">
+                    <Wallet className="w-3 h-3 text-accent-blue-rest shrink-0" />
+                    100 AI credits included, then top up
+                  </span>
+                  <span className="flex items-center gap-1.5 text-xs text-text-secondary">
+                    <KeyRound className="w-3 h-3 text-accent-blue-rest shrink-0" />
+                    Or bring your own API key
+                  </span>
+                </div>
+              </div>
+              <Link
+                href="/dashboard/byos/connect"
+                className="shrink-0 inline-flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-bold uppercase rounded-xl border border-accent-blue-rest text-text-loud hover:border-accent-blue-hover hover:text-accent-blue-rest transition-all"
+              >
+                Connect your server <ArrowRight className="w-3 h-3" />
+              </Link>
+            </motion.div>
 
             <p className="mt-8 text-center">
               <Link

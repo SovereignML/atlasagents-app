@@ -18,6 +18,7 @@ import { fundWallet } from "@/lib/openrouter-billing"
 import { clawBackFunds } from "@/lib/billing"
 import { describeVmError } from "@/lib/vm-provider"
 import { usdToCredits } from "@/lib/credit-pricing"
+import { BYOS_SIGNUP_CREDITS } from "@/configs/plans"
 import { notify } from "@/lib/notifications/dispatch"
 import { createAdminNotification } from "@/lib/admin-notify"
 import { claimEvent } from "@/lib/idempotency"
@@ -357,6 +358,32 @@ export async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> 
       )
     } catch (err) {
       console.error(`[stripe] depositToWallet failed for user ${local.userId}:`, err)
+    }
+  }
+
+  // BYOS users on managed AI (no own key) get a one-time starter grant on their
+  // FIRST invoice. After that they top up like any other wallet user. Own-key
+  // BYOS users pay their provider directly, so no grant.
+  const byosInstance = local.instance as { id?: string; byosLlmMode?: string | null } | null
+  if (
+    local.plan?.tier === "byos" &&
+    byosInstance?.byosLlmMode === "managed_credits" &&
+    invoice.billing_reason === "subscription_create"
+  ) {
+    try {
+      await fundWallet(
+        local.userId,
+        BYOS_SIGNUP_CREDITS,
+        "plan_deposit",
+        "BYOS signup credits",
+        byosInstance.id,
+        { planMode: "add" },
+      )
+      console.log(
+        `[stripe] Granted ${BYOS_SIGNUP_CREDITS} BYOS signup credits to user ${local.userId} (invoice ${invoice.id})`,
+      )
+    } catch (err) {
+      console.error(`[stripe] BYOS signup credit grant failed for user ${local.userId}:`, err)
     }
   }
 }

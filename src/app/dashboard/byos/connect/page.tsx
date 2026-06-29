@@ -3,7 +3,7 @@ import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
 import { normalizePem } from "@/lib/ssh"
-import { BYOS_PLAN } from "@/configs/plans"
+import { BYOS_PLAN, formatUsd } from "@/configs/plans"
 import { ByosConnectForm } from "./connect-form"
 
 export default async function ByosConnectPage() {
@@ -19,7 +19,7 @@ export default async function ByosConnectPage() {
     <PageContainer>
       <PageHeader
         title="Connect your server"
-        description="Bring your own server. We install, run, and manage the OpenClaw agent on it for a flat $9/mo."
+        description={`Bring your own server. We install, run, and manage the OpenClaw agent on it for a flat ${formatUsd(BYOS_PLAN.displayPriceMonthly)}/mo per server.`}
       />
       <ByosConnectForm
         fleetPublicKey={fleetPublicKey}

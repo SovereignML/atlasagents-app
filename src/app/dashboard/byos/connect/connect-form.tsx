@@ -310,8 +310,8 @@ export function ByosConnectForm({
                       <Wallet className="size-4" /> Use our OpenRouter credits
                     </div>
                     <p className="mt-1.5 text-sm text-muted-foreground">
-                      Pay-as-you-go from your credit wallet. We mint a per-agent key, no
-                      LLM signup needed.
+                      Includes 100 starter credits, then pay-as-you-go from your wallet. We
+                      mint a per-agent key, no LLM signup needed.
                     </p>
                   </ToggleGroupItem>
                   <ToggleGroupItem
@@ -567,7 +567,8 @@ export function ByosConnectForm({
                   </div>
                   {llmMode === "managed_credits" && (
                     <p className="text-xs text-muted-foreground">
-                      + LLM usage metered from your credit wallet.
+                      Includes 100 starter credits. Additional LLM usage is metered from
+                      your credit wallet.
                     </p>
                   )}
                   <p className="text-xs text-muted-foreground">

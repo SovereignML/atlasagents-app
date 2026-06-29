@@ -21,8 +21,10 @@ import {
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
 import { whereUserInstancesVisible } from "@/lib/instance-queries"
 import { getEffectiveUserId } from "@/lib/effective-user"
+import { BYOS_PLAN, formatUsd } from "@/configs/plans"
 
 const PLAN_FEATURES = [
+  "100 AI credits included (managed mode)",
   "Full monitoring & alerts",
   "Managed updates & backups",
   "No vendor lock-in",
@@ -215,13 +217,14 @@ export default async function ByosPage() {
           </p>
           <div className="mt-2 flex items-end gap-1.5">
             <span className="font-mono text-4xl font-semibold leading-none text-primary">
-              $29
+              {formatUsd(BYOS_PLAN.displayPriceMonthly)}
             </span>
             <span className="pb-0.5 text-sm text-muted-foreground">/mo</span>
           </div>
           <p className="mt-3 text-sm text-muted-foreground">
             A flat monthly fee per connected server. We manage the agent; you
-            keep the hardware and the data.
+            keep the hardware and the data. Managed-AI servers start with 100
+            credits, then top up anytime.
           </p>
           <ul className="mt-5 space-y-3">
             {PLAN_FEATURES.map((feature) => (

@@ -203,7 +203,7 @@ Seven plans, defined in [`src/configs/plans.ts`](../src/configs/plans.ts). AI us
 | Operator | `operator` | $69 | $690 | $99 | 2,000 | 3 | Growing operations |
 | Scale | `scale` | $179 | $1,790 | $249 | 5,000 | 10 | Agencies and teams |
 | Enterprise | `enterprise` | From $499 | custom | From $999 | custom | scalable | High-scale orgs (contact sales) |
-| Bring Your Own Server | `byos` | $9 | $99 | $9 | — | — | Manage your own server ([BYOS](BYOS.md)) |
+| Bring Your Own Server | `byos` | $2.50 | $30 | $2.50 | 100 (one-time, managed mode) | — | Manage your own server ([BYOS](BYOS.md)) |
 
 Billing is monthly or yearly (yearly ≈ 2 months free, ~17% off).
 
