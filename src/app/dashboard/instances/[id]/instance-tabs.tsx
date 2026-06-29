@@ -70,6 +70,7 @@ import { HeartbeatBar, type HeartbeatSample } from "@/components/dashboard/heart
 import { AccessTab } from "./instance-access-tab"
 import { ToolsTab } from "./instance-tools-tab"
 import { SkillsTab } from "./instance-skills-tab"
+import { FilesTab } from "./instance-files-browser"
 
 type InstanceLite = {
   id: string
@@ -173,6 +174,7 @@ const TABS = [
   { id: "controls", label: "Controls" },
   { id: "tools", label: "Tools" },
   { id: "skills", label: "Skills" },
+  { id: "files", label: "Files" },
   { id: "interfaces", label: "Interfaces" },
   { id: "backup", label: "Backup" },
   { id: "logs", label: "Logs" },
@@ -355,6 +357,14 @@ export function InstanceTabs({
           instanceId={instance.id}
           runtime={instance.runtime}
           status={instance.status}
+        />
+      </TabsContent>
+      <TabsContent value="files" className="mt-0">
+        <FilesTab
+          instanceId={instance.id}
+          status={instance.status}
+          deploymentTarget={instance.deploymentTarget}
+          runtimeLabel={instance.runtimeLabel}
         />
       </TabsContent>
       <TabsContent value="interfaces" className="mt-0">
