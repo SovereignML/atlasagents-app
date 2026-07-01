@@ -71,12 +71,13 @@ npm run build       # admin/dashboard are force-dynamic, safe with no DB
 
 ## 5. Start — pick one
 
-Both start paths run `scripts/deploy-entrypoint.sh`, which applies any pending
-Drizzle migrations (`drizzle-kit migrate`, idempotent) **before** the server
-accepts traffic, then execs the standalone server. So a deploy that adds
-columns no longer needs a manual `db:push`/`db:migrate` step — just rebuild and
-restart. If a migration fails, the process exits and the supervisor retries,
-surfacing the error in the logs rather than serving a half-migrated schema.
+Both start paths run `scripts/deploy-entrypoint.sh`, which syncs the DB schema
+(`drizzle-kit push --force`, idempotent — the same tool `bootstrap-pg.sh` uses)
+**before** the server accepts traffic, then execs the standalone server. So a
+deploy that adds columns no longer needs a manual `db:push` step — just rebuild
+and restart. The sync is non-fatal: if it fails, the entrypoint logs a warning
+and starts the server anyway with the existing schema, so a schema-tool problem
+degrades to a couple of erroring pages rather than a full crash-loop.
 
 ### pm2
 

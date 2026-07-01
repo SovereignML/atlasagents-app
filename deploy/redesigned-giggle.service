@@ -9,8 +9,8 @@
 ; Assumes:
 ;   - App checked out at /opt/redesigned-giggle (adjust WorkingDirectory below)
 ;   - `npm ci && npm run build` already run there
-;   - Pending Drizzle migrations are applied automatically on start by
-;     scripts/deploy-entrypoint.sh (below), so no manual db:push/db:migrate
+;   - The DB schema is synced automatically on start by
+;     scripts/deploy-entrypoint.sh (drizzle-kit push), so no manual db:push
 ;     step is needed after a deploy.
 ;   - /etc/redesigned-giggle.env contains DATABASE_URL, AUTH_SECRET,
 ;     NEXTAUTH_URL, etc. (chmod 600, owned by the app user)
@@ -30,7 +30,7 @@ Environment=NODE_ENV=production
 Environment=HOSTNAME=0.0.0.0
 Environment=PORT=3000
 Environment=NEXT_TELEMETRY_DISABLED=1
-; Applies pending Drizzle migrations, then execs the standalone server
+; Syncs the DB schema (drizzle-kit push), then execs the standalone server
 ; (same pid, so systemd keeps tracking it as the main process).
 ExecStart=/usr/bin/env bash scripts/deploy-entrypoint.sh
 Restart=on-failure
