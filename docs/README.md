@@ -15,7 +15,7 @@
 | [BYOS.md](BYOS.md) | Bring Your Own Server — manage an agent on hardware the customer owns |
 | [BILLING.md](BILLING.md) | Credit wallet + OpenRouter margin billing, spend caps, and the usage-sync poller |
 | [INTEGRATIONS.md](INTEGRATIONS.md) | User-connected integrations: Google Drive agent backups and BYO Cloudflare domains |
-| [PROVIDERS.md](PROVIDERS.md) | Multi-provider VPS router (Linode / DigitalOcean / OVHcloud): scoring, failover, budgets |
+| [PROVIDERS.md](PROVIDERS.md) | Multi-provider VPS router (DigitalOcean / Linode): scoring, failover, budgets |
 | [RUNTIMES.md](RUNTIMES.md) | The agent runtimes — OpenClaw and Hermes |
 | [HERMES-API-INTEGRATION.md](HERMES-API-INTEGRATION.md) | Connecting external bots to a Hermes instance's OpenAI-compatible `/v1` API |
 

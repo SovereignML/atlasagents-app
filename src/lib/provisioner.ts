@@ -601,12 +601,10 @@ echo "=== provision: v1_models_ok ==="
 
 function isLiveMode(): boolean {
   // Live provisioning needs the fleet SSH key plus at least one provider token.
-  // Any enabled VPS provider's credential counts — DO is primary, but Linode/OVH
-  // remain valid so a multi-provider deployment still reports live mode.
+  // Any enabled VPS provider's credential counts — DO is primary, but Linode
+  // remains valid so a multi-provider deployment still reports live mode.
   const hasProviderToken = Boolean(
-    process.env.DIGITALOCEAN_API_TOKEN ||
-      process.env.LINODE_API_TOKEN ||
-      process.env.OVH_APP_KEY,
+    process.env.DIGITALOCEAN_API_TOKEN || process.env.LINODE_API_TOKEN,
   )
   return hasProviderToken && Boolean(process.env.SSH_FLEET_PRIVATE_KEY)
 }
@@ -747,9 +745,6 @@ async function provisionBotLocked(
   })
 
   try {
-    // #region agent log
-    fetch('http://127.0.0.1:7305/ingest/880804f1-30d2-40e6-a578-5c94bee7e97e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'52ccd5'},body:JSON.stringify({sessionId:'52ccd5',runId:'pre-fix-2',hypothesisId:'A2,F',location:'src/lib/provisioner.ts:provisionBotLocked',message:'provision branch',data:{target,liveMode:isLiveMode(),hasOvhAppKey:!!process.env.OVH_APP_KEY,hasDoToken:!!process.env.DIGITALOCEAN_API_TOKEN,hasLinodeToken:!!process.env.LINODE_API_TOKEN,hasFleetKey:!!process.env.SSH_FLEET_PRIVATE_KEY},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     let result: ProvisionResult
     if (!isLiveMode()) {
       await logInstanceEvent({
@@ -1070,9 +1065,9 @@ type AcquiredVm = {
   ipAddress: string
   useGoldenImage: boolean
   /**
-   * Whether the provider booted the VM from cloud-init. When false (OVH VPS),
-   * the runtime bootstrap is run over SSH after boot instead of polling for a
-   * cloud-init completion marker that will never arrive.
+   * Whether the provider booted the VM from cloud-init. When false, the runtime
+   * bootstrap is run over SSH after boot instead of polling for a cloud-init
+   * completion marker that will never arrive.
    */
   supportsCloudInit: boolean
 }
@@ -1420,8 +1415,7 @@ async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
     await sshWaitReady(target)
 
     /* --- 4. Bootstrap: golden image (skip), cloud-init (poll), or run  */
-    /*        the bootstrap over SSH for providers without cloud-init     */
-    /*        (OVH VPS).                                                  */
+    /*        the bootstrap over SSH for providers without cloud-init.    */
     if (useGoldenImage) {
       currentStage = "bootstrap"
       await setProvisionStage(instance.id, currentStage)
@@ -1449,8 +1443,8 @@ async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
         message: PROVISION_EVENT.bootstrapComplete,
       })
     } else {
-      // No cloud-init (OVH VPS): run the runtime bootstrap over SSH, mirroring
-      // the BYOS path. The VM booted a clean Ubuntu image with our fleet key.
+      // No cloud-init: run the runtime bootstrap over SSH, mirroring the BYOS
+      // path. The VM booted a clean Ubuntu image with our fleet key.
       currentStage = "bootstrap"
       await setProvisionStage(instance.id, currentStage)
       await logInstanceEvent({
@@ -1474,7 +1468,7 @@ async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
       await logSshStep(instance.id, bootstrapStep)
       if (bootstrapStep.exitCode !== 0 && bootstrapStep.exitCode !== null) {
         throw new Error(
-          `OVH VPS bootstrap failed (exit ${bootstrapStep.exitCode}): ${
+          `SSH bootstrap failed (exit ${bootstrapStep.exitCode}): ${
             bootstrapStep.stderr || bootstrapStep.stdout
           }`,
         )

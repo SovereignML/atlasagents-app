@@ -1,6 +1,6 @@
 # VPS Provider Router
 
-> Where a managed-VPS agent actually gets provisioned. SovereignML routes each deploy across **multiple cloud providers** (Linode, DigitalOcean, OVHcloud) by score, with hard filters, failover, internal per-provider budgets, and health-aware ranking. This replaces the old single, env-driven Linode path.
+> Where a managed-VPS agent actually gets provisioned. SovereignML routes each deploy across **multiple cloud providers** (DigitalOcean, Linode) by score, with hard filters, failover, internal per-provider budgets, and health-aware ranking. This replaces the old single, env-driven Linode path.
 
 For end users this is invisible — you pick a **region** and a **server size** (see [FEATURES.md](FEATURES.md)) and the platform picks the best provider. Everything below is operator/developer facing.
 
@@ -14,9 +14,8 @@ The catalog ([`src/configs/providers.ts`](../src/configs/providers.ts)) is the s
 
 | Provider | Slug | Credential env | Default priority | Monthly budget (soft / hard) |
 |----------|------|----------------|-----------------:|------------------------------|
-| Linode | `linode` | `LINODE_API_TOKEN` | 10 | $5,000 ($4,000 / $5,000) |
-| DigitalOcean | `digitalocean` | `DIGITALOCEAN_API_TOKEN` | 5 | $3,000 ($2,400 / $3,000) |
-| OVHcloud | `ovh` | `OVH_APP_KEY` | 0 | $2,000 ($1,600 / $2,000) |
+| DigitalOcean | `digitalocean` | `DIGITALOCEAN_API_TOKEN` | 100 | $3,000 ($2,400 / $3,000) |
+| Linode / Akamai | `linode` | `LINODE_API_TOKEN` | 90 | $5,000 ($4,000 / $5,000) |
 
 Each normalized server tier (`server-types.ts` slug) and region maps to a provider-specific plan/region code (`PROVIDER_PLAN_MAP`, `PROVIDER_REGION_MAP`). Tiers are matched on **category + RAM**; vCPU may differ where a provider has no exact match. Not every provider serves every region (e.g. only Linode has a Tokyo POP). Secrets live **only** in env, never in the DB.
 

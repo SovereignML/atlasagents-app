@@ -48,10 +48,6 @@ function collect(): CheckResult {
   const providerVars: Record<string, string[]> = {
     digitalocean: ["DIGITALOCEAN_API_TOKEN"],
     linode: ["LINODE_API_TOKEN"],
-    // OVH VPS product is account-scoped (no Cloud Project); these three signing
-    // creds are all that's required. A default payment method on the account is
-    // also needed for VPS ordering but can't be checked from here.
-    ovh: ["OVH_APP_KEY", "OVH_APP_SECRET", "OVH_CONSUMER_KEY"],
   }
   for (const v of providerVars[vmProvider] ?? []) {
     if (!set(v)) errors.push(`${v} is not set — required for VM_PROVIDER=${vmProvider}.`)

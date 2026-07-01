@@ -355,7 +355,7 @@ Defined in [`src/configs/regions.ts`](../src/configs/regions.ts); each maps to a
 
 ### Compute Tiers (9 configurations)
 
-Normalized tiers in [`src/configs/server-types.ts`](../src/configs/server-types.ts), each mapped to a plan code per provider (Linode/DigitalOcean/OVHcloud). Storage add-on: $0.05/GB-month (0–1000 GB).
+Normalized tiers in [`src/configs/server-types.ts`](../src/configs/server-types.ts), each mapped to a plan code per provider (DigitalOcean/Linode). Storage add-on: $0.05/GB-month (0–1000 GB).
 
 | Slug | Category | Label | vCPU | RAM | Storage | Monthly |
 |------|----------|-------|-----:|----:|--------:|--------:|
@@ -376,7 +376,7 @@ Normalized tiers in [`src/configs/server-types.ts`](../src/configs/server-types.
 The earliest version of this doc listed several things as limitations or roadmap that have since shipped:
 
 - **PostgreSQL** — the app runs on PostgreSQL via Drizzle ORM (no SQLite). See [TECH-STACK.md](TECH-STACK.md).
-- **Real provisioning** — agents run on real VMs across Linode / DigitalOcean / OVHcloud with scoring and failover. See [VPS Provider Router](PROVIDERS.md). (Not "mock IPs", and not Hetzner.)
+- **Real provisioning** — agents run on real VMs across DigitalOcean / Linode with scoring and failover. See [VPS Provider Router](PROVIDERS.md). (Not "mock IPs", and not Hetzner.)
 - **Credit billing with margin** — per-instance OpenRouter keys, spend caps, and a usage poller. See [Billing & credits](BILLING.md).
 - **White-label / agency** — customers can run agents on subdomains of their own Cloudflare zones. See [Integrations](INTEGRATIONS.md).
 - **Bring Your Own Server** — manage an agent on hardware the customer owns. See [BYOS](BYOS.md).

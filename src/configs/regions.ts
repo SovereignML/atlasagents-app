@@ -14,10 +14,8 @@ export type RegionConfig = {
 }
 
 export const REGIONS: readonly RegionConfig[] = [
-  // US-only for now: OVH (primary VPS provider) serves only US datacenters
-  // (US-EAST-VA / US-WEST-OR). The other locations are kept in the catalog but
-  // disabled so they don't appear in the region picker or get picked as the
-  // default region.
+  // US-only for now. The other locations are kept in the catalog but disabled so
+  // they don't appear in the region picker or get picked as the default region.
   {
     slug: "us-east-1",
     name: "Newark",

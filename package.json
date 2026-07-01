@@ -32,7 +32,7 @@
     "seed:agent-events": "node --env-file=.env --import tsx scripts/seed-agent-events.ts",
     "support:backfill-chatwoot": "node --env-file=.env --import tsx scripts/backfill-chatwoot-messages.ts",
     "providers:enable-akamai": "node --env-file=.env --import tsx scripts/enable-akamai-default.ts",
-    "providers:enable-ovh": "node --env-file=.env --import tsx scripts/enable-ovh-primary.ts"
+    "providers:remove-ovh": "node --env-file=.env --import tsx scripts/remove-ovh-provider.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.10.0",
