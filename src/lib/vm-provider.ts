@@ -6,7 +6,7 @@ export type CreateVmOpts = {
   authorizedKeys?: string[]
   tags?: string[]
   image?: string
-  /** Cloud-init user-data script. Provider-agnostic: Linode, DO, OVH all support this. */
+  /** Cloud-init user-data script. Provider-agnostic: Linode and DO both support this. */
   userData?: string
 }
 
@@ -68,8 +68,8 @@ export type ProviderHealth = {
 export interface VpsProvider extends VmProvider {
   /**
    * Whether this provider boots VMs from cloud-init `userData` (Linode/DO) or
-   * needs the runtime bootstrap run over SSH after boot (OVH VPS, which has no
-   * cloud-init). Drives the provisioner's bootstrap branch — see
+   * needs the runtime bootstrap run over SSH after boot (providers with no
+   * cloud-init support). Drives the provisioner's bootstrap branch — see
    * provisionVpsBot in src/lib/provisioner.ts.
    */
   readonly supportsCloudInit: boolean
@@ -88,7 +88,7 @@ export interface VpsProvider extends VmProvider {
  * Legacy env-driven factory (`VM_PROVIDER`, default "digitalocean"). Retained for
  * the shared-cluster / non-routed paths. The VPS path uses the router + the
  * slug/id factories in src/lib/providers. Delegates to the slug factory so every
- * supported provider (linode / digitalocean / ovh) works here too.
+ * supported provider (linode / digitalocean) works here too.
  *
  * Dynamic import avoids a module-load cycle (providers/index → adapters →
  * vm-provider).

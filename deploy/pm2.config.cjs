@@ -39,11 +39,11 @@ module.exports = {
   apps: [
     {
       name: "redesigned-giggle",
-      script: "node",
-      args: [
-        `--env-file=${envPath}`,
-        path.join(repoRoot, ".next/standalone/server.js"),
-      ],
+      // Entrypoint applies pending Drizzle migrations, then execs the
+      // standalone server (same pid, so pm2 keeps managing it). It reads
+      // DATABASE_URL from the repo-root .env itself, so no --env-file here.
+      script: path.join(repoRoot, "scripts/deploy-entrypoint.sh"),
+      interpreter: "bash",
       cwd: repoRoot,
       exec_mode: "fork",
       instances: 1,

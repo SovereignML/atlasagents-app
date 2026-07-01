@@ -38,8 +38,8 @@ function candidate(over: Partial<RawCandidate>): RawCandidate {
 console.log("scoreCandidates — ranking")
 {
   const linode = candidate({ providerSlug: "linode", successRate: 0.95 })
-  const ovh = candidate({
-    providerSlug: "ovh",
+  const akamai = candidate({
+    providerSlug: "akamai",
     monthlyCostUsd: 44, // pricier → cost-efficiency drag
     budget: { monthlyCreditsUsd: 2000, currentUsageUsd: 100, softLimitUsd: 1600, burnRateUsdPerDay: 5, remainingUsd: 1900 },
     successRate: 0.9,
@@ -51,9 +51,9 @@ console.log("scoreCandidates — ranking")
     successRate: 0.7,
   })
 
-  const ranked = scoreCandidates([ovh, digitalocean, linode], ROUTING_WEIGHTS)
+  const ranked = scoreCandidates([akamai, digitalocean, linode], ROUTING_WEIGHTS)
   assert(ranked[0].providerSlug === "linode", "healthiest + cheapest + most budget wins (linode)")
-  assert(ranked[1].providerSlug === "ovh", "pricey-but-healthy ovh ranks above degraded do")
+  assert(ranked[1].providerSlug === "akamai", "pricey-but-healthy akamai ranks above degraded do")
   assert(ranked[2].providerSlug === "digitalocean", "degraded + past-soft-limit do ranks last")
   assert(ranked[0].score > ranked[1].score && ranked[1].score > ranked[2].score, "scores strictly decreasing")
   assert(ranked.every((c) => c.breakdown.total === c.score), "breakdown.total mirrors score")
@@ -63,14 +63,14 @@ console.log("scoreCandidates — admin pin leads regardless of score")
 {
   const good = candidate({ providerSlug: "linode" })
   const weakPinned = candidate({
-    providerSlug: "ovh",
+    providerSlug: "digitalocean",
     monthlyCostUsd: 44,
     health: { status: "degraded", latencyMs: 3000 },
     successRate: 0.6,
     pinned: true,
   })
   const ranked = scoreCandidates([good, weakPinned], ROUTING_WEIGHTS)
-  assert(ranked[0].providerSlug === "ovh", "pinned provider leads even with a lower raw score")
+  assert(ranked[0].providerSlug === "digitalocean", "pinned provider leads even with a lower raw score")
   assert(ranked[0].score < ranked[1].score, "pinned leader genuinely has the lower score")
 }
 

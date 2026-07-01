@@ -8,9 +8,8 @@ import { db, providers, eq } from "@/db"
 import type { VpsProvider } from "@/lib/vm-provider"
 import { LinodeProvider } from "@/lib/linode"
 import { DigitalOceanProvider, describeDoError } from "@/lib/providers/digitalocean"
-import { OVHProvider, describeOvhError } from "@/lib/providers/ovh"
 
-export type ProviderSlug = "linode" | "digitalocean" | "ovh"
+export type ProviderSlug = "linode" | "digitalocean"
 
 /** Construct an adapter from a slug. Throws on unknown slug. */
 export function instantiateProvider(slug: string): VpsProvider {
@@ -19,8 +18,6 @@ export function instantiateProvider(slug: string): VpsProvider {
       return new LinodeProvider()
     case "digitalocean":
       return new DigitalOceanProvider()
-    case "ovh":
-      return new OVHProvider()
     default:
       throw new Error(`Unknown provider slug: ${slug}`)
   }
@@ -80,8 +77,6 @@ export async function describeProviderError(slug: string, err: unknown): Promise
   switch (slug) {
     case "digitalocean":
       return describeDoError(err)
-    case "ovh":
-      return describeOvhError(err)
     case "linode":
     default: {
       const { describeLinodeError } = await import("@/lib/linode")

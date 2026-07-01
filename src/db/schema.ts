@@ -566,7 +566,7 @@ export const providers = pgTable(
   "Provider",
   {
     id: cuid().primaryKey(),
-    // "linode" | "digitalocean" | "ovh"
+    // "linode" | "digitalocean"
     slug: text().notNull(),
     name: text().notNull(),
     // Hard gate — disabled providers are never routed to.
