@@ -2,7 +2,7 @@ import Link from "next/link"
 import { BRANDING } from "@/configs/branding"
 import { Reveal, RevealGroup, RevealItem } from "@/components/marketing/motion/reveal"
 
-const LAST_UPDATED = "May 30, 2026" // {{TODO: confirm effective date on legal sign-off}}
+const LAST_UPDATED = "June 30, 2026"
 
 const sections = [
   {
@@ -53,7 +53,7 @@ Features described in documentation or marketing materials may be subject to pla
     subsections: [
       {
         title: "Subscription Plans",
-        content: "SovereignML offers subscription tiers including Free, Builder, Operator, Scale, and Enterprise (custom pricing). Plans are credit-based for AI usage, workflows, automations, and related services. Features and limits vary by tier. Current plan details are available at sovereignml.com/pricing.",
+        content: "SovereignML offers subscription tiers including Free, Lite, Builder, Operator, Scale, Enterprise (custom pricing), and Bring Your Own Server. Plans are credit-based for AI usage, workflows, automations, and related services. Features and limits vary by tier. Current plan details are available at sovereignml.com/pricing.",
       },
       {
         title: "Payment",
@@ -61,7 +61,7 @@ Features described in documentation or marketing materials may be subject to pla
       },
       {
         title: "Renewals & Cancellation",
-        content: "Subscriptions automatically renew at the end of each billing cycle. You may cancel at any time from your dashboard. Cancellation takes effect at the end of the current billing period. No partial refunds are issued.",
+        content: "Subscriptions automatically renew at the end of each billing cycle. You may cancel at any time from your dashboard. Cancellation takes effect at the end of the current billing period. Refunds for the unused portion of a billing period, unused prepaid compute, and unused purchased credits are governed by our Refund Policy.",
       },
       {
         title: "Failed Payments",
@@ -69,7 +69,7 @@ Features described in documentation or marketing materials may be subject to pla
       },
       {
         title: "Refunds",
-        content: "All sales are final. We do not offer refunds for monthly or yearly subscriptions, including partial-period refunds. If you believe you were charged in error, contact billing@sovereignml.com within 14 days of the charge.",
+        content: "Within 14 days of a charge, you may request a refund of the unused portion of a prepaid billing period, unused prepaid compute, and unused purchased credits (top-ups), on a pro-rata basis and net of payment-processing fees. Consumed usage, plan-included and promotional credits, and one-time fees are non-refundable. Full terms, including how each amount is calculated, are set out in our Refund Policy. If you believe you were charged in error, contact billing@sovereignml.com within 14 days of the charge.",
       },
       {
         title: "Price Changes",
@@ -110,11 +110,11 @@ Violation of these terms may result in immediate account suspension or terminati
       },
       {
         title: "Cloud Infrastructure",
-        content: "Agent deployment provisions infrastructure on enterprise-grade cloud providers. You acknowledge that service availability depends on upstream provider status. {{TODO: legal review}}",
+        content: "Agent deployment provisions infrastructure on enterprise-grade cloud providers. You acknowledge that service availability depends on upstream provider status.",
       },
       {
         title: "Data Use & Product Improvement",
-        content: "We may use aggregated, anonymized data derived from platform usage to operate, secure, and improve the Platform, including improving agent performance and our models over time. We do not sell your data. You can opt out of analytics-based product improvement by contacting us at privacy@sovereignml.com. {{TODO: legal review — confirm scope, wording, and opt-out mechanism}}",
+        content: "We may use aggregated, anonymized data derived from platform usage to operate, secure, and improve the Platform, including improving agent performance and our models over time. We do not sell your data. You can opt out of analytics-based product improvement by contacting us at privacy@sovereignml.com.",
       },
     ],
   },
@@ -161,7 +161,7 @@ Open-source components used in the Platform remain subject to their respective l
   {
     id: "governing-law",
     title: "Governing Law",
-    content: `These Terms are governed by the laws of the jurisdiction in which SovereignML is incorporated, without regard to conflict of law provisions.
+    content: `These Terms are governed by the laws of the State of North Carolina, USA, where SovereignML L.L.C. is organized, without regard to conflict of law provisions.
 
 Any disputes arising from these Terms or the Platform shall first be submitted to good-faith negotiation. If unresolved, disputes shall be settled by binding arbitration, except that either party may seek injunctive relief in court for IP violations.`,
   },
@@ -170,7 +170,7 @@ Any disputes arising from these Terms or the Platform shall first be submitted t
     title: "Contact",
     content: `For questions about these Terms, contact us:
 
-SovereignML
+SovereignML L.L.C.
 Email: legal@sovereignml.com
 Website: sovereignml.com`,
   },
@@ -252,7 +252,7 @@ export default function TermsPage() {
       {/* Footer links */}
       <div className="mt-16 pt-8 border-t border-[var(--border-color)] flex flex-col sm:flex-row gap-4 justify-between items-start">
         <p className="text-[var(--text-secondary)] text-sm">
-          &copy; {new Date().getFullYear()} {BRANDING.name}. All rights reserved.
+          &copy; {new Date().getFullYear()} {BRANDING.legalEntity}. All rights reserved.
         </p>
         <div className="flex gap-6 text-sm">
           <Link
@@ -260,6 +260,12 @@ export default function TermsPage() {
             className="text-[var(--text-secondary)] hover:text-primary transition-colors"
           >
             Privacy Policy
+          </Link>
+          <Link
+            href="/refund"
+            className="text-[var(--text-secondary)] hover:text-primary transition-colors"
+          >
+            Refund Policy
           </Link>
           <Link
             href="/sla"

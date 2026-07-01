@@ -8,6 +8,11 @@ export const BRANDING = {
   description:
     "SovereignML is the AI operations platform for deploying intelligent agents — built on open agent runtimes like OpenClaw and Hermes — that do real work. Launch AI agents in minutes, automate business operations, and scale your AI workforce with your own isolated instances and no single-vendor lock-in.",
   domain: "sovereignml.com",
+  // Full legal entity for use in legal pages (Terms, Privacy, Refund, SLA)
+  // contact blocks, footers, and governing-law clauses. Marketing/nav copy
+  // continues to use `name`.
+  legalEntity: "SovereignML L.L.C.",
+  jurisdiction: "North Carolina, USA",
   appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
   supportEmail: "support@sovereignml.com",
   noreplyEmail: "noreply@sovereignml.com",

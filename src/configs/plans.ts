@@ -60,7 +60,7 @@ export const PLANS: readonly PlanConfig[] = [
     name: "Free",
     description: "Try and build",
     features: [
-      "100 credits included",
+      "10 credits included",
       "Limited workflows",
       "Basic agent deployment",
       "Community support",
@@ -70,7 +70,7 @@ export const PLANS: readonly PlanConfig[] = [
     stripePriceIdYearly: process.env.STRIPE_PRICE_FREE_YEARLY ?? "",
     isActive: true,
     sortOrder: 0,
-    creditsPerPeriod: 100,
+    creditsPerPeriod: 10,
     displayPriceMonthly: 0,
     displayPriceYearly: 0,
     fullPriceMonthly: 0,

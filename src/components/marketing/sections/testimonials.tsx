@@ -3,8 +3,9 @@
 import { motion } from "framer-motion";
 import { TestimonialsColumn, type Testimonial } from "@/components/ui/testimonials-columns-1";
 
-// {{TODO: replace with real customer quotes (with permission) when available.
-// Until then these are illustrative examples, like the use-case stats.}}
+// NOTE: This section is currently NOT rendered (see src/app/page.tsx). The
+// entries below are illustrative placeholders; replace with real, permissioned
+// customer quotes before re-enabling the section.
 const testimonials: Testimonial[] = [
   {
     text: "We launched a support agent in an afternoon. It now handles most of our tickets overnight, and escalations arrive with full context.",

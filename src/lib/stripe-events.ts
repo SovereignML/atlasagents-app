@@ -24,6 +24,7 @@ import { createAdminNotification } from "@/lib/admin-notify"
 import { claimEvent } from "@/lib/idempotency"
 import { posthogServer } from "@/lib/posthog-server"
 import { adsConversions } from "@/lib/ads"
+import { creditGrantSchedule } from "@/lib/plan-period"
 
 // ---------- checkout.session.completed ----------
 // Triggered when the user finishes paying. Flips Instance to "running",
@@ -344,6 +345,14 @@ export async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> 
     const planMode = isNewSubscription ? "add" : "renew"
     const periodLabel = new Date().toISOString().slice(0, 7) // yyyy-mm
     const action = isNewSubscription ? "grant" : "renewal"
+    // Yearly plans prepay 12 months but the allotment is distributed monthly:
+    // this deposits only the first month (expiring in a month) and seeds
+    // `nextCreditGrantAt` so the monthly-grants sweep drips the rest. Monthly
+    // plans deposit the full allotment expiring at the Stripe period end.
+    const { expireAt, nextCreditGrantAt } = creditGrantSchedule(
+      local.interval,
+      local.currentPeriodEnd ?? null,
+    )
     try {
       await fundWallet(
         local.userId,
@@ -351,10 +360,16 @@ export async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> 
         "plan_deposit",
         `Plan ${action}: ${local.plan?.name ?? "unknown"} (${periodLabel})`,
         (local.instance as { id?: string } | null)?.id,
-        { planExpiry: local.currentPeriodEnd ?? null, planMode },
+        { planExpiry: expireAt, planMode },
       )
+      // Reset the drip schedule: a yearly (re)deposit re-seeds it; a monthly one
+      // clears it (Stripe's monthly invoice is the renewal, not a drip).
+      await db
+        .update(subscriptions)
+        .set({ nextCreditGrantAt })
+        .where(eq(subscriptions.id, local.id))
       console.log(
-        `[stripe] Granted ${credits.toLocaleString()} credits to user ${local.userId} (invoice ${invoice.id}, ${planMode})`,
+        `[stripe] Granted ${credits.toLocaleString()} credits to user ${local.userId} (invoice ${invoice.id}, ${planMode}, interval ${local.interval})`,
       )
     } catch (err) {
       console.error(`[stripe] depositToWallet failed for user ${local.userId}:`, err)

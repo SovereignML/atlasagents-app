@@ -43,6 +43,10 @@ function PriceBlock({ plan, interval }: Props) {
   const fullAmount = isYear ? plan.fullPriceYearly : plan.fullPriceMonthly
   const suffix = isYear ? "/year" : "/mo"
   const hasPromo = fullAmount > amount
+  // Only plans whose yearly price is less than 12x the monthly price actually
+  // get the "2 months free" annual discount (e.g. BYOS is a flat 12x, so no
+  // discount — don't show the label there).
+  const hasAnnualDiscount = plan.displayPriceYearly < plan.displayPriceMonthly * 12
 
   return (
     <div className="mt-6">
@@ -62,7 +66,7 @@ function PriceBlock({ plan, interval }: Props) {
           Launch pricing
         </p>
       )}
-      {isYear && (
+      {isYear && hasAnnualDiscount && (
         <p className="mt-1 text-xs font-mono text-primary">
           2 months free
         </p>

@@ -2,7 +2,7 @@ import Link from "next/link"
 import { BRANDING } from "@/configs/branding"
 import { Reveal, RevealGroup, RevealItem } from "@/components/marketing/motion/reveal"
 
-const LAST_UPDATED = "May 30, 2026" // {{TODO: confirm effective date on legal sign-off}}
+const LAST_UPDATED = "June 29, 2026"
 
 const sections = [
   {
@@ -56,7 +56,7 @@ By creating an account or using our services, you agree to the collection and us
       "To send transactional emails (password resets, deployment confirmations) via Resend",
       "To enforce platform security, detect abuse, and apply rate limits",
       "To provide customer support when you contact us",
-      "To improve the platform — including agent performance and our models over time — based only on aggregated, anonymized usage patterns. You can opt out of analytics-based product improvement by contacting privacy@sovereignml.com. {{TODO: legal review — confirm opt-out wording and mechanism}}",
+      "To improve the platform — including agent performance and our models over time — based only on aggregated, anonymized usage patterns. You can opt out of analytics-based product improvement by contacting privacy@sovereignml.com.",
     ],
   },
   {
@@ -140,7 +140,7 @@ To exercise any of these rights, contact us at the address below. We will respon
     title: "Contact",
     content: `For privacy-related questions, data requests, or to report a concern, contact us at:
 
-SovereignML
+SovereignML L.L.C.
 Email: privacy@sovereignml.com
 Website: sovereignml.com`,
   },
@@ -233,7 +233,7 @@ export default function PrivacyPage() {
       {/* Footer links */}
       <div className="mt-16 pt-8 border-t border-[var(--border-color)] flex flex-col sm:flex-row gap-4 justify-between items-start">
         <p className="text-[var(--text-secondary)] text-sm">
-          &copy; {new Date().getFullYear()} {BRANDING.name}. All rights reserved.
+          &copy; {new Date().getFullYear()} {BRANDING.legalEntity}. All rights reserved.
         </p>
         <div className="flex gap-6 text-sm">
           <Link

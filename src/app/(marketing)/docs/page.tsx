@@ -36,7 +36,7 @@ const faqItems = [
   {
     question: "How does billing work?",
     answer:
-      "Billing is monthly or yearly via Stripe. Plans include Free (100 credits), Lite ($9/mo), Builder ($19/mo), Operator ($69/mo), Scale ($179/mo), and Enterprise (from $499/mo). Credits cover AI usage, workflows, automations, and vector search; you can buy overage packs. Annual billing includes about two months free vs. monthly. Manage subscriptions from your dashboard.",
+      "Billing is monthly or yearly via Stripe. Plans include Free (10 credits), Lite ($9/mo), Builder ($19/mo), Operator ($69/mo), Scale ($179/mo), and Enterprise (from $499/mo). Credits cover AI usage, workflows, automations, and vector search; you can buy overage packs. Annual billing includes about two months free vs. monthly. Manage subscriptions from your dashboard.",
   },
   {
     question: "Can I deploy multiple agents?",
@@ -219,7 +219,7 @@ const sections = [
           </div>
           <div>
             <p className="font-bold text-[var(--text-primary)] mb-1">Yearly Billing</p>
-            <p>Choosing yearly billing at deploy time saves about two months vs. paying monthly on Builder, Operator, and Scale. The billing interval cannot be changed after deployment.</p>
+            <p>Choosing yearly billing at deploy time saves about two months vs. paying monthly on Lite, Builder, Operator, and Scale. The billing interval cannot be changed after deployment.</p>
           </div>
           <div>
             <p className="font-bold text-[var(--text-primary)] mb-1">Billing Dashboard</p>

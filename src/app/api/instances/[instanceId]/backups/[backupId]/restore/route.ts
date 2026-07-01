@@ -3,6 +3,7 @@ import { z } from "zod"
 import { auth } from "@/auth"
 import { getEffectiveUserId } from "@/lib/effective-user"
 import { db, instances, instanceLogs, subscriptions, backupRecords, eq, and } from "@/db"
+import { getFreeTierUsage, checkFreeDeployAllowed, type FreeRuntime } from "@/lib/free-tier"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { canOperateInstance } from "@/lib/instance-access"
 import { logAuditEvent } from "@/lib/audit"
@@ -205,16 +206,15 @@ export async function POST(
     )
   }
 
-  // Enforce the same one-free-instance guard as the deploy route.
-  const existingFree = await db.query.subscriptions.findFirst({
-    where: and(eq(subscriptions.userId, ownerId), eq(subscriptions.status, "active")),
-    with: { plan: true },
-  })
-  if (existingFree && existingFree.plan?.tier === "free") {
-    return NextResponse.json(
-      { error: "You already have a free agent. Upgrade to deploy more.", code: "free_limit" },
-      { status: 409 },
-    )
+  // Enforce the same per-runtime + lifetime free guard as the deploy route.
+  const restoreRuntime: FreeRuntime =
+    (fields.agentConfig as { runtime?: string } | null)?.runtime === "hermes"
+      ? "hermes"
+      : "openclaw"
+  const usage = await getFreeTierUsage(ownerId)
+  const blocked = checkFreeDeployAllowed(usage, restoreRuntime)
+  if (blocked) {
+    return NextResponse.json(blocked.body, { status: blocked.status })
   }
 
   const created = await createInstanceFromAgentFields({

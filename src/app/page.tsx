@@ -10,7 +10,8 @@ import { AgentWheel } from "@/components/marketing/sections/agent-wheel"
 import { MissionControlPlanner } from "@/components/marketing/sections/mission-control-planner"
 import { CapabilityTimeline } from "@/components/marketing/sections/capability-timeline"
 import { Features } from "@/components/ui/features-8"
-import { Testimonials } from "@/components/marketing/sections/testimonials"
+// Testimonials section is disabled until real customer quotes exist (see page body).
+// import { Testimonials } from "@/components/marketing/sections/testimonials"
 import { CompetitorComparison } from "@/components/marketing/sections/competitor-comparison"
 import { AgentConfigurator } from "@/components/marketing/sections/agent-configurator"
 import { PricingElevation } from "@/components/marketing/sections/pricing-elevation"
@@ -228,7 +229,9 @@ export default function Home() {
         {/* <AgentConfigurator /> hidden for now */}
         {/* Integration constellation — central hub orb + tool grid */}
         <IntegrationConstellation />
-        <Testimonials />
+        {/* Testimonials hidden until real, permissioned customer quotes are
+            available — the current entries are illustrative placeholders. */}
+        {/* <Testimonials /> */}
         <CompetitorComparison />
         <ConvergenceCTA />
         {/* Trust strip — enable once program memberships + official logos are

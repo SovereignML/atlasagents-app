@@ -184,6 +184,12 @@ export const subscriptions = pgTable(
     interval: text().default("month").notNull(),
     status: text().default("incomplete").notNull(),
     currentPeriodEnd: timestamp({ mode: "date", withTimezone: false }),
+    // Yearly plans prepay 12 months but we DRIP the monthly allotment: this marks
+    // when the next monthly credit grant is due. NULL for monthly subs (Stripe's
+    // monthly invoice handles the renewal deposit) and once a yearly period is
+    // fully dripped (the annual renewal invoice re-seeds it). Driven by the
+    // monthly-grants sweep — see src/lib/monthly-grants.ts.
+    nextCreditGrantAt: timestamp({ mode: "date", withTimezone: false }),
     cancelAtPeriodEnd: boolean().default(false).notNull(),
     // Reseller billing (Phase 6). NULL = a platform subscription (today's
     // behavior, billed on the platform's own Stripe). Non-null = a child
@@ -205,6 +211,8 @@ export const subscriptions = pgTable(
     index("Subscription_userId_idx").on(t.userId),
     index("Subscription_status_idx").on(t.status),
     index("Subscription_teamId_idx").on(t.teamId),
+    // The monthly-grants sweep scans due yearly drips by this column.
+    index("Subscription_nextCreditGrantAt_idx").on(t.nextCreditGrantAt),
   ],
 )
 

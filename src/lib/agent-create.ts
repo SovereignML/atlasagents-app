@@ -112,17 +112,10 @@ export async function createInstanceFromAgentFields(
   }
 
   // Hermes always ships with the Open WebUI sidecar (mandatory native install),
-  // which needs a paid plan with ≥2GB RAM. The Free tier is a short-lived demo
-  // (excluded regardless of its machine) and any sub-2GB plan can't host the
-  // sidecar — block both server-side regardless of what the form sent.
+  // which needs ≥2GB RAM. The Free demo runs on the shared-4g machine, so it can
+  // host the sidecar — Hermes is allowed on Free (gated by the per-runtime free
+  // limit, see src/lib/free-tier.ts). Any sub-2GB plan still can't run it.
   if (args.agentConfig?.runtime === "hermes") {
-    if (planConfig.tier === "free") {
-      return {
-        ok: false,
-        status: 400,
-        error: "Hermes is not available on the Free plan. Choose Lite or higher.",
-      }
-    }
     if (serverConfig.ramGb < 2) {
       return {
         ok: false,

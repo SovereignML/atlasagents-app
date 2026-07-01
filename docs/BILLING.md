@@ -12,6 +12,7 @@ Everything AI-related is billed in **credits**.
 
 - **1 credit = $0.01 USD** (the single source of truth, [`src/lib/credit-pricing.ts`](../src/lib/credit-pricing.ts) → `CREDITS_PER_USD = 100`). Balances are stored and charged as whole integer credits.
 - **Each plan grants credits per billing period** (`creditsPerPeriod` in [`src/configs/plans.ts`](../src/configs/plans.ts)): Free 100, Builder 3,000, Operator 12,000, Scale 35,000. Enterprise is custom; BYOS grants none (you either meter against credits you top up, or bring your own key).
+  - `creditsPerPeriod` is a **monthly** allotment. **Monthly** subs get it on each Stripe invoice. **Yearly** subs prepay 12 months but the credits are **distributed monthly**, not lumped: the first month is granted on `invoice.paid` and the daily plan-credit sweep ([`src/lib/monthly-grants.ts`](../src/lib/monthly-grants.ts), driven by `POST /api/billing/expire-credits`) drips the remaining 11 months, each a fresh use-it-or-lose-it bucket. `Subscription.nextCreditGrantAt` tracks when the next drip is due.
 - **Top-ups / overage packs** when you run low ([`OVERAGE_PACKS`](../src/configs/plans.ts)):
 
   | Credits | Price |
