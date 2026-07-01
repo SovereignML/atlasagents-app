@@ -1,6 +1,7 @@
 import { NodeSSH } from "node-ssh"
 import { db, instances, eq } from "@/db"
 import { BOOTSTRAP_LOG, BOOTSTRAP_STATUS } from "./runtimes/bootstrap"
+import { buildPipedBashCommand, decideElevation } from "./ssh-elevate"
 
 export type SshTarget = {
   host: string
@@ -15,6 +16,13 @@ export type SshTarget = {
    * bootstrap path which has no instance row yet.
    */
   instanceId?: string
+  /**
+   * Run privileged remote commands via `sudo -n`. Set for BYOS servers whose
+   * SSH user is not root but has passwordless sudo (the bootstrap installs
+   * packages, writes /etc, manages systemd — all root-only). Managed VPS/shared
+   * hosts connect as root and leave this unset.
+   */
+  elevate?: boolean
 }
 
 function loadPrivateKey(): string {
@@ -225,9 +233,12 @@ export async function sshRun(
 ): Promise<SshRunResult> {
   const ssh = await connectWithRetry(target)
   try {
+    // Elevated targets (non-root BYOS users) run the command under sudo. Raw
+    // (unelevated) targets pass the command through verbatim — unchanged.
+    const finalCommand = target.elevate ? buildPipedBashCommand(command, true) : command
     return await execWithTimeout(
       ssh,
-      command,
+      finalCommand,
       opts.timeoutMs ?? DEFAULT_SSH_CMD_TIMEOUT_MS,
       "ssh command",
     )
@@ -245,8 +256,7 @@ export async function sshRunScript(
   bashScript: string,
   opts: { timeoutMs?: number } = {},
 ): Promise<SshRunResult> {
-  const b64 = Buffer.from(bashScript, "utf8").toString("base64")
-  const command = `echo '${b64}' | base64 -d | bash`
+  const command = buildPipedBashCommand(bashScript, target.elevate ?? false)
   const ssh = await connectWithRetry(target)
   try {
     return await execWithTimeout(
@@ -333,15 +343,19 @@ export async function sshWaitReady(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs
   let lastErr: unknown
+  // Readiness is a pure connectivity probe — never elevate it, so a missing or
+  // password-gated sudo surfaces later at the bootstrap step with a clear error
+  // rather than masquerading as "SSH not ready".
+  const probe: SshTarget = { ...target, elevate: false }
   while (Date.now() < deadline) {
     try {
-      const r = await sshRun(target, "echo ok")
+      const r = await sshRun(probe, "echo ok")
       if (r.code === 0) {
         // Verify stability: wait 2s and check again to ensure sshd
         // isn't transiently available during cloud-init.
         await new Promise((r) => setTimeout(r, 2_000))
         try {
-          const r2 = await sshRun(target, "echo ok")
+          const r2 = await sshRun(probe, "echo ok")
           if (r2.code === 0) return
         } catch {
           // Second check failed — sshd went away, keep polling
@@ -355,6 +369,47 @@ export async function sshWaitReady(
   throw new Error(
     `SSH not ready on ${target.host} within ${timeoutMs}ms` +
       (lastErr ? `; last error: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}` : ""),
+  )
+}
+
+/**
+ * Determine whether remote privileged commands must run under `sudo`.
+ *
+ * BYOS servers are owned by the customer and reached as whatever SSH user they
+ * configured. The bootstrap installs apt packages, writes /etc, and manages
+ * systemd — all root-only — so we must know up front how to gain root instead
+ * of guessing from the username string (a non-root login named "root", or a
+ * customer using a sudo-capable account, both break the guess and surface as an
+ * opaque "/tmp/bootstrap.status: Permission denied" mid-bootstrap).
+ *
+ * Probes the live connection (never elevated):
+ *   - `id -u` == 0            → already root, no sudo needed (elevate=false)
+ *   - else `sudo -n true` ok  → passwordless sudo available   (elevate=true)
+ *   - else                     → throw a clear, actionable error
+ *
+ * The `-n` on the sudo probe means a password-gated sudo fails fast here with a
+ * useful message rather than hanging on a prompt during the bootstrap.
+ */
+export async function resolveElevation(target: SshTarget): Promise<boolean> {
+  const probe: SshTarget = { ...target, elevate: false }
+  const idResult = await sshRun(probe, "id -u")
+  // Only probe sudo when we're not already root — avoids a needless second
+  // round-trip and a spurious sudo prompt on root logins.
+  let sudoCode: number | null = null
+  let sudoDetail: string | undefined
+  if (!(idResult.code === 0 && idResult.stdout.trim() === "0")) {
+    const sudoResult = await sshRun(probe, "sudo -n true 2>&1")
+    sudoCode = sudoResult.code
+    sudoDetail = sudoResult.stdout || sudoResult.stderr
+  }
+  return decideElevation(
+    {
+      uidStdout: idResult.stdout,
+      uidCode: idResult.code,
+      sudoCode,
+      sudoDetail,
+    },
+    target.username ?? "root",
   )
 }
 

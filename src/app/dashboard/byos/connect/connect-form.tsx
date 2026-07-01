@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils"
 
 type LlmMode = "managed_credits" | "own_key"
 type BillingInterval = "month" | "year"
+type Runtime = "openclaw" | "hermes"
 type Step = "server" | "agent" | "project" | "billing"
 
 const STEPS: Step[] = ["server", "agent", "project", "billing"]
@@ -31,8 +32,10 @@ const STEP_LABELS: Record<Step, string> = {
   billing: "Billing",
 }
 
-// BYOS only ever installs OpenClaw — Hermes is not offered.
-const RUNTIME = "openclaw" as const
+const RUNTIME_OPTIONS: { value: Runtime; label: string; hint: string }[] = [
+  { value: "openclaw", label: "OpenClaw", hint: "Default agent runtime" },
+  { value: "hermes", label: "Hermes", hint: "Nous Research Hermes (Python)" },
+]
 
 const SELECTED_GLOW =
   "aria-pressed:border-ring aria-pressed:ring-1 aria-pressed:ring-ring aria-pressed:bg-ring/15 aria-pressed:hover:bg-ring/20 aria-pressed:text-foreground " +
@@ -61,6 +64,9 @@ export function ByosConnectForm({
   const [submitting, setSubmitting] = useState(false)
   const [copied, setCopied] = useState(false)
 
+  // Agent step
+  const [runtime, setRuntime] = useState<Runtime>("openclaw")
+
   // Server step
   const [host, setHost] = useState("")
   const [port, setPort] = useState("22")
@@ -76,6 +82,7 @@ export function ByosConnectForm({
   const [interval, setInterval] = useState<BillingInterval>("month")
 
   const stepIdx = STEPS.indexOf(step)
+  const runtimeLabel = RUNTIME_OPTIONS.find((r) => r.value === runtime)?.label ?? runtime
   const selectedCategory = AGENT_CATEGORIES.find((c) => c.slug === useCase)
   const coreActions = selectedCategory?.examples ? [...selectedCategory.examples] : []
   const slugPreview = deploymentSlug(name)
@@ -149,7 +156,7 @@ export function ByosConnectForm({
             deployment_target: "byos",
             knowledge_source: "none",
             budget_tier: "mid",
-            runtime: RUNTIME,
+            runtime,
           },
         }),
       })
@@ -356,7 +363,7 @@ export function ByosConnectForm({
               <div>
                 <h2 className="text-lg font-semibold text-foreground">Choose Your Agent</h2>
                 <p className="text-sm text-muted-foreground">
-                  Your server runs the OpenClaw agent runtime.
+                  Pick the runtime that powers your agent.
                 </p>
               </div>
 
@@ -365,22 +372,32 @@ export function ByosConnectForm({
                   Runtime Engine
                 </p>
                 <ToggleGroup
-                  value={[RUNTIME]}
+                  value={[runtime]}
+                  onValueChange={(v) => v[0] && setRuntime(v[0] as Runtime)}
                   className="grid w-full grid-cols-1 gap-2 md:grid-cols-2"
                   spacing={1}
                 >
-                  <ToggleGroupItem
-                    value={RUNTIME}
-                    variant="outline"
-                    className={cn(
-                      "h-auto flex-col items-start whitespace-normal p-4 text-left",
-                      SELECTED_GLOW
-                    )}
-                  >
-                    <p className="text-sm font-medium text-foreground">OpenClaw</p>
-                    <p className="text-xs text-muted-foreground">Default agent runtime</p>
-                  </ToggleGroupItem>
+                  {RUNTIME_OPTIONS.map((r) => (
+                    <ToggleGroupItem
+                      key={r.value}
+                      value={r.value}
+                      variant="outline"
+                      className={cn(
+                        "h-auto flex-col items-start whitespace-normal p-4 text-left",
+                        SELECTED_GLOW
+                      )}
+                    >
+                      <p className="text-sm font-medium text-foreground">{r.label}</p>
+                      <p className="text-xs text-muted-foreground">{r.hint}</p>
+                    </ToggleGroupItem>
+                  ))}
                 </ToggleGroup>
+                {runtime === "hermes" && (
+                  <p className="text-xs text-muted-foreground">
+                    Hermes ships with the Open WebUI chat interface bundled. Your server must have
+                    at least 2GB RAM to run Hermes and Open WebUI.
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -519,7 +536,7 @@ export function ByosConnectForm({
                     <p className="font-medium text-foreground">{selectedCategory?.name ?? "-"}</p>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-xs text-muted-foreground">Runtime: OpenClaw</p>
+                    <p className="text-xs text-muted-foreground">Runtime: {runtimeLabel}</p>
                   </CardContent>
                 </Card>
                 <Card size="sm">

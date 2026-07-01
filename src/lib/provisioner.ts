@@ -1,4 +1,6 @@
 import crypto from "node:crypto"
+import { isIP } from "node:net"
+import { lookup } from "node:dns/promises"
 import type { InferSelectModel } from "drizzle-orm"
 import { db, instances, instanceLogs, instanceKnowledge, regions, serverConfigs, providerHealthLogs, eq } from "@/db"
 import {
@@ -8,6 +10,7 @@ import {
   ensureProvisioningFailed,
 } from "@/lib/instance-state"
 import { reserveHostSlot, FleetEmptyError, FleetFullError } from "@/lib/host-scheduler"
+import { rollbackVmOutcome } from "@/lib/rollback-outcome"
 import {
   sshDockerRestart,
   sshDockerRm,
@@ -15,6 +18,7 @@ import {
   sshDockerStart,
   sshDockerStop,
   sshPollBootstrap,
+  resolveElevation,
   sshRun,
   sshRunScriptLogged,
   sshVmHasCloudflareOriginCerts,
@@ -1970,15 +1974,63 @@ async function configureRuntimeOverSsh(
  * configure-over-SSH sequence. On failure we never touch their server beyond
  * marking the instance failed.
  */
+/**
+ * Resolve a BYOS host to an IPv4 address for a Cloudflare A record. Literal
+ * IPv4 passes through; a hostname is resolved to its first A record. Returns
+ * null for IPv6-only / unresolvable hosts (the managed subdomain is then
+ * skipped and the agent stays reachable by IP).
+ */
+async function resolveIpv4ForDns(host: string): Promise<string | null> {
+  if (isIP(host) === 4) return host
+  if (isIP(host) === 6) return null
+  try {
+    const { address, family } = await lookup(host, { family: 4 })
+    return family === 4 ? address : null
+  } catch {
+    return null
+  }
+}
+
 async function provisionByosBot(instance: Instance): Promise<ProvisionResult> {
   const runtime = getRuntime(instance.runtime)
   const host = instance.byosHost
   if (!host) {
     throw new Error("BYOS instance is missing byosHost — cannot connect")
   }
+
+  // Cloudflare origin cert for the managed subdomain (Full (strict) to the BYOS
+  // origin on :443). Optional — without it Caddy serves `tls internal` and the
+  // platform zone must be in "Full" (not strict) mode. Same contract as the
+  // managed VPS path.
+  const cfOriginCertPem = process.env.CLOUDFLARE_ORIGIN_CERT_PEM
+    ? normalizePem(process.env.CLOUDFLARE_ORIGIN_CERT_PEM)
+    : undefined
+  const cfOriginKeyPem = process.env.CLOUDFLARE_ORIGIN_CERT_KEY
+    ? normalizePem(process.env.CLOUDFLARE_ORIGIN_CERT_KEY)
+    : undefined
+  if (cfOriginCertPem && !isValidPem(cfOriginCertPem)) {
+    throw new Error(
+      "CLOUDFLARE_ORIGIN_CERT_PEM is set but does not contain valid PEM data (missing -----BEGIN header).",
+    )
+  }
+  if (cfOriginKeyPem && !isValidPem(cfOriginKeyPem)) {
+    throw new Error(
+      "CLOUDFLARE_ORIGIN_CERT_KEY is set but does not contain valid PEM data (missing -----BEGIN header).",
+    )
+  }
   const port = instance.byosPort ?? 22
   const username = instance.byosUser ?? "root"
-  const target: SshTarget = { host, port, username, instanceId: instance.id }
+  // Elevation is decided after connect via `resolveElevation` (id -u / sudo -n),
+  // not guessed from the username — a non-root login named "root" or a
+  // sudo-capable account both defeat a string check. Starts unelevated; the
+  // real value is set once SSH is ready (before the bootstrap runs).
+  const target: SshTarget = {
+    host,
+    port,
+    username,
+    instanceId: instance.id,
+    elevate: false,
+  }
   let currentStage: VpsStage = "waiting_ssh"
 
   try {
@@ -2004,6 +2056,12 @@ async function provisionByosBot(instance: Instance): Promise<ProvisionResult> {
       )
     }
 
+    // Decide how to gain root for the privileged bootstrap: connect as root
+    // directly, or run everything under passwordless sudo. Fails fast with a
+    // clear error if neither is possible (rather than an opaque permission
+    // denied mid-bootstrap).
+    target.elevate = await resolveElevation(target)
+
     /* --- 2. Bootstrap (install Node + Caddy + runtime) over SSH ----- */
     currentStage = "bootstrap"
     await setProvisionStage(instance.id, currentStage)
@@ -2014,6 +2072,8 @@ async function provisionByosBot(instance: Instance): Promise<ProvisionResult> {
     })
     const bootstrapScript = runtime.renderBootstrap({
       gatewayPort: runtime.gatewayPort,
+      cfOriginCertPem,
+      cfOriginKeyPem,
       webuiEnabled: Boolean(instance.webuiEnabled) && Boolean(runtime.sidecar),
     })
     const bootstrapStep = await sshRunScriptLogged(
@@ -2039,15 +2099,59 @@ async function provisionByosBot(instance: Instance): Promise<ProvisionResult> {
       message: PROVISION_EVENT.bootstrapComplete,
     })
 
+    /* --- 2b. Managed subdomain (*.sovereignclaw.xyz) pointing at the BYOS   */
+    /*         server, so the agent gets a real HTTPS hostname instead of a   */
+    /*         bare IP. Best-effort: a DNS failure (or an unresolvable/IPv6   */
+    /*         host) logs a warning and provisioning continues IP-only.       */
+    let managedSubdomainForProvision: string | null = instance.managedSubdomain ?? null
+    if (process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ZONE_ID) {
+      const dnsIp = await resolveIpv4ForDns(host)
+      if (!dnsIp) {
+        await logInstanceEvent({
+          instanceId: instance.id,
+          stage: currentStage,
+          level: "warn",
+          message: `Could not resolve ${host} to an IPv4 address for a managed hostname; the agent stays reachable by IP.`,
+        })
+      } else {
+        try {
+          const { name, recordId } = await createAgentSubdomain(instance.id, dnsIp, instance.name)
+          managedSubdomainForProvision = name
+          await db
+            .update(instances)
+            .set({
+              managedSubdomain: name,
+              cfRecordId: recordId,
+              dnsStatus: "propagating",
+            })
+            .where(eq(instances.id, instance.id))
+          await logInstanceEvent({
+            instanceId: instance.id,
+            stage: currentStage,
+            message: `Cloudflare DNS upserted: ${name} → ${dnsIp} (proxied)`,
+          })
+        } catch (cfErr) {
+          await logInstanceEvent({
+            instanceId: instance.id,
+            stage: currentStage,
+            level: "warn",
+            message: `Cloudflare DNS upsert failed (continuing without managed subdomain): ${
+              cfErr instanceof Error ? cfErr.message : String(cfErr)
+            }`,
+          })
+        }
+      }
+    }
+
     /* --- 3. Resolve the LLM key (our minted key vs. customer's own) - */
     const openRouterApiKey =
       instance.byosLlmMode === "own_key" && instance.byosOwnApiKeyEnc
         ? decryptSecret(instance.byosOwnApiKeyEnc)
         : await resolveRuntimeOpenRouterKey(instance, resolveLlmProvider(instance))
 
-    /* --- 4. Shared configure-over-SSH (no managed subdomain, no VM) - */
+    /* --- 4. Shared configure-over-SSH (managed subdomain, no VM) ---- */
     return await configureRuntimeOverSsh(instance, target, host, runtime, {
-      managedSubdomain: null,
+      managedSubdomain: managedSubdomainForProvision,
       openRouterApiKey,
       vmId: undefined,
     })
@@ -2131,16 +2235,15 @@ async function rollbackProvisioning(
     set: setFields,
   })
 
+  const outcome = rollbackVmOutcome(vmId, vmDeleted)
   await logInstanceEvent({
     instanceId,
-    level: vmDeleted ? "warn" : "error",
+    level: outcome.level,
     stage: "rollback",
-    action: vmDeleted ? "vm_deleted" : "orphan_pending",
-    result: vmDeleted ? "ok" : "error",
-    detail: { vmId },
-    message: vmDeleted
-      ? `Rollback complete. VM ${vmId} deleted.`
-      : `Rollback incomplete. VM ${vmId} still exists — awaiting reconciler.`,
+    action: outcome.action,
+    result: outcome.result,
+    detail: vmId ? { vmId } : undefined,
+    message: outcome.message,
   })
 }
 

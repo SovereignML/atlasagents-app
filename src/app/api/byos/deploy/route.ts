@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server"
-import crypto from "node:crypto"
 import { auth } from "@/auth"
 import { db, eq, and, asc, instances, instanceLogs, regions, serverConfigs, users, plans, subscriptions } from "@/db"
 import {
@@ -16,9 +15,7 @@ import { findPlanBySlug, BYOS_SIGNUP_CREDITS } from "@/configs/plans"
 import { fundWallet } from "@/lib/openrouter-billing"
 import { BRANDING } from "@/configs/branding"
 import { parseAgentConfig } from "@/lib/agent-config"
-import { selectSkills } from "@/configs/skill-map"
-import { generateSoul } from "@/lib/soul"
-import { routeModel } from "@/lib/model-router"
+import { buildAgentFields } from "@/lib/agent-create"
 import { provisionBot } from "@/lib/provisioner"
 import { describeVmError } from "@/lib/vm-provider"
 import { assertPublicHost, BlockedHostError } from "@/lib/net-guard"
@@ -154,10 +151,10 @@ async function handleByosDeploy(req: NextRequest) {
     return NextResponse.json({ error: `Invalid agentConfig: ${parsedAgentConfig.error}` }, { status: 400 })
   }
   const cfg = parsedAgentConfig.data
-  const skills = selectSkills(cfg)
-  const soulMd = generateSoul(cfg, skills)
-  routeModel(cfg.budget_tier)
-  const botToken = "sk_bot_" + crypto.randomBytes(24).toString("hex")
+  // Derive the shared agent columns the same way the managed deploy path does
+  // (soul, skills, botToken, runtime, and — critically — webuiEnabled, which
+  // Hermes needs so the Open WebUI sidecar is installed and fronted by Caddy).
+  const agentFields = buildAgentFields(cfg)
 
   // Agents are team-scoped — resolve the active team.
   const team = await getUserTeam(session.user.id)
@@ -178,15 +175,10 @@ async function handleByosDeploy(req: NextRequest) {
       storageGb: serverConfig.storageGb,
       billingInterval,
       status: "pending",
-      deploymentTarget: "byos",
-      runtime: cfg.runtime,
-      interfaceKind: cfg.interface,
-      agentType: cfg.use_case,
-      agentConfig: cfg,
-      soulMd,
-      skills,
-      modelTier: cfg.budget_tier,
-      botToken,
+      // Shared agent columns (runtime, webuiEnabled, soul, skills, botToken, …)
+      // derived identically to the managed path; deploymentTarget is forced to
+      // "byos" in rawCfg above.
+      ...agentFields,
       byosHost: byosHost.trim(),
       byosPort,
       byosUser: byosUser.trim() || "root",

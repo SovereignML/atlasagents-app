@@ -104,6 +104,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Clear stale status/log from a prior run before the first write. BYOS servers
+# are reused across deploys, so a status/log file left behind by an earlier
+# (possibly root-owned) attempt would make the first "running" write fail with
+# a permission error and abort under set -e. Running as root (managed cloud-init
+# or a resolved-elevation BYOS bootstrap) makes this a reliable reset; no-op on
+# a first-ever boot.
+mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
+rm -f "$STATUS" "$LOG" 2>/dev/null || true
+
 echo "running" > "$STATUS"
 exec > >(tee -a "$LOG") 2>&1
 echo "=== Bootstrap started at $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
