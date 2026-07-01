@@ -34,47 +34,42 @@ export interface TeamMember {
 }
 
 const DEFAULT_MEMBERS: TeamMember[] = [
+  // Slot 1: intentionally blank to balance the 6-tile grid with 5 people.
   {
-    id: '1',
-    name: 'Chadrack',
-    role: 'director of photography',
-    image: 'https://media.licdn.com/dms/image/v2/D4D03AQFnmLdpZW78yA/profile-displayphoto-scale_200_200/B4DZvM8NB2JMAY-/0/1768669895649?e=2147483647&v=beta&t=5VGAB-2gYupLNaHvJHECollR25THd-3oR5wngGlQiY4',
-    social: { twitter: '#', linkedin: '#', behance: '#' },
+    id: 'blank',
+    name: '',
+    role: '',
+    image: '',
   },
   {
-    id: '2',
-    name: 'Mak VieSAinte',
-    role: 'FOUNDER',
-    image: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS2vnSxNNVGZV2MXRjlGELl-NgLl5kXdpDR6A&s',
-    social: { twitter: '#', linkedin: '#' },
+    id: 'pavan-meka',
+    name: 'Pavan Meka',
+    role: 'Founder & CEO',
+    image: '/assets/team/Pavan_Meka.png',
   },
   {
-    id: '3',
-    name: 'Osiris Balonga',
-    role: 'LEAD FRONT-END',
-    image: 'https://media.licdn.com/dms/image/v2/D4D03AQGVqrPPAGHtoQ/profile-displayphoto-scale_200_200/B4DZwhAkjaHwAY-/0/1770080338529?e=2147483647&v=beta&t=q-_6p1VCJ8NN8eHj9zUFwJZds_XpKez9Hy14SAIDp4M',
-    social: { twitter: '#', linkedin: '#' },
+    id: 'subba-reddy-meka',
+    name: 'Subba Reddy Meka',
+    role: 'Head of Operations',
+    image: '/assets/team/Subba_Reddy_Meka.png',
   },
   {
-    id: '4',
-    name: 'Jacques',
-    role: 'PRODUCT OWNER',
-    image: 'https://media.licdn.com/dms/image/v2/D4D03AQE-Z7-S1LSYNQ/profile-displayphoto-shrink_200_200/profile-displayphoto-shrink_200_200/0/1724143166545?e=2147483647&v=beta&t=6IPCwgOzblGt4p2fEdnY74gMbLyRHii5Ite3A39qQsY',
-    social: { linkedin: '#' },
+    id: 'mahmudur-labib',
+    name: 'Mahmudur Labib',
+    role: 'Co-Founder & Head of Product',
+    image: '/assets/team/Labib.jpg',
   },
   {
-    id: '5',
-    name: 'Riche Makso',
-    role: 'CTO - PRODUCT DESIGNER',
-    image: 'https://media.licdn.com/dms/image/v2/D4D03AQEkTAbZLlSrLg/profile-displayphoto-scale_200_200/B4DZoHdu8BGgAY-/0/1761061833315?e=2147483647&v=beta&t=Rg1dBTvq9X2heyhuhBwG2DsEkG65v0vQ35hF2FSeYns',
-    social: { twitter: '#', linkedin: '#' },
+    id: 'mahfuz-imon',
+    name: 'Mahfuz Imon',
+    role: 'Platform Lead',
+    image: '/assets/team/Mahfuz_Imon.jpg',
   },
   {
-    id: '6',
-    name: 'Jemima',
-    role: 'MAKE-UP ARTISTE',
-    image: 'https://i.pravatar.cc/400?img=16',
-    social: { instagram: '#' } as TeamMember['social'],
+    id: 'yeasir-joy',
+    name: 'Yeasir Joy',
+    role: 'Head of Growth',
+    image: '/assets/team/Yeasir_Joy.png',
   },
 ];
 
@@ -135,7 +130,7 @@ export default function TeamShowcase({ members = DEFAULT_MEMBERS }: TeamShowcase
 
       {/* ── Right: member name list*/}
       <div className="flex flex-col sm:grid sm:grid-cols-2 md:flex md:flex-col gap-4 md:gap-5 pt-0 md:pt-2 flex-1 w-full">
-        {members.map((member) => (
+        {members.filter((member) => member.name).map((member) => (
           <MemberRow
             key={member.id}
             member={member}
@@ -165,6 +160,11 @@ function PhotoCard({
 }) {
   const isActive = hoveredId === member.id;
   const isDimmed = hoveredId !== null && !isActive;
+
+  // Empty placeholder tile — keeps the grid balanced without a photo/name.
+  if (!member.image) {
+    return <div className={cn('flex-shrink-0', className)} aria-hidden="true" />;
+  }
 
   return (
     <div

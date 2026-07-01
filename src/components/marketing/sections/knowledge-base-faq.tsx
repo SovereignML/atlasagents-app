@@ -16,7 +16,7 @@ const faqs = [
   },
   {
     q: "What types of agents can I deploy?",
-    a: "Agents run on two open runtimes, OpenClaw and Hermes, across eight categories: Automation, DevOps, Support, Research, Content, Sales, Social, and Custom. Each configurable to your exact requirements.",
+    a: "Agents run on two open runtimes, OpenClaw and Hermes, across eight categories: Automation, DevOps, Support, Research, Content, Sales, Social Media, and Custom. Each configurable to your exact requirements.",
   },
   {
     q: "Do I need AI expertise?",

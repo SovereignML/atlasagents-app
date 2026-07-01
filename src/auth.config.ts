@@ -6,6 +6,10 @@ export default {
   providers: [],
   pages: {
     signIn: "/login",
+    // Route auth errors (e.g. a user cancelling the Google consent screen, which
+    // Auth.js surfaces as the generic `Configuration` code) back to /login with
+    // `?error=<Type>` instead of the raw built-in /api/auth/error page.
+    error: "/login",
   },
   callbacks: {
     async jwt({ token, user }) {

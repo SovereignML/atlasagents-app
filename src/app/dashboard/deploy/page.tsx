@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import {
@@ -119,6 +119,19 @@ export default function DeployPage() {
   const [billingInterval, setBillingInterval] = useState<BillingInterval>("month")
   const [selectedPlan, setSelectedPlan] = useState<PlanConfig | null>(null)
 
+  // Free-tier usage drives Free-plan gating: hidden once the lifetime allowance
+  // is spent, and disabled for a runtime that already has a live free agent.
+  const [freeUsage, setFreeUsage] = useState<{
+    exhausted: boolean
+    activeRuntimes: Runtime[]
+  } | null>(null)
+  useEffect(() => {
+    fetch("/api/free-tier/usage")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setFreeUsage({ exhausted: d.exhausted, activeRuntimes: d.activeRuntimes }))
+      .catch(() => {})
+  }, [])
+
   const selectedServer = selectedPlan ? resolveServerForPlan(selectedPlan) : null
 
   const STEPS = ALL_STEPS
@@ -127,14 +140,25 @@ export default function DeployPage() {
 
   const coreActions = selectedCategoryObj?.examples ? [...selectedCategoryObj.examples] : []
 
-  // Hermes always boxes Open WebUI as a sidecar, so it needs a paid plan with
-  // ≥2GB RAM. The Free tier is a short-lived demo (excluded regardless of its
-  // underlying machine), and any sub-2GB plan can't host the sidecar.
+  // Hermes boxes Open WebUI as a sidecar, so it needs ≥2GB RAM. The Free demo
+  // runs on a 4GB machine, so Hermes is allowed on Free; only sub-2GB plans are
+  // blocked.
   function planSupportsRuntime(plan: PlanConfig): boolean {
     if (runtime !== "hermes") return true
-    if (plan.tier === "free") return false
     const server = resolveServerForPlan(plan)
     return !!server && server.ramGb >= 2
+  }
+
+  // Free-plan-specific gating, layered on top of runtime support: the lifetime
+  // allowance is spent, or a free agent on this runtime is already running.
+  // Mirrors the server-side guard in src/lib/free-tier.ts.
+  function freeBlockReason(plan: PlanConfig): string | null {
+    if (plan.tier !== "free" || !freeUsage) return null
+    if (freeUsage.exhausted) return "Free limit reached"
+    if (freeUsage.activeRuntimes.includes(runtime)) {
+      return `Free ${runtime === "hermes" ? "Hermes" : "OpenClaw"} running`
+    }
+    return null
   }
 
   const canNext = (() => {
@@ -272,13 +296,19 @@ export default function DeployPage() {
                     const next = v[0] as Runtime | undefined
                     if (!next) return
                     setRuntime(next)
-                    // Switching to Hermes invalidates the Free tier and any
-                    // sub-2GB plan — clear it so the form can't deploy an
-                    // unsupported combo. (planSupportsRuntime reads the old
-                    // runtime state here, so check `next` explicitly.)
-                    if (next === "hermes" && selectedPlan) {
+                    // Switching runtime can invalidate the selected plan: Hermes
+                    // needs a ≥2GB machine, and Free is per-runtime (a free agent
+                    // may already be live on the new runtime). Clear it so the
+                    // form can't deploy an unsupported/blocked combo.
+                    if (selectedPlan) {
                       const server = resolveServerForPlan(selectedPlan)
-                      if (selectedPlan.tier === "free" || !server || server.ramGb < 2) {
+                      const hermesUnsupported =
+                        next === "hermes" && (!server || server.ramGb < 2)
+                      const freeBlocked =
+                        selectedPlan.tier === "free" &&
+                        !!freeUsage &&
+                        (freeUsage.exhausted || freeUsage.activeRuntimes.includes(next))
+                      if (hermesUnsupported || freeBlocked) {
                         setSelectedPlan(null)
                       }
                     }
@@ -329,8 +359,8 @@ export default function DeployPage() {
                   <p className="text-xs text-muted-foreground">
                     Hermes ships with the Open WebUI chat interface bundled: you&apos;ll get a web
                     chat UI at <span className="font-mono">/</span> and the OpenAI-compatible API at{" "}
-                    <span className="font-mono">/v1</span> on the same public URL. Requires a paid
-                    plan (Lite or higher).
+                    <span className="font-mono">/v1</span> on the same public URL. Available on every
+                    plan, including the Free demo.
                   </p>
                 )}
               </div>
@@ -433,7 +463,7 @@ export default function DeployPage() {
                   const slug = v[0]
                   if (!slug) return
                   const p = DEPLOYABLE_PLANS.find((x) => x.slug === slug)
-                  if (p && planSupportsRuntime(p)) setSelectedPlan(p)
+                  if (p && planSupportsRuntime(p) && !freeBlockReason(p)) setSelectedPlan(p)
                 }}
                 className="flex w-full flex-col gap-3"
                 spacing={1}
@@ -443,13 +473,13 @@ export default function DeployPage() {
                   const price = plan.displayPriceMonthly
                   const showSpecs = plan.tier !== "free"
                   const runtimeBlocked = !planSupportsRuntime(plan)
-                  const blockedLabel =
-                    plan.tier === "free" ? "Not available on Free" : "Needs ≥2GB plan"
+                  const freeBlocked = freeBlockReason(plan)
+                  const blockedLabel = freeBlocked ?? "Needs ≥2GB plan"
                   return (
                     <ToggleGroupItem
                       key={plan.slug}
                       value={plan.slug}
-                      disabled={runtimeBlocked}
+                      disabled={runtimeBlocked || !!freeBlocked}
                       variant="outline"
                       className={cn(
                         "h-auto w-full flex-col items-stretch whitespace-normal p-5 text-left",
@@ -464,7 +494,7 @@ export default function DeployPage() {
                             {plan.highlight && (
                               <Badge className="font-mono text-[10px]">Popular</Badge>
                             )}
-                            {runtimeBlocked && (
+                            {(runtimeBlocked || freeBlocked) && (
                               <Badge variant="outline" className="text-[10px]">
                                 {blockedLabel}
                               </Badge>

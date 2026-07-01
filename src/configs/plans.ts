@@ -60,7 +60,7 @@ export const PLANS: readonly PlanConfig[] = [
     name: "Free",
     description: "Try and build",
     features: [
-      "100 credits included",
+      "10 credits included",
       "Limited workflows",
       "Basic agent deployment",
       "Community support",
@@ -70,7 +70,7 @@ export const PLANS: readonly PlanConfig[] = [
     stripePriceIdYearly: process.env.STRIPE_PRICE_FREE_YEARLY ?? "",
     isActive: true,
     sortOrder: 0,
-    creditsPerPeriod: 100,
+    creditsPerPeriod: 10,
     displayPriceMonthly: 0,
     displayPriceYearly: 0,
     fullPriceMonthly: 0,
@@ -218,12 +218,13 @@ export const PLANS: readonly PlanConfig[] = [
     slug: "byos",
     tier: "byos",
     name: "Bring Your Own Server",
-    description: "Manage your own server",
+    description: "Management only",
     features: [
       "Connect your own server",
       "Full management panel",
       "Deploy & monitor your agent",
-      "Use our managed AI model credits or bring your own API key",
+      "100 AI credits included (managed mode)",
+      "Or bring your own API key",
       "Logs, restart, and config controls",
     ],
     stripePriceIdMonthly: process.env.STRIPE_PRICE_BYOS_MONTHLY ?? "",
@@ -231,10 +232,10 @@ export const PLANS: readonly PlanConfig[] = [
     isActive: true,
     sortOrder: 50,
     creditsPerPeriod: 0,
-    displayPriceMonthly: 9,
-    displayPriceYearly: 99,
-    fullPriceMonthly: 9,
-    fullPriceYearly: 99,
+    displayPriceMonthly: 2.5,
+    displayPriceYearly: 30,
+    fullPriceMonthly: 2.5,
+    fullPriceYearly: 30,
     cta: "get-started",
     serverConfigSlug: "byos-managed",
   },
@@ -282,6 +283,13 @@ export const DEPLOYABLE_PLANS = PLANS.filter(
 /** The Bring Your Own Server management-panel plan. */
 export const BYOS_PLAN = PLANS.find((p) => p.tier === "byos")!
 
+/** One-time credits granted to a BYOS user on signup when they use managed AI (no own key). */
+export const BYOS_SIGNUP_CREDITS = 100
+
 export function formatUsd(amount: number): string {
-  return `$${amount.toLocaleString("en-US")}`
+  const hasCents = !Number.isInteger(amount)
+  return `$${amount.toLocaleString("en-US", {
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: 2,
+  })}`
 }

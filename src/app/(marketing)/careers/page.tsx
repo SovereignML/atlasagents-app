@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button"
 import { Reveal, RevealGroup, RevealItem } from "@/components/marketing/motion/reveal"
 import { spring } from "@/lib/motion"
 import { BRANDING } from "@/configs/branding"
-import { Team } from "@/components/marketing/sections/team"
 
 export const metadata: Metadata = {
   title: "Careers",
@@ -29,7 +28,6 @@ const values = [
 
 export default function CareersPage() {
   return (
-    <>
     <div className="max-w-[1200px] mx-auto px-8 py-16">
       <Reveal className="border-l-4 border-primary pl-8 mb-16">
         <div className="text-primary text-xs mb-3 opacity-80">
@@ -81,8 +79,5 @@ export default function CareersPage() {
         </Button>
       </Reveal>
     </div>
-
-    <Team />
-    </>
   )
 }

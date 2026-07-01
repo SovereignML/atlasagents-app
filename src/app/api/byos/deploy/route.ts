@@ -12,7 +12,8 @@ import { logAuditEvent } from "@/lib/audit"
 import { createSlug } from "@/lib/instance"
 import { encryptSecret } from "@/lib/crypto-secret"
 import { planUnitAmountCents } from "@/lib/pricing"
-import { findPlanBySlug } from "@/configs/plans"
+import { findPlanBySlug, BYOS_SIGNUP_CREDITS } from "@/configs/plans"
+import { fundWallet } from "@/lib/openrouter-billing"
 import { BRANDING } from "@/configs/branding"
 import { parseAgentConfig } from "@/lib/agent-config"
 import { selectSkills } from "@/configs/skill-map"
@@ -304,6 +305,23 @@ async function handleByosDeploy(req: NextRequest) {
       interval: billingInterval,
       status: "active",
     })
+  }
+
+  // Mirror the webhook's one-time BYOS signup grant for managed-AI users so the
+  // dev/no-Stripe path matches production behavior.
+  if (llmMode === "managed_credits") {
+    try {
+      await fundWallet(
+        userId,
+        BYOS_SIGNUP_CREDITS,
+        "plan_deposit",
+        "BYOS signup credits",
+        instanceId,
+        { planMode: "add" },
+      )
+    } catch (err) {
+      console.error("[byos/deploy] BYOS signup credit grant failed (dev path):", err)
+    }
   }
 
   await db.insert(instanceLogs).values({

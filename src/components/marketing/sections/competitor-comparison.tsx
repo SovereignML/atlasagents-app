@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { motion } from "framer-motion";
 import {
   Server, Shield, LockOpen, Boxes, KeyRound, Workflow,
@@ -17,9 +16,8 @@ import { BRANDING } from "@/configs/branding";
  * ONLY column that is all-✓: the ownership of self-hosting with the convenience
  * of managed SaaS.
  *
- * {{TODO: competitor cell values reflect publicly available positioning
- * (researched June 2026) and should be confirmed by marketing/legal before
- * this ships publicly.}}
+ * Competitor cell values reflect publicly available positioning (researched
+ * June 2026), as cited in the on-page footnote.
  */
 
 const SOVEREIGN = "sovereign" as const;
@@ -46,7 +44,7 @@ type Row = {
 
 const rows: Row[] = [
   {
-    feature: "Runs on your own private instance",
+    feature: "Runs on your instance",
     icon: Server,
     values: { sovereign: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
   },
@@ -56,17 +54,17 @@ const rows: Row[] = [
     values: { sovereign: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
   },
   {
-    feature: "No vendor lock-in, full config export",
+    feature: "No vendor lock-in",
     icon: LockOpen,
     values: { sovereign: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
   },
   {
-    feature: "Open agent runtime (OpenClaw / Hermes)",
+    feature: "Open agent runtime",
     icon: Boxes,
     values: { sovereign: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
   },
   {
-    feature: "Bring your own model keys",
+    feature: "Bring your own AI keys",
     icon: KeyRound,
     badge: "new",
     values: { sovereign: true, sintra: false, worksbuddy: false, lindy: "partial", selfhost: true },
@@ -82,9 +80,9 @@ const rows: Row[] = [
     values: { sovereign: true, sintra: true, worksbuddy: true, lindy: true, selfhost: false },
   },
   {
-    feature: "No per-seat or per-action credit metering",
+    feature: "No per-action credit metering",
     icon: Wallet,
-    values: { sovereign: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
+    values: { sovereign: true, sintra: false, worksbuddy: false, lindy: false, selfhost: false },
   },
 ];
 
@@ -113,8 +111,6 @@ function CellMark({ value }: { value: Cell }) {
 }
 
 export function CompetitorComparison() {
-  const [hoveredCol, setHoveredCol] = useState<ProductKey | null>(null);
-
   return (
     <section
       id="comparison"
@@ -165,20 +161,12 @@ export function CompetitorComparison() {
                 <th className="sticky left-0 z-10 bg-background align-bottom p-0" />
                 {products.map((p) => {
                   const owned = p.key === SOVEREIGN;
-                  const hovered = hoveredCol === p.key;
                   return (
                     <th
                       key={p.key}
                       className="align-bottom p-0 text-center"
-                      onMouseEnter={() => setHoveredCol(p.key)}
-                      onMouseLeave={() => setHoveredCol(null)}
                     >
-                      <div
-                        className={
-                          "rounded-t-xl px-3 pb-5 pt-6 transition-colors " +
-                          (hovered ? "bg-text-loud/[0.04]" : "")
-                        }
-                      >
+                      <div className="rounded-t-xl px-3 pb-5 pt-6">
                         <p
                           className={
                             "text-base font-semibold tracking-[-0.5px] " +
@@ -204,7 +192,7 @@ export function CompetitorComparison() {
                     {/* Feature label */}
                     <th
                       scope="row"
-                      className="sticky left-0 z-10 border-b border-border-muted bg-background py-4 pr-6 text-left align-middle font-normal"
+                      className="sticky left-0 z-10 border-b border-border-muted bg-background py-4 pl-7 pr-6 text-left align-middle font-normal transition-colors group-hover:rounded-l-lg group-hover:border-transparent group-hover:bg-text-loud/[0.04] [tr:has(+tr:hover)_&]:border-transparent"
                     >
                       <span className="flex items-center gap-2.5">
                         <Icon className="size-4 shrink-0 text-text-muted" />
@@ -219,14 +207,12 @@ export function CompetitorComparison() {
                       </span>
                     </th>
 
-                    {products.map((p) => (
+                    {products.map((p, i) => (
                       <td
                         key={p.key}
-                        onMouseEnter={() => setHoveredCol(p.key)}
-                        onMouseLeave={() => setHoveredCol(null)}
                         className={
-                          "border-b border-border-muted px-3 py-4 text-center align-middle transition-colors " +
-                          (hoveredCol === p.key ? "bg-text-loud/[0.04]" : "")
+                          "border-b border-border-muted py-4 pl-3 text-center align-middle transition-colors group-hover:border-transparent group-hover:bg-text-loud/[0.04] [tr:has(+tr:hover)_&]:border-transparent " +
+                          (i === products.length - 1 ? "pr-6 group-hover:rounded-r-lg" : "pr-3")
                         }
                       >
                         <CellMark value={row.values[p.key]} />
@@ -237,23 +223,21 @@ export function CompetitorComparison() {
               })}
 
               {/* Cost row */}
-              <tr>
+              <tr className="group">
                 <th
                   scope="row"
-                  className="sticky left-0 z-10 bg-background py-5 pr-6 text-left align-middle font-normal"
+                  className="sticky left-0 z-10 rounded-bl-xl bg-background py-5 pl-7 pr-6 text-left align-middle font-normal transition-colors group-hover:rounded-l-lg group-hover:bg-text-loud/[0.04]"
                 >
                   <span className="text-sm font-semibold text-text-loud">Cost</span>
                 </th>
-                {products.map((p) => {
+                {products.map((p, i) => {
                   const owned = p.key === SOVEREIGN;
                   return (
                     <td
                       key={p.key}
-                      onMouseEnter={() => setHoveredCol(p.key)}
-                      onMouseLeave={() => setHoveredCol(null)}
                       className={
-                        "rounded-b-xl px-3 py-5 text-center align-middle transition-colors " +
-                        (hoveredCol === p.key ? "bg-text-loud/[0.04]" : "")
+                        "py-5 pl-3 text-center align-middle transition-colors group-hover:bg-text-loud/[0.04] " +
+                        (i === products.length - 1 ? "rounded-br-xl pr-6 group-hover:rounded-r-lg" : "pr-3")
                       }
                     >
                       <span

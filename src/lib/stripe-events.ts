@@ -18,11 +18,13 @@ import { fundWallet } from "@/lib/openrouter-billing"
 import { clawBackFunds } from "@/lib/billing"
 import { describeVmError } from "@/lib/vm-provider"
 import { usdToCredits } from "@/lib/credit-pricing"
+import { BYOS_SIGNUP_CREDITS } from "@/configs/plans"
 import { notify } from "@/lib/notifications/dispatch"
 import { createAdminNotification } from "@/lib/admin-notify"
 import { claimEvent } from "@/lib/idempotency"
 import { posthogServer } from "@/lib/posthog-server"
 import { adsConversions } from "@/lib/ads"
+import { creditGrantSchedule } from "@/lib/plan-period"
 
 // ---------- checkout.session.completed ----------
 // Triggered when the user finishes paying. Flips Instance to "running",
@@ -343,6 +345,14 @@ export async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> 
     const planMode = isNewSubscription ? "add" : "renew"
     const periodLabel = new Date().toISOString().slice(0, 7) // yyyy-mm
     const action = isNewSubscription ? "grant" : "renewal"
+    // Yearly plans prepay 12 months but the allotment is distributed monthly:
+    // this deposits only the first month (expiring in a month) and seeds
+    // `nextCreditGrantAt` so the monthly-grants sweep drips the rest. Monthly
+    // plans deposit the full allotment expiring at the Stripe period end.
+    const { expireAt, nextCreditGrantAt } = creditGrantSchedule(
+      local.interval,
+      local.currentPeriodEnd ?? null,
+    )
     try {
       await fundWallet(
         local.userId,
@@ -350,13 +360,45 @@ export async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> 
         "plan_deposit",
         `Plan ${action}: ${local.plan?.name ?? "unknown"} (${periodLabel})`,
         (local.instance as { id?: string } | null)?.id,
-        { planExpiry: local.currentPeriodEnd ?? null, planMode },
+        { planExpiry: expireAt, planMode },
       )
+      // Reset the drip schedule: a yearly (re)deposit re-seeds it; a monthly one
+      // clears it (Stripe's monthly invoice is the renewal, not a drip).
+      await db
+        .update(subscriptions)
+        .set({ nextCreditGrantAt })
+        .where(eq(subscriptions.id, local.id))
       console.log(
-        `[stripe] Granted ${credits.toLocaleString()} credits to user ${local.userId} (invoice ${invoice.id}, ${planMode})`,
+        `[stripe] Granted ${credits.toLocaleString()} credits to user ${local.userId} (invoice ${invoice.id}, ${planMode}, interval ${local.interval})`,
       )
     } catch (err) {
       console.error(`[stripe] depositToWallet failed for user ${local.userId}:`, err)
+    }
+  }
+
+  // BYOS users on managed AI (no own key) get a one-time starter grant on their
+  // FIRST invoice. After that they top up like any other wallet user. Own-key
+  // BYOS users pay their provider directly, so no grant.
+  const byosInstance = local.instance as { id?: string; byosLlmMode?: string | null } | null
+  if (
+    local.plan?.tier === "byos" &&
+    byosInstance?.byosLlmMode === "managed_credits" &&
+    invoice.billing_reason === "subscription_create"
+  ) {
+    try {
+      await fundWallet(
+        local.userId,
+        BYOS_SIGNUP_CREDITS,
+        "plan_deposit",
+        "BYOS signup credits",
+        byosInstance.id,
+        { planMode: "add" },
+      )
+      console.log(
+        `[stripe] Granted ${BYOS_SIGNUP_CREDITS} BYOS signup credits to user ${local.userId} (invoice ${invoice.id})`,
+      )
+    } catch (err) {
+      console.error(`[stripe] BYOS signup credit grant failed for user ${local.userId}:`, err)
     }
   }
 }

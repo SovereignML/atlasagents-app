@@ -169,6 +169,13 @@
       "when": 1782213615140,
       "tag": "0023_curious_wolfpack",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1782899933260,
+      "tag": "0024_calm_hitman",
+      "breakpoints": true
     }
   ]
 }

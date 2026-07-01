@@ -1,8 +1,9 @@
 import Link from "next/link"
+import { BRANDING } from "@/configs/branding"
 import { Reveal } from "@/components/marketing/motion/reveal"
 
-const LAST_UPDATED = "June 2026"
-const LEGAL_ENTITY = "SovereignML L.L.C., North Carolina"
+const LAST_UPDATED = "June 29, 2026"
+const LEGAL_ENTITY = `${BRANDING.legalEntity}, ${BRANDING.jurisdiction}`
 
 export const metadata = {
   title: "Service Level Agreement | SovereignML",
@@ -31,9 +32,8 @@ export default function SLAPage() {
           Uptime Commitment
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-          {/* {{TODO: confirm per-tier uptime targets with founder}} */}
           {[
-            { plan: "Builder & Operator", uptime: "99.5%", monthly: "~3.6 hrs" },
+            { plan: "Lite, Builder & Operator", uptime: "99.5%", monthly: "~3.6 hrs" },
             { plan: "Scale", uptime: "99.9%", monthly: "~43 min" },
             { plan: "Enterprise", uptime: "99.99%", monthly: "~4.3 min" },
           ].map((tier) => (
@@ -75,8 +75,11 @@ export default function SLAPage() {
             </thead>
             <tbody>
               {[
-                { plan: "Starter", channel: "Community Forum", response: "Best effort", hours: "N/A" },
-                { plan: "Pro", channel: "Priority Email", response: "< 24 hours", hours: "Mon–Fri" },
+                { plan: "Free", channel: "Community Forum", response: "Best effort", hours: "N/A" },
+                { plan: "Lite", channel: "Email", response: "< 48 hours", hours: "Mon–Fri" },
+                { plan: "Builder", channel: "Email", response: "< 24 hours", hours: "Mon–Fri" },
+                { plan: "Operator", channel: "Priority Email", response: "< 24 hours", hours: "Mon–Fri" },
+                { plan: "Scale", channel: "Priority Email + Chat", response: "< 12 hours", hours: "Mon–Fri" },
                 { plan: "Enterprise", channel: "Phone + Slack", response: "< 2 hours", hours: "24/7" },
               ].map((row, i) => (
                 <tr
@@ -102,7 +105,7 @@ export default function SLAPage() {
         </h2>
         <div className="space-y-4">
           {[
-            { plan: "Builder & Operator", interval: "Daily", alerts: "None", desc: "Daily health status checks on deployed agents." },
+            { plan: "Lite, Builder & Operator", interval: "Daily", alerts: "None", desc: "Daily health status checks on deployed agents." },
             { plan: "Scale", interval: "Hourly", alerts: "Email alerts", desc: "Hourly health checks with email notification on degradation." },
             { plan: "Enterprise", interval: "Real-time", alerts: "Chat + Phone", desc: "Continuous real-time monitoring with immediate multi-channel alerting." },
           ].map((tier) => (

@@ -4,11 +4,12 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { easing } from "@/lib/motion";
 
+// Illustrative figures for the dashboard mockup (not live data).
 const STATUS_AGENTS = [
   { name: "Support Agent", status: "active", uptime: "99.97%", load: 72 },
   { name: "DevOps Agent", status: "active", uptime: "99.99%", load: 41 },
   { name: "Sales Agent", status: "active", uptime: "99.94%", load: 58 },
-  { name: "Content Agent", status: "idle", uptime: "99.95%", load: 12 }, // {{TODO: confirm real figure}}
+  { name: "Content Agent", status: "idle", uptime: "99.95%", load: 12 },
 ];
 
 const TASK_FEED = [

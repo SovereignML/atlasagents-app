@@ -38,10 +38,8 @@ const footerSections = [
   {
     title: "Company",
     links: [
-      { href: "https://blog.sovereignml.com", label: "Blog", external: true },
       { href: "/docs", label: "Docs", external: true },
-      // Team page hidden from the landing page for now — restore when ready.
-      // { href: "/team", label: "Team" },
+      { href: "/team", label: "Team" },
       { href: "/careers", label: "Careers" },
       { href: "/docs#faq", label: "Resources" },
     ],
@@ -51,6 +49,7 @@ const footerSections = [
     links: [
       { href: "/terms", label: "Terms" },
       { href: "/privacy", label: "Privacy" },
+      { href: "/refund", label: "Refunds" },
       { href: "/sla", label: "SLA" },
     ],
   },

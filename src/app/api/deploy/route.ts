@@ -12,10 +12,11 @@ import { planUnitAmountCents } from "@/lib/pricing"
 import { findPlanBySlug } from "@/configs/plans"
 import { BRANDING } from "@/configs/branding"
 import { parseAgentConfig } from "@/lib/agent-config"
+import { getFreeTierUsage, checkFreeDeployAllowed, type FreeRuntime } from "@/lib/free-tier"
 import { provisionBot } from "@/lib/provisioner"
 import { describeVmError } from "@/lib/vm-provider"
 import { addPlanCredits } from "@/lib/wallet"
-import { planPeriodEnd } from "@/lib/plan-period"
+import { creditGrantSchedule } from "@/lib/plan-period"
 import { getUserTeam } from "@/lib/team"
 import { createInstanceFromAgentFields } from "@/lib/agent-create"
 import { deploySchema } from "@/lib/validations"
@@ -69,29 +70,27 @@ async function handleDeploy(req: NextRequest) {
   fetch('http://127.0.0.1:7305/ingest/880804f1-30d2-40e6-a578-5c94bee7e97e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'52ccd5'},body:JSON.stringify({sessionId:'52ccd5',runId:'pre-fix-2',hypothesisId:'G,restart',location:'src/app/api/deploy/route.ts:handleDeploy',message:'deploy request branch',data:{planSlug,tier:planConfig.tier,regionSlug,serverConfigSlug:planConfig.serverConfigSlug,stripeConfigured:isStripeConfigured(),devBypass:isDevBypassAllowed()},timestamp:Date.now()})}).catch(()=>{});
   // #endregion
 
-  // ── Free tier: enforce 1 free instance per user ───────────────────
-  if (planConfig.tier === "free") {
-    const existingFree = await db.query.subscriptions.findFirst({
-      where: and(
-        eq(subscriptions.userId, session.user.id),
-        eq(subscriptions.status, "active"),
-      ),
-      with: { plan: true },
-    })
-    if (existingFree && existingFree.plan?.tier === "free") {
-      return NextResponse.json(
-        { error: "You already have a free instance. Upgrade to deploy more agents." },
-        { status: 409 },
-      )
-    }
-  }
-
   // ── Agent config parsing ──────────────────────────────────────────
   let parsedAgentConfig: ReturnType<typeof parseAgentConfig> | null = null
   if (agentConfigInput) {
     parsedAgentConfig = parseAgentConfig(agentConfigInput)
     if (!parsedAgentConfig.ok) {
       return NextResponse.json({ error: `Invalid agentConfig: ${parsedAgentConfig.error}` }, { status: 400 })
+    }
+  }
+
+  // ── Free tier: per-runtime concurrency + lifetime cap ─────────────
+  // One live free agent per runtime (OpenClaw + Hermes), up to a lifetime of
+  // FREE_LIFETIME_LIMIT deploys total. See src/lib/free-tier.ts.
+  if (planConfig.tier === "free") {
+    const runtime: FreeRuntime =
+      parsedAgentConfig?.ok && parsedAgentConfig.data.runtime === "hermes"
+        ? "hermes"
+        : "openclaw"
+    const usage = await getFreeTierUsage(session.user.id)
+    const blocked = checkFreeDeployAllowed(usage, runtime)
+    if (blocked) {
+      return NextResponse.json(blocked.body, { status: blocked.status })
     }
   }
 
@@ -168,6 +167,10 @@ async function handleDeploy(req: NextRequest) {
       }
     })()
 
+    // Yearly plans drip the allotment monthly (see creditGrantSchedule); grant
+    // one month now and let the monthly-grants sweep top it up.
+    const freeSchedule = creditGrantSchedule(billingInterval, null)
+
     if (dbPlan) {
       await db.insert(subscriptions).values({
         userId,
@@ -175,6 +178,7 @@ async function handleDeploy(req: NextRequest) {
         instanceId,
         interval: billingInterval,
         status: "active",
+        nextCreditGrantAt: freeSchedule.nextCreditGrantAt,
       })
     }
 
@@ -185,7 +189,7 @@ async function handleDeploy(req: NextRequest) {
         await addPlanCredits(
           userId,
           planConfig.creditsPerPeriod,
-          planPeriodEnd(billingInterval),
+          freeSchedule.expireAt,
           `Free tier grant: ${planConfig.name}`,
           instanceId,
         )
@@ -286,6 +290,10 @@ async function handleDeploy(req: NextRequest) {
     }
   })()
 
+  // Yearly plans drip the allotment monthly (see creditGrantSchedule); grant
+  // one month now and let the monthly-grants sweep top it up.
+  const devSchedule = creditGrantSchedule(billingInterval, null)
+
   if (dbPlan) {
     await db.insert(subscriptions).values({
       userId,
@@ -293,6 +301,7 @@ async function handleDeploy(req: NextRequest) {
       instanceId,
       interval: billingInterval,
       status: "active",
+      nextCreditGrantAt: devSchedule.nextCreditGrantAt,
     })
   }
 
@@ -304,7 +313,7 @@ async function handleDeploy(req: NextRequest) {
       await addPlanCredits(
         userId,
         planConfig.creditsPerPeriod,
-        planPeriodEnd(billingInterval),
+        devSchedule.expireAt,
         `Dev mode grant: ${planConfig.name} (${billingInterval})`,
         instanceId,
       )

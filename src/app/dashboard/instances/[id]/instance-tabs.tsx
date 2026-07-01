@@ -988,14 +988,14 @@ function DeploymentProgress({
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
-                    <AlertDialogCancel render={<Button variant="outline">Cancel</Button>} />
+                    <AlertDialogCancel variant="outline">Cancel</AlertDialogCancel>
                     <AlertDialogAction
-                      render={
-                        <Button variant="destructive" onClick={handleDelete} disabled={isPending}>
-                          {isPending ? "Deleting…" : "Delete"}
-                        </Button>
-                      }
-                    />
+                      variant="destructive"
+                      onClick={handleDelete}
+                      disabled={isPending}
+                    >
+                      {isPending ? "Deleting…" : "Delete"}
+                    </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>

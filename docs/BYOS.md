@@ -25,10 +25,12 @@ BYOS is its own plan (`byos` in [`src/configs/plans.ts`](../src/configs/plans.ts
 
 | | Price |
 |---|---|
-| Monthly | **$29/mo** |
-| Yearly | **$290/yr** (~2 months free) |
+| Monthly | **$2.50/mo** per server |
+| Yearly | **$30/yr** per server |
 
-This is a flat **management-panel fee only**. Because SovereignML doesn't own the hardware, there is **no compute/VM billing** — unlike the managed-VPS plans, where the server size is part of the price. LLM usage is billed separately and only in `managed_credits` mode (below).
+This is a flat **management-panel fee only**, charged per connected server. Because SovereignML doesn't own the hardware, there is **no compute/VM billing** — unlike the managed-VPS plans, where the server size is part of the price. LLM usage is billed separately and only in `managed_credits` mode (below).
+
+Servers connected in `managed_credits` mode receive a **one-time grant of 100 AI credits** on signup (`BYOS_SIGNUP_CREDITS` in [`src/configs/plans.ts`](../src/configs/plans.ts)); after that, top up your wallet as needed. `own_key` servers get no grant because they pay their provider directly.
 
 ### LLM modes
 
@@ -39,7 +41,7 @@ When you connect a server you pick one of two ways to pay for the agent's model 
 | **`managed_credits`** (pay-as-you-go) | The agent uses SovereignML's OpenRouter access. Usage is metered against your **credit wallet**. | Your SovereignML credits — see [BILLING.md](BILLING.md). |
 | **`own_key`** | You paste your **own** LLM provider API key. It's encrypted at rest and injected into the agent. | You, directly to your provider. SovereignML never meters it. |
 
-You only pay the $29/mo panel fee in `own_key` mode; in `managed_credits` you also draw down credits as the agent runs.
+You only pay the $2.50/mo panel fee in `own_key` mode; in `managed_credits` you start with 100 included credits and then draw down your wallet as the agent runs.
 
 ---
 

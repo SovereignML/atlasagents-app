@@ -331,7 +331,7 @@ Several subsystems are driven by cron hitting authenticated endpoints with a `Au
 |----------|-----------|-------------------|---------|
 | `POST /api/billing/usage-sync` | `USAGE_SYNC_CRON_TOKEN` | ~every 10 min | Poll OpenRouter spend, charge wallets, enforce caps ([BILLING.md](BILLING.md)). |
 | `POST /api/billing/daily` | `BILLING_CRON_TOKEN` | daily | Daily compute billing (accrues provider usage). |
-| `POST /api/billing/expire-credits` | `CREDIT_EXPIRY_CRON_TOKEN` | daily | Expire use-it-or-lose-it plan credits past their period end (cancelled/lapsed subs); re-syncs OpenRouter caps down ([BILLING.md](BILLING.md)). |
+| `POST /api/billing/expire-credits` | `CREDIT_EXPIRY_CRON_TOKEN` | daily | Plan-credit lifecycle: (1) distribute the monthly credit allotment to **yearly** subscribers whose drip is due (yearly plans prepay 12 months but credits are handed out monthly), then (2) expire use-it-or-lose-it plan credits past their period end (cancelled/lapsed subs). Re-syncs OpenRouter caps ([BILLING.md](BILLING.md)). **Without this cron, yearly subscribers only ever receive their first month of credits.** |
 | `POST /api/audit-log/prune` | `AUDIT_RETENTION_CRON_TOKEN` | daily | Delete audit-log rows older than 7 days. |
 | `POST /api/admin/notifications/prune` | `ADMIN_NOTIFICATION_RETENTION_CRON_TOKEN` | daily | Delete **resolved** admin notifications older than 30 days. |
 | `POST /api/internal/alerts-eval` | `ALERTS_EVAL_CRON_TOKEN` | ~every 5–10 min | Evaluate team alert rules against recent agent events and fire notifications. Without this cron, alert rules never trigger. |
