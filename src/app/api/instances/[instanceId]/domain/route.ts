@@ -4,11 +4,7 @@ import { getEffectiveUserId } from "@/lib/effective-user"
 import { db, instances, eq } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { canOperateInstance } from "@/lib/instance-access"
-import { sshInstallCaddyfile, sshRun, sshWriteFile, sshVmHasCloudflareOriginCerts } from "@/lib/ssh"
-import { getRuntime } from "@/lib/runtimes"
-import { decryptSecret } from "@/lib/crypto-secret"
-import { routeModel } from "@/lib/model-router"
-import type { BudgetTier } from "@/lib/agent-config"
+import { reconfigureInstanceIngress } from "@/lib/instance-ingress"
 
 export async function POST(
   req: NextRequest,
@@ -46,64 +42,11 @@ export async function POST(
     return NextResponse.json({ error: "Invalid domain format" }, { status: 400 })
   }
 
-  const target = { host: instance.ipAddress, instanceId: instance.id }
-  const runtime = getRuntime(instance.runtime)
-
   try {
-    const useCfOriginTls =
-      Boolean(instance.managedSubdomain) && (await sshVmHasCloudflareOriginCerts(target))
-    const caddyContent = runtime.renderCaddyfile({
-      domain,
-      managedSubdomain: instance.managedSubdomain,
-      useCfOriginTls,
-    })
-    const caddyResult = await sshInstallCaddyfile(target, caddyContent)
-    if (caddyResult.code !== 0 && caddyResult.code !== null) {
-      throw new Error(
-        `Caddy reload failed (exit ${caddyResult.code}): ${caddyResult.stderr || caddyResult.stdout}`,
-      )
-    }
-
-    // Re-render the full gateway config (which recomputes controlUi.allowedOrigins
-    // for the new domain) and write it back. This is runtime-agnostic — it avoids
-    // depending on a runtime-specific `config set` CLI. The gateway token is
-    // preserved by decrypting the persisted ciphertext; the LLM model fields come
-    // from the instance's tier. The OpenRouter key is not stored in this config
-    // (it lives in .env), so an empty placeholder is fine here.
-    if (instance.gatewayTokenEnc) {
-      const route = routeModel((instance.modelTier ?? "mid") as BudgetTier)
-      const configContent = runtime.renderConfig({
-        gatewayToken: decryptSecret(instance.gatewayTokenEnc),
-        openRouterApiKey: "",
-        model: route.model,
-        fallbackModel: route.fallback,
-        domain,
-        managedSubdomain: instance.managedSubdomain,
-        ipAddress: instance.ipAddress,
-        tlsStatus: domain ? (instance.tlsStatus ?? "pending") : null,
-      })
-      const writeStep = await sshWriteFile(target, runtime.paths.configPath, configContent)
-      if (writeStep.code !== 0 && writeStep.code !== null) {
-        throw new Error(
-          `writing ${runtime.displayName} config failed (exit ${writeStep.code}): ${writeStep.stderr || writeStep.stdout}`,
-        )
-      }
-      const owner = runtime.paths.systemUser
-      await sshRun(
-        target,
-        `chown -R ${owner}:${owner} '${runtime.paths.installDir}/${runtime.paths.configSubdir}'`,
-      )
-    }
-
-    const restartStep = await sshRun(
-      target,
-      `systemctl restart ${runtime.serviceName} 2>&1`,
-    )
-    if (restartStep.code !== 0 && restartStep.code !== null) {
-      throw new Error(
-        `systemctl restart ${runtime.serviceName} failed (exit ${restartStep.code}): ${restartStep.stderr || restartStep.stdout}`,
-      )
-    }
+    // Direct (grey-cloud) custom domain — the user points an A record at the box
+    // and Caddy provisions Let's Encrypt. The orange-cloud case goes through
+    // /cloudflare-domain instead, which passes proxied: true.
+    await reconfigureInstanceIngress(instance, { domain, proxied: false })
   } catch (err) {
     console.error(`[domain] Failed to update Caddy config:`, err)
     return NextResponse.json(
@@ -116,6 +59,13 @@ export async function POST(
     .update(instances)
     .set({
       domain,
+      // This path always renders Caddy for a direct (grey-cloud) domain, so the
+      // flag has to follow. Leaving a stale `true` from an earlier
+      // Bring-Your-Own-Cloudflare binding would make dns-status skip the
+      // exact-IP check and report "ready" off any A record. cfZoneId /
+      // cfUserRecordId are left intact so the Cloudflare DELETE route can still
+      // clean up a record it created.
+      domainProxied: false,
       dnsStatus: domain ? "pending" : null,
       tlsStatus: domain ? "pending" : null,
     })

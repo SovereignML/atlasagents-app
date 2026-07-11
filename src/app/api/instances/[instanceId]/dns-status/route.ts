@@ -31,13 +31,20 @@ export async function GET(
     return NextResponse.json({ error: "Instance not found" }, { status: 404 })
   }
 
-  // Probe the managed Cloudflare subdomain when present, otherwise the
-  // user-supplied custom domain. If neither is set, DNS state stays NULL.
-  const probeHost = instance.managedSubdomain ?? instance.domain
-  // A proxied custom domain (Bring-Your-Own-Cloudflare) resolves to Cloudflare
-  // anycast IPs, never the origin — so treat it like a managed subdomain where
-  // any A record means DNS is live, rather than requiring an exact-IP match.
-  const isManaged = Boolean(instance.managedSubdomain) || instance.domainProxied
+  // Probe the CUSTOM domain when one is set, falling back to the managed
+  // subdomain. The custom domain is what the user is actually waiting on, what
+  // the DnsCard renders, and what buildPublicGatewayUrl gates https:// on. The
+  // managed subdomain is live from the moment the platform mints it, so probing
+  // it in preference would report "ready"/"issued" off a hostname nobody is
+  // waiting for while the custom domain sits unresolved.
+  const probeHost = instance.domain ?? instance.managedSubdomain
+
+  // Is the host we're about to probe behind a Cloudflare proxy? A proxied host
+  // resolves to CF anycast IPs and never to the origin, so an exact-IP match is
+  // impossible — any A record means it's live. The platform's managed subdomain
+  // is always proxied (see createAgentSubdomain); a custom domain is proxied only
+  // on the Bring-Your-Own-Cloudflare path.
+  const proxied = instance.domain ? instance.domainProxied : true
 
   if (!probeHost) {
     return NextResponse.json({
@@ -54,7 +61,7 @@ export async function GET(
   let dnsStatus: DnsStatus = (instance.dnsStatus as DnsStatus) ?? "pending"
   try {
     resolvedIps = await dns.promises.resolve4(probeHost)
-    if (isManaged) {
+    if (proxied) {
       // Cloudflare-proxied: any A record means CF anycast IPs are live —
       // that's "ready" from our perspective. The origin IP is hidden.
       if (resolvedIps.length > 0) dnsStatus = "ready"

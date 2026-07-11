@@ -533,18 +533,35 @@ model:
       ? buildDualRouteBody(allowed, args.upstreamPort)
       : buildSingleUpstreamBody(allowed, HERMES_GATEWAY_PORT)
 
+    const port80 = `:80 {
+${body}
+}
+`
+
     const domain = args.domain?.trim()
     if (domain) {
+      // Behind the user's own Cloudflare proxy (orange-cloud): Cloudflare
+      // terminates TLS at its edge and pulls from the origin over HTTPS without
+      // validating the cert (zone SSL = "Full", not strict), so a self-signed
+      // `tls internal` cert is accepted. ACME cannot work here — the HTTP-01
+      // challenge never reaches the origin — so Let's Encrypt is not an option.
+      // Keep :80 for Cloudflare's origin pull / Always-Use-HTTPS check.
+      if (args.domainUseInternalTls) {
+        return `${domain} {
+  tls internal
+${body}
+}
+
+${port80}`
+      }
+      // Direct (grey-cloud / non-Cloudflare) custom domain: Caddy
+      // auto-provisions Let's Encrypt TLS.
       return `${domain} {
 ${body}
 }
 `
     }
 
-    const port80 = `:80 {
-${body}
-}
-`
     const managed = args.managedSubdomain?.trim()
     if (managed && args.useCfOriginTls) {
       return `{

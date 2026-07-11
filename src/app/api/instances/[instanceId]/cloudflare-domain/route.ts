@@ -4,16 +4,7 @@ import { getEffectiveUserId } from "@/lib/effective-user"
 import { db, instances, eq } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { canOperateInstance } from "@/lib/instance-access"
-import {
-  sshInstallCaddyfile,
-  sshRun,
-  sshWriteFile,
-  sshVmHasCloudflareOriginCerts,
-} from "@/lib/ssh"
-import { getRuntime } from "@/lib/runtimes"
-import { decryptSecret } from "@/lib/crypto-secret"
-import { routeModel } from "@/lib/model-router"
-import type { BudgetTier } from "@/lib/agent-config"
+import { reconfigureInstanceIngress } from "@/lib/instance-ingress"
 import { logAuditEvent } from "@/lib/audit"
 import {
   getCloudflareTokenForTeam,
@@ -64,65 +55,16 @@ async function loadInstance(
 }
 
 /**
- * Re-render Caddy + the gateway config for the given domain over SSH and
- * restart the service. Mirrors the legacy domain/route.ts reconfigure path,
- * but forces `tls internal` when the domain is proxied through the user's
- * Cloudflare (orange-cloud). Throws on failure.
+ * Re-render Caddy for a domain that is proxied through the user's own
+ * Cloudflare (orange-cloud), so it gets `tls internal` rather than Let's
+ * Encrypt. Shared with the DIY /domain route — see instance-ingress.ts.
  */
-async function reconfigureCaddy(
+function reconfigureCaddy(
   instance: LoadedInstance,
   domain: string | null,
   proxied: boolean,
 ): Promise<void> {
-  const target = { host: instance.ipAddress as string, instanceId: instance.id }
-  const runtime = getRuntime(instance.runtime)
-
-  const useCfOriginTls =
-    Boolean(instance.managedSubdomain) && (await sshVmHasCloudflareOriginCerts(target))
-  const caddyContent = runtime.renderCaddyfile({
-    domain,
-    managedSubdomain: instance.managedSubdomain,
-    useCfOriginTls,
-    domainUseInternalTls: Boolean(domain) && proxied,
-  })
-  const caddyResult = await sshInstallCaddyfile(target, caddyContent)
-  if (caddyResult.code !== 0 && caddyResult.code !== null) {
-    throw new Error(
-      `Caddy reload failed (exit ${caddyResult.code}): ${caddyResult.stderr || caddyResult.stdout}`,
-    )
-  }
-
-  if (instance.gatewayTokenEnc) {
-    const route = routeModel((instance.modelTier ?? "mid") as BudgetTier)
-    const configContent = runtime.renderConfig({
-      gatewayToken: decryptSecret(instance.gatewayTokenEnc),
-      openRouterApiKey: "",
-      model: route.model,
-      fallbackModel: route.fallback,
-      domain,
-      managedSubdomain: instance.managedSubdomain,
-      ipAddress: instance.ipAddress,
-      tlsStatus: domain ? (instance.tlsStatus ?? "pending") : null,
-    })
-    const writeStep = await sshWriteFile(target, runtime.paths.configPath, configContent)
-    if (writeStep.code !== 0 && writeStep.code !== null) {
-      throw new Error(
-        `writing ${runtime.displayName} config failed (exit ${writeStep.code}): ${writeStep.stderr || writeStep.stdout}`,
-      )
-    }
-    const owner = runtime.paths.systemUser
-    await sshRun(
-      target,
-      `chown -R ${owner}:${owner} '${runtime.paths.installDir}/${runtime.paths.configSubdir}'`,
-    )
-  }
-
-  const restartStep = await sshRun(target, `systemctl restart ${runtime.serviceName} 2>&1`)
-  if (restartStep.code !== 0 && restartStep.code !== null) {
-    throw new Error(
-      `systemctl restart ${runtime.serviceName} failed (exit ${restartStep.code}): ${restartStep.stderr || restartStep.stdout}`,
-    )
-  }
+  return reconfigureInstanceIngress(instance, { domain, proxied })
 }
 
 /**
