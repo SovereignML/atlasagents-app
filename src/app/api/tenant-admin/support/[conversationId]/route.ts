@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { requireTenantAdmin, isTenantGuardError } from "@/lib/tenant-admin-access"
 import {
-  resolveChatwootForTeam,
+  resolveTenantChatwootOrNull,
   getConversationMessages,
   getConversation,
   postAgentReply,
@@ -28,7 +28,7 @@ export async function GET(
   const id = parseId(conversationId)
   if (!id) return NextResponse.json({ error: "Invalid id" }, { status: 400 })
 
-  const cfg = await resolveChatwootForTeam(admin.tenantTeamId)
+  const cfg = await resolveTenantChatwootOrNull(admin.tenantTeamId)
   if (!cfg) return NextResponse.json({ error: "Chatwoot not configured" }, { status: 409 })
 
   const [messages, state] = await Promise.all([
@@ -57,7 +57,7 @@ export async function POST(
   const parsed = replySchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: "Invalid input" }, { status: 400 })
 
-  const cfg = await resolveChatwootForTeam(admin.tenantTeamId)
+  const cfg = await resolveTenantChatwootOrNull(admin.tenantTeamId)
   if (!cfg) return NextResponse.json({ error: "Chatwoot not configured" }, { status: 409 })
 
   const ok = await postAgentReply(cfg, id, parsed.data.content)
@@ -92,7 +92,7 @@ export async function PATCH(
   const parsed = statusSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: "Invalid input" }, { status: 400 })
 
-  const cfg = await resolveChatwootForTeam(admin.tenantTeamId)
+  const cfg = await resolveTenantChatwootOrNull(admin.tenantTeamId)
   if (!cfg) return NextResponse.json({ error: "Chatwoot not configured" }, { status: 409 })
 
   const ok = await setConversationStatus(cfg, id, parsed.data.status)

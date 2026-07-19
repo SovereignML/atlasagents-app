@@ -298,6 +298,15 @@ export function TeamIntegrationsTab({
                         <FieldLabel htmlFor="cf-token">API token</FieldLabel>
                         <Input
                           id="cf-token"
+                          name="cf-api-token"
+                          type="text"
+                          autoComplete="off"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          data-1p-ignore
+                          data-lpignore="true"
+                          data-bwignore="true"
+                          data-form-type="other"
                           value={token}
                           onChange={(e) => setToken(e.target.value)}
                           className="font-mono"
@@ -383,7 +392,8 @@ export function TeamSshTab({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          Shared SSH keys are available to the whole team when deploying agents.
+          These keys are installed for root SSH access on every agent VPS the team owns. Add or
+          remove a key and it&apos;s synced across all running agents automatically.
         </p>
         {canManage && (
           <Dialog open={showAdd} onOpenChange={setShowAdd}>
@@ -486,7 +496,7 @@ export function TeamSshTab({
             <AlertDialogTitle>Remove this SSH key?</AlertDialogTitle>
             <AlertDialogDescription>
               {pendingDelete
-                ? `"${pendingDelete.name}" will no longer appear when deploying. Agents already using it keep working.`
+                ? `"${pendingDelete.name}" will be removed from every agent VPS in this team, revoking its SSH access. This can't be undone.`
                 : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>

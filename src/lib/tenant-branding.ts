@@ -13,10 +13,11 @@
 // in @/db is not edge-compatible. Host→team resolution happens in the dashboard
 // layout server component (Node), not in middleware.
 
-import { db, teamBranding, eq, and, isNotNull } from "@/db"
+import { db, teamBranding, eq, and, isNotNull, isNull } from "@/db"
 import { BRANDING } from "@/configs/branding"
 import { teamHasWhiteLabel } from "@/lib/white-label"
 import { normalizeHost, isCanonicalHost } from "@/lib/host"
+import { cfSaasConfigured, getCustomHostname, mapCustomHostnameStatus } from "@/lib/cloudflare-saas"
 
 // Re-exported for call sites that import host helpers from here.
 export { normalizeHost, isCanonicalHost, normalizeCustomDomain, getCnameTarget } from "@/lib/host"
@@ -128,7 +129,60 @@ export async function resolveTeamByHost(
     ),
     columns: { teamId: true },
   })
-  return row?.teamId ?? null
+  if (!row) return null
+  // Entitlement is live: a team whose white-label was revoked must stop
+  // resolving by its custom domain even while the (stale) verified row lingers —
+  // otherwise the host keeps capturing signups and serving the tenant's widget.
+  // `teamHasWhiteLabel` is the single source of truth (see white-label.ts).
+  if (!(await teamHasWhiteLabel(row.teamId))) return null
+  return row.teamId
+}
+
+/**
+ * Sweep team custom domains whose Cloudflare hostname exists but isn't yet marked
+ * verified, and stamp `domainVerifiedAt` once the cert goes active. This lets a
+ * domain activate on its own (on the reconciler cadence) instead of only when a
+ * branding manager happens to reopen the status card. No-op when CF-for-SaaS
+ * isn't configured. Returns how many were checked / newly verified.
+ */
+export async function reconcilePendingCustomHostnames(): Promise<{
+  checked: number
+  verified: number
+}> {
+  if (!cfSaasConfigured()) return { checked: 0, verified: 0 }
+  const rows = await db.query.teamBranding.findMany({
+    where: and(
+      isNotNull(teamBranding.cfCustomHostnameId),
+      isNull(teamBranding.domainVerifiedAt),
+    ),
+    columns: { teamId: true, cfCustomHostnameId: true, dnsStatus: true, tlsStatus: true },
+  })
+  let verified = 0
+  for (const row of rows) {
+    if (!row.cfCustomHostnameId) continue
+    try {
+      const ch = await getCustomHostname(row.cfCustomHostnameId)
+      const mapped = mapCustomHostnameStatus(ch)
+      const set: {
+        dnsStatus?: string | null
+        tlsStatus?: string | null
+        domainVerifiedAt?: Date
+        updatedAt: Date
+      } = { updatedAt: new Date() }
+      if (mapped.dnsStatus !== row.dnsStatus) set.dnsStatus = mapped.dnsStatus
+      if (mapped.tlsStatus !== row.tlsStatus) set.tlsStatus = mapped.tlsStatus
+      if (mapped.active) {
+        set.domainVerifiedAt = new Date()
+        verified++
+      }
+      if (set.dnsStatus != null || set.tlsStatus != null || set.domainVerifiedAt != null) {
+        await db.update(teamBranding).set(set).where(eq(teamBranding.teamId, row.teamId))
+      }
+    } catch (err) {
+      console.error("[cf-saas reconcile] getCustomHostname failed:", err)
+    }
+  }
+  return { checked: rows.length, verified }
 }
 
 /** Branding for a request Host header (custom-domain path). */

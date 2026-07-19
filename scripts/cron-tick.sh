@@ -46,6 +46,7 @@ tick() {
 
 # Frequent endpoints (run every minute). Add more lines as needed.
 tick /api/internal/uptime-sync  UPTIME_SYNC_CRON_TOKEN
+tick /api/internal/metrics-collect  METRICS_COLLECT_CRON_TOKEN
 tick /api/internal/alerts-eval  ALERTS_EVAL_CRON_TOKEN
 tick /api/billing/usage-sync    USAGE_SYNC_CRON_TOKEN
 tick /api/internal/demo-reap    DEMO_REAP_CRON_TOKEN

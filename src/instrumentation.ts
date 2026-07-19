@@ -24,6 +24,13 @@ export async function register() {
     const { assertEnv } = await import("@/lib/env-check")
     assertBillingConfig()
     assertEnv()
+
+    // Self-driving warm VM pool: start the in-process refill scheduler so the
+    // pool (the primary managed-VPS delivery path) stays topped up with zero
+    // external cron wiring. No-ops when the pool is disabled. Dynamic import
+    // keeps DB code out of the edge bundle.
+    const { startWarmPoolScheduler } = await import("@/lib/warm-pool")
+    startWarmPoolScheduler()
   }
 }
 

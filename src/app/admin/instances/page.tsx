@@ -1,9 +1,13 @@
 import Link from "next/link"
 
 import { db, desc, instances, orphanEvents, sql } from "@/db"
-import { Badge } from "@/components/ui/badge"
+import { requireAdminPage } from "@/lib/admin-guard"
 import { runtimeLabel } from "@/lib/runtimes/labels"
+import { getPoolHealth, listWarmVms, type PoolHealthEntry } from "@/lib/warm-pool"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Progress } from "@/components/ui/progress"
+import { StatusBadge } from "@/components/admin/status-badge"
 import {
   Card,
   CardContent,
@@ -18,24 +22,11 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
-
-function statusBadgeVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
-  switch (status) {
-    case "running":
-      return "default"
-    case "failed":
-    case "failed_provisioning":
-      return "destructive"
-    case "provisioning":
-    case "pending":
-      return "outline"
-    default:
-      return "secondary"
-  }
-}
+import { DestroyWarmVmButton } from "./pool-actions"
 
 const TABS = [
   { id: "active", label: "Active" },
+  { id: "pool", label: "Pre-Baked VMs" },
   { id: "deleted", label: "Deleted" },
   { id: "failed", label: "Failed" },
   { id: "orphans", label: "Orphans" },
@@ -46,32 +37,44 @@ function parseTab(s: string | undefined): Tab {
   return (TABS.find((t) => t.id === s)?.id ?? "active") as Tab
 }
 
+/** Age of a timestamp as a compact "3d" / "4h" / "12m" / "just now" string. */
+function ago(date: Date | null | undefined): string {
+  if (!date) return "-"
+  const ms = Date.now() - date.getTime()
+  const m = Math.floor(ms / 60_000)
+  if (m < 1) return "just now"
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.floor(h / 24)}d ago`
+}
+
 export default async function AdminInstancesPage({
   searchParams,
 }: {
   searchParams: Promise<{ tab?: string }>
 }) {
+  await requireAdminPage()
   const { tab } = await searchParams
   const active = parseTab(tab)
 
+  const usesInstances = active === "active" || active === "deleted" || active === "failed"
   const whereByTab = {
     active: sql`${instances.status} NOT IN ('deleted', 'failed_provisioning')`,
     deleted: sql`${instances.status} = 'deleted'`,
     failed: sql`${instances.status} = 'failed_provisioning'`,
-    orphans: sql`1 = 0`,
-  }[active]
+  } as const
 
-  const rows =
-    active === "orphans"
-      ? []
-      : await db.query.instances.findMany({
-          where: whereByTab,
-          with: { user: true, region: true, serverConfig: true },
-          orderBy:
-            active === "deleted"
-              ? [desc(instances.lastTransitionAt), desc(instances.createdAt)]
-              : desc(instances.createdAt),
-        })
+  const rows = usesInstances
+    ? await db.query.instances.findMany({
+        where: whereByTab[active as "active" | "deleted" | "failed"],
+        with: { user: true, region: true, serverConfig: true },
+        orderBy:
+          active === "deleted"
+            ? [desc(instances.lastTransitionAt), desc(instances.createdAt)]
+            : desc(instances.createdAt),
+      })
+    : []
 
   const orphans =
     active === "orphans"
@@ -82,11 +85,14 @@ export default async function AdminInstancesPage({
           .limit(200)
       : []
 
+  const poolHealth = active === "pool" ? await getPoolHealth() : null
+  const warmVmRows = active === "pool" ? await listWarmVms() : []
+
   return (
     <PageContainer>
       <PageHeader
         title="Admin · Instances"
-        description="All agent instances across users. Deleted rows and orphan events stay here for audit."
+        description="All agent instances across users, plus the pre-baked VM pool. Deleted rows and orphan events stay here for audit."
       />
 
       <div className="flex items-end gap-1 border-b">
@@ -103,14 +109,25 @@ export default async function AdminInstancesPage({
             {t.label}
           </Link>
         ))}
-        <form action="/api/admin/reconcile" method="POST" className="ml-auto pb-1">
-          <Button type="submit" variant="outline" size="sm">
-            Run reconciler
-          </Button>
-        </form>
+        <div className="ml-auto flex items-center gap-2 pb-1">
+          <Button
+            variant="outline"
+            size="sm"
+            render={<a href="/api/admin/deleted-ips/export">Export IPs (CSV)</a>}
+          />
+          <form
+            action={active === "pool" ? "/api/internal/pool-refill" : "/api/admin/reconcile"}
+            method="POST"
+          >
+            <Button type="submit" variant="outline" size="sm">
+              {active === "pool" ? "Refill pool" : "Run reconciler"}
+            </Button>
+          </form>
+        </div>
       </div>
 
-      {active !== "orphans" && rows.length === 0 && (
+      {/* ── Instance tabs (active / deleted / failed) ── */}
+      {usesInstances && rows.length === 0 && (
         <Empty>
           <EmptyHeader>
             <EmptyTitle>Nothing to show</EmptyTitle>
@@ -119,7 +136,7 @@ export default async function AdminInstancesPage({
         </Empty>
       )}
 
-      {active !== "orphans" && rows.length > 0 && (
+      {usesInstances && rows.length > 0 && (
         <div className="space-y-3">
           {rows.map((instance) => (
             <Card key={instance.id}>
@@ -127,9 +144,7 @@ export default async function AdminInstancesPage({
                 <div className="min-w-0">
                   <div className="flex items-center gap-3">
                     <h3 className="truncate font-medium text-foreground">{instance.name}</h3>
-                    <Badge variant={statusBadgeVariant(instance.status)} className="font-mono">
-                      {instance.status}
-                    </Badge>
+                    <StatusBadge status={instance.status} mono />
                     {instance.deploymentTarget === "vps" && (
                       <Badge variant="outline" className="font-mono">
                         {runtimeLabel(instance.runtime)}
@@ -143,7 +158,11 @@ export default async function AdminInstancesPage({
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">{instance.user.email}</p>
                   <p className="truncate font-mono text-xs text-muted-foreground">
-                    {instance.slug} · {instance.ipAddress || "no IP"}
+                    {instance.slug} ·{" "}
+                    {instance.ipAddress ||
+                      (instance.deletedIpAddress
+                        ? `${instance.deletedIpAddress} (released)`
+                        : "no IP")}
                     {instance.domain && ` · ${instance.domain}`}
                   </p>
                   {active === "deleted" && (
@@ -185,6 +204,12 @@ export default async function AdminInstancesPage({
         </div>
       )}
 
+      {/* ── Pre-Baked VMs (warm pool) ── */}
+      {active === "pool" && poolHealth && (
+        <PoolTab health={poolHealth} rows={warmVmRows} />
+      )}
+
+      {/* ── Orphans ── */}
       {active === "orphans" && (
         <div className="space-y-2">
           {orphans.length === 0 && (
@@ -201,7 +226,14 @@ export default async function AdminInstancesPage({
             <Card key={o.id} size="sm">
               <CardHeader className="flex flex-row items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <CardTitle className="font-mono text-sm">vm#{o.vmId}</CardTitle>
+                  <CardTitle className="font-mono text-sm">
+                    vm#{o.vmId}
+                    {o.ipAddress && (
+                      <span className="ml-2 font-normal text-muted-foreground">
+                        {o.ipAddress} (released)
+                      </span>
+                    )}
+                  </CardTitle>
                   <CardDescription className="truncate text-xs">
                     {o.detail ?? ""}
                   </CardDescription>
@@ -223,6 +255,141 @@ export default async function AdminInstancesPage({
         </div>
       )}
     </PageContainer>
+  )
+}
+
+function PoolTab({
+  health,
+  rows,
+}: {
+  health: { enabled: boolean; entries: PoolHealthEntry[] }
+  rows: Array<Awaited<ReturnType<typeof listWarmVms>>[number]>
+}) {
+  return (
+    <div className="space-y-6">
+      {!health.enabled && (
+        <Card size="sm" className="border-amber-500/40">
+          <CardContent className="text-sm text-muted-foreground">
+            The warm pool is <strong>disabled</strong> in this environment (needs a provider token +
+            fleet SSH key, and <span className="font-mono">POOL_ENABLED</span> not set to{" "}
+            <span className="font-mono">false</span>). Existing rows are shown for reference; no VMs
+            are created or refilled.
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Fill summary per pool target */}
+      {health.entries.length === 0 ? (
+        <Card size="sm">
+          <CardContent className="text-sm text-muted-foreground">
+            No pool targets configured (all sizes are 0).
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {health.entries.map((e) => {
+            const pct = e.target > 0 ? Math.min(100, Math.round((e.ready / e.target) * 100)) : 0
+            const full = e.ready >= e.target
+            return (
+              <Card key={e.poolKey} size="sm">
+                <CardHeader>
+                  <div className="flex items-center justify-between gap-2">
+                    <CardTitle className="text-sm">
+                      {runtimeLabel(e.runtime)}
+                      {e.webuiEnabled && (
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">+ WebUI</span>
+                      )}
+                    </CardTitle>
+                    <span
+                      className={`text-sm font-bold ${full ? "text-primary" : "text-amber-600 dark:text-amber-400"}`}
+                    >
+                      {e.ready} / {e.target}
+                    </span>
+                  </div>
+                  <CardDescription className="font-mono text-[10px]">
+                    {e.regionCode} · {e.planCode}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <Progress
+                    value={pct}
+                    indicatorClassName={full ? "bg-primary" : "bg-amber-500"}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {e.inFlight} in-flight · {e.claimed} claimed
+                    {e.failed > 0 && (
+                      <span className="text-destructive"> · {e.failed} failed</span>
+                    )}
+                  </p>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Warm-VM rows */}
+      {rows.length === 0 ? (
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>No pre-baked VMs</EmptyTitle>
+            <EmptyDescription>
+              The pool has no VMs yet. When enabled it refills automatically; use “Refill pool” to
+              trigger a pass now.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <div className="space-y-3">
+          {rows.map((vm) => (
+            <Card key={vm.id} size="sm">
+              <CardContent className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-3">
+                    <StatusBadge status={vm.status} mono />
+                    <Badge variant="outline" className="font-mono">
+                      {runtimeLabel(vm.runtime)}
+                    </Badge>
+                    {vm.webuiEnabled && (
+                      <span className="text-[10px] text-muted-foreground">+ WebUI</span>
+                    )}
+                    {vm.vmId && (
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        vm#{vm.vmId}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                    {vm.poolKey}
+                  </p>
+                  <p className="truncate font-mono text-xs text-muted-foreground">
+                    {vm.ipAddress || "no IP"}
+                    {vm.managedSubdomain && ` · ${vm.managedSubdomain}`}
+                  </p>
+                  {vm.lastError && (
+                    <p className="mt-1 font-mono text-xs text-destructive">
+                      lastError: {vm.lastError}
+                    </p>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-3 text-right text-xs text-muted-foreground">
+                  <div>
+                    <p>created {ago(vm.createdAt)}</p>
+                    {vm.readyAt && <p>ready {ago(vm.readyAt)}</p>}
+                    {vm.claimedAt && <p>claimed {ago(vm.claimedAt)}</p>}
+                  </div>
+                  <DestroyWarmVmButton
+                    warmVmId={vm.id}
+                    poolKey={vm.poolKey}
+                    status={vm.status}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 

@@ -52,6 +52,46 @@ and NotFound also reads `next/navigation`:
   served remotely/by the system. Expected, no action.
 - `[GRID_OVERFLOW]` on Progress / ThemeToggle — resolved with
   `cfg.overrides.{Progress,ThemeToggle}.cardMode: "column"`.
+- `[GRID_OVERFLOW] escape` on **Progress** (BackupStages/DeployProgress/QuotaUsed,
+  labelled "fixed/portal") — FALSE POSITIVE. The previews are plain flex columns;
+  the Radix `Progress` indicator's `transform: translateX(-N%)` reads as content
+  positioned outside the cell. `column` mode can't clear an `escape` flag (only
+  `single` would, which drops 2 of the 3 useful stories), so it re-fires every
+  re-sync. Screenshot renders correctly in column — KEEP `column`, ignore the warn.
+
+## Out-of-scope components (deliberately excluded)
+`src/components/ui/` also contains 5 marketing page *sections* — `features-8`,
+`logo-cloud-2`, `team-showcase`, `testimonials-columns-1`, `trusted-companies` —
+composed page blocks, NOT reusable DS primitives. They are excluded via the
+`EXCLUDE` set in `.design-sync/gen-entry.mjs` (keep in sync with the 34-entry
+`componentSrcMap`). The synced kit is 34 primitives. If a new marketing section
+lands in `ui/`, add it to that EXCLUDE set so the barrel/bundle stays at 34.
+
+## Preview authoring gotchas (folded from June fan-out learnings)
+These are embodied in the committed `previews/*.tsx`; kept here so a re-sync
+understands WHY, and for any future authoring wave:
+- **ChartContainer / recharts**: `ResponsiveContainer`'s ResizeObserver fires
+  AFTER the networkidle screenshot, so the chart captures black. Fix: pass
+  explicit `width={…} height={…}` directly to the recharts element
+  (`<AreaChart width={480} height={220}>`, `<BarChart …>`) — recharts renders
+  synchronously at that size, bypassing the async measure. Reuse for any recharts.
+- **FlowButton**: hardcodes near-black text on transparent bg — invisible on the
+  console-dark canvas. Its preview wraps it in an inline-styled LIGHT panel
+  (`background:#f5f5f4`) so the intended contrast reads. Surface glue only.
+- **Toaster (sonner)**: a fired toast portals in only after a click+animation, so
+  it can't be captured statically. Preview mounts real `<Toaster/>` + a wired
+  button AND renders representative static notification rows mirroring toast style.
+- **Overlays** (Dialog/AlertDialog/Sheet/Popover/DropdownMenu/Select/Tooltip):
+  Base UI (`@base-ui/react`) — render OPEN statically via `defaultOpen` on the
+  root (Tooltip: `defaultOpen delay={0}`; Select: `defaultValue`, no defaultOpen).
+  Triggers use Base UI `render={<Button/>}`, not `asChild`. Each has a
+  `cardMode:"single"` + viewport override so the open panel gets room.
+- **CONFIG_STALE re-stamp rule**: `sync-hashes.mjs configSlicesFor().componentFor()`
+  strips only `cardMode`/`primaryStory` from an override before hashing — a
+  `viewport` (or any other override knob) is graded-relevant, so changing it moves
+  the grade key. A scoped `preview-rebuild.mjs` then aborts `[CONFIG_STALE]` until
+  a full `package-build.mjs` re-stamps `.stories-map.json`. Orchestrator runs the
+  full build first; authors never do.
 
 ## Theme decision
 Previews default to the **console-dark** theme (lime `#a3e635` on `#0a0a0b`) —

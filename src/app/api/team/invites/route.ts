@@ -4,6 +4,7 @@ import { db, eq, and, isNull, teamInvites, memberships, teams, users } from "@/d
 import { z } from "zod"
 import { randomBytes } from "node:crypto"
 import { getUserTeam, canManageTeam, canAssignRole } from "@/lib/team"
+import { getTeamSeatLimit } from "@/lib/seats"
 import { sendTeamInviteEmail } from "@/lib/email"
 import { logAuditEvent } from "@/lib/audit"
 
@@ -45,7 +46,7 @@ export async function POST(req: Request) {
   // doesn't depend on the client. Platform staff bypass.
   const isAdmin = (session.user as { role?: string }).role === "admin"
   if (!isAdmin) {
-    const [memberCount, openInvites] = await Promise.all([
+    const [memberCount, openInvites, seatLimit] = await Promise.all([
       db.query.memberships.findMany({ where: eq(memberships.teamId, team.id) }),
       db.query.teamInvites.findMany({
         where: and(
@@ -54,8 +55,9 @@ export async function POST(req: Request) {
           isNull(teamInvites.revokedAt),
         ),
       }),
+      getTeamSeatLimit(team),
     ])
-    if (memberCount.length + openInvites.length >= team.seatLimit) {
+    if (memberCount.length + openInvites.length >= seatLimit) {
       return NextResponse.json({ error: "Team is at seat limit" }, { status: 409 })
     }
   }

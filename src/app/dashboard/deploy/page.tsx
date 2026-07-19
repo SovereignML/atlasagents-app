@@ -132,8 +132,6 @@ export default function DeployPage() {
       .catch(() => {})
   }, [])
 
-  const selectedServer = selectedPlan ? resolveServerForPlan(selectedPlan) : null
-
   const STEPS = ALL_STEPS
   const stepIdx = STEPS.indexOf(step)
   const selectedCategoryObj = AGENT_CATEGORIES.find((c) => c.slug === useCase)
@@ -355,14 +353,6 @@ export default function DeployPage() {
                     )
                   })}
                 </ToggleGroup>
-                {runtime === "hermes" && (
-                  <p className="text-xs text-muted-foreground">
-                    Hermes ships with the Open WebUI chat interface bundled: you&apos;ll get a web
-                    chat UI at <span className="font-mono">/</span> and the OpenAI-compatible API at{" "}
-                    <span className="font-mono">/v1</span> on the same public URL. Available on every
-                    plan, including the Free demo.
-                  </p>
-                )}
               </div>
             </div>
           )}
@@ -452,7 +442,7 @@ export default function DeployPage() {
               <div>
                 <h2 className="text-lg font-semibold text-foreground">Choose Your Plan</h2>
                 <p className="text-sm text-muted-foreground">
-                  Each plan includes dedicated infrastructure, credits, and support.
+                  Every plan runs the same managed agent — only the included credits differ.
                 </p>
               </div>
 
@@ -469,12 +459,10 @@ export default function DeployPage() {
                 spacing={1}
               >
                 {DEPLOYABLE_PLANS.map((plan) => {
-                  const server = resolveServerForPlan(plan)
                   const price = plan.displayPriceMonthly
-                  const showSpecs = plan.tier !== "free"
                   const runtimeBlocked = !planSupportsRuntime(plan)
                   const freeBlocked = freeBlockReason(plan)
-                  const blockedLabel = freeBlocked ?? "Needs ≥2GB plan"
+                  const blockedLabel = freeBlocked ?? "Unavailable"
                   return (
                     <ToggleGroupItem
                       key={plan.slug}
@@ -513,14 +501,12 @@ export default function DeployPage() {
                           )}
                         </div>
                       </div>
-                      {showSpecs && server && (
-                        <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                          <span>{server.vcpu} vCPU</span>
-                          <span>{server.ramGb} GB RAM</span>
-                          <span>{server.storageGb} GB Storage</span>
-                          <span>{plan.creditsPerPeriod.toLocaleString()} credits/mo</span>
-                        </div>
-                      )}
+                      <div className="mt-3 flex items-baseline gap-1.5">
+                        <span className="text-lg font-bold text-primary">
+                          {plan.creditsPerPeriod.toLocaleString()}
+                        </span>
+                        <span className="text-xs text-muted-foreground">credits / month</span>
+                      </div>
                       <div className="mt-3 flex flex-wrap gap-1.5">
                         {plan.features.slice(0, 3).map((f) => (
                           <Badge key={f} variant="outline" className="text-[10px]">
@@ -563,31 +549,19 @@ export default function DeployPage() {
                 </Card>
               )}
 
-              {selectedPlan && selectedPlan.tier !== "free" && selectedServer && (
+              {selectedPlan && selectedPlan.tier !== "free" && (
                 <Card className="bg-muted/40">
                   <CardHeader>
                     <CardDescription className="font-mono text-[10px] tracking-[0.1em] uppercase text-primary">
                       Your plan includes
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
-                    <div>
-                      <p className="text-xs text-muted-foreground">CPU</p>
-                      <p className="font-medium text-foreground">{selectedServer.vcpu} vCPU</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Memory</p>
-                      <p className="font-medium text-foreground">{selectedServer.ramGb} GB RAM</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Storage</p>
-                      <p className="font-medium text-foreground">{selectedServer.storageGb} GB</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Credits</p>
-                      <p className="font-medium text-foreground">
-                        {selectedPlan.creditsPerPeriod.toLocaleString()}/mo
+                  <CardContent>
+                    <div className="flex items-baseline gap-2">
+                      <p className="text-3xl font-bold text-primary">
+                        {selectedPlan.creditsPerPeriod.toLocaleString()}
                       </p>
+                      <p className="text-sm text-muted-foreground">credits / month</p>
                     </div>
                   </CardContent>
                 </Card>
@@ -708,14 +682,14 @@ export default function DeployPage() {
                     <p className="font-medium text-foreground">{selectedPlan?.name ?? "-"}</p>
                   </CardHeader>
                 </Card>
-                {selectedPlan && selectedPlan.tier !== "free" && selectedServer && (
+                {selectedPlan && selectedPlan.tier !== "free" && (
                   <Card size="sm">
                     <CardHeader>
                       <CardDescription className="text-xs uppercase tracking-wide">
-                        Infrastructure
+                        Credits
                       </CardDescription>
                       <p className="font-medium text-foreground">
-                        {selectedServer.vcpu} vCPU, {selectedServer.ramGb} GB RAM
+                        {selectedPlan.creditsPerPeriod.toLocaleString()} / mo
                       </p>
                     </CardHeader>
                   </Card>
