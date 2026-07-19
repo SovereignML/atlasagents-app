@@ -3,6 +3,10 @@
 Node + Postgres installed directly on a VPS, with the Next.js standalone
 server managed by **pm2** or **systemd**.
 
+> For a step-by-step **clean-database → live** narrative (secrets, seeding,
+> admin, TLS, cron, Stripe), see [`docs/guides/DEPLOY-CLEAN.md`](../docs/guides/DEPLOY-CLEAN.md).
+> This file is the terse runbook reference for the same bare-metal path.
+
 ## Env policy — read this once
 
 The app loads **exactly one env file: `.env` at the repo root**. Next.js'
