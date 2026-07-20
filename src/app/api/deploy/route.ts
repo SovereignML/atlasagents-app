@@ -17,7 +17,7 @@ import { provisionBot } from "@/lib/provisioner"
 import { describeVmError } from "@/lib/vm-provider"
 import { addPlanCredits } from "@/lib/wallet"
 import { creditGrantSchedule } from "@/lib/plan-period"
-import { getEffectiveTeam } from "@/lib/effective-user"
+import { getUserTeam } from "@/lib/team"
 import { createInstanceFromAgentFields } from "@/lib/agent-create"
 import { deploySchema } from "@/lib/validations"
 
@@ -38,17 +38,6 @@ async function handleDeploy(req: NextRequest) {
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
-
-  // Identity for this deploy — honors "act as customer": when a tenant admin is
-  // acting as a child team, the agent is owned by the child owner and lands in
-  // the child team (so funding / OpenRouter tenant-key / ACL resolve correctly),
-  // while the audit trail records the real tenant admin (actorUserId). For a
-  // normal deploy this is just the signed-in user + their active team.
-  const ctx = await getEffectiveTeam()
-  if (!ctx) {
-    return NextResponse.json({ error: "No active team" }, { status: 403 })
-  }
-  const { effectiveUserId, actorUserId, teamId } = ctx
 
   const body = await req.json().catch(() => null)
   const parsed = deploySchema.safeParse(body)
@@ -77,6 +66,10 @@ async function handleDeploy(req: NextRequest) {
     return NextResponse.json({ error: "Plan has no server configuration" }, { status: 400 })
   }
 
+  // #region agent log
+  fetch('http://127.0.0.1:7305/ingest/880804f1-30d2-40e6-a578-5c94bee7e97e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'52ccd5'},body:JSON.stringify({sessionId:'52ccd5',runId:'pre-fix-2',hypothesisId:'G,restart',location:'src/app/api/deploy/route.ts:handleDeploy',message:'deploy request branch',data:{planSlug,tier:planConfig.tier,regionSlug,serverConfigSlug:planConfig.serverConfigSlug,stripeConfigured:isStripeConfigured(),devBypass:isDevBypassAllowed()},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+
   // ── Agent config parsing ──────────────────────────────────────────
   let parsedAgentConfig: ReturnType<typeof parseAgentConfig> | null = null
   if (agentConfigInput) {
@@ -94,11 +87,17 @@ async function handleDeploy(req: NextRequest) {
       parsedAgentConfig?.ok && parsedAgentConfig.data.runtime === "hermes"
         ? "hermes"
         : "openclaw"
-    const usage = await getFreeTierUsage(effectiveUserId)
+    const usage = await getFreeTierUsage(session.user.id)
     const blocked = checkFreeDeployAllowed(usage, runtime)
     if (blocked) {
       return NextResponse.json(blocked.body, { status: blocked.status })
     }
+  }
+
+  // Resolve the active team — agents and SSH keys are team-scoped.
+  const team = await getUserTeam(session.user.id)
+  if (!team) {
+    return NextResponse.json({ error: "No active team" }, { status: 403 })
   }
 
   // ── SSH key ───────────────────────────────────────────────────────
@@ -110,7 +109,7 @@ async function handleDeploy(req: NextRequest) {
     const fp = computeSshFingerprint(sshPublicKey)
     // SSH keys are shared per team; dedupe the fingerprint within the team.
     const existing = await db.query.sshKeys.findFirst({
-      where: and(eq(sshKeys.fingerprint, fp), eq(sshKeys.teamId, teamId)),
+      where: and(eq(sshKeys.fingerprint, fp), eq(sshKeys.teamId, team.teamId)),
     })
     if (existing) {
       sshKeyId = existing.id
@@ -118,8 +117,8 @@ async function handleDeploy(req: NextRequest) {
       const [created] = await db
         .insert(sshKeys)
         .values({
-          teamId,
-          userId: effectiveUserId,
+          teamId: team.teamId,
+          userId: session.user.id,
           name: `key-${fp.slice(7, 19)}`,
           publicKey: sshPublicKey.trim(),
           fingerprint: fp,
@@ -131,9 +130,8 @@ async function handleDeploy(req: NextRequest) {
 
   // ── Resolve infra + create the pending instance (shared with restore) ─
   const created = await createInstanceFromAgentFields({
-    userId: effectiveUserId,
-    actorUserId,
-    teamId,
+    userId: session.user.id,
+    teamId: team.teamId,
     name,
     agentConfig: parsedAgentConfig?.ok ? parsedAgentConfig.data : null,
     planSlug,
@@ -146,12 +144,12 @@ async function handleDeploy(req: NextRequest) {
   if (!created.ok) {
     return NextResponse.json({ error: created.error }, { status: created.status })
   }
-  const { instance, dbPlan } = created
+  const { instance, serverConfig, dbPlan } = created
 
   // ── Free tier: bypass Stripe, auto-provision ──────────────────────
   if (planConfig.tier === "free") {
     const instanceId = instance.id
-    const userId = effectiveUserId
+    const userId = session.user.id
 
     ;(async () => {
       try {
@@ -212,21 +210,21 @@ async function handleDeploy(req: NextRequest) {
   // ── Paid tier: Stripe Checkout ────────────────────────────────────
   if (isStripeConfigured()) {
     const userRow = await db.query.users.findFirst({
-      where: eq(users.id, effectiveUserId),
-      columns: { stripeCustomerId: true, email: true },
+      where: eq(users.id, session.user.id),
+      columns: { stripeCustomerId: true },
     })
     let stripeCustomerId = userRow?.stripeCustomerId
 
     if (!stripeCustomerId) {
       const customer = await stripe.customers.create({
-        email: userRow?.email ?? undefined,
-        metadata: { userId: effectiveUserId },
+        email: session.user.email ?? undefined,
+        metadata: { userId: session.user.id },
       })
       stripeCustomerId = customer.id
       await db
         .update(users)
         .set({ stripeCustomerId })
-        .where(eq(users.id, effectiveUserId))
+        .where(eq(users.id, session.user.id))
     }
 
     const unitAmount = planUnitAmountCents(planConfig, billingInterval)
@@ -241,7 +239,7 @@ async function handleDeploy(req: NextRequest) {
             currency: "usd",
             product_data: {
               name: `${BRANDING.name} ${planConfig.name} Plan`,
-              description: `${planConfig.creditsPerPeriod.toLocaleString()} credits/${billingInterval === "year" ? "yr" : "mo"}`,
+              description: `${serverConfig.vcpu} vCPU, ${serverConfig.ramGb} GB RAM, ${serverConfig.storageGb} GB storage · ${planConfig.creditsPerPeriod.toLocaleString()} credits/${billingInterval === "year" ? "yr" : "mo"}`,
             },
             unit_amount: unitAmount,
             recurring: {
@@ -253,7 +251,7 @@ async function handleDeploy(req: NextRequest) {
       ],
       metadata: {
         instanceId: instance.id,
-        userId: effectiveUserId,
+        userId: session.user.id,
         planSlug: planConfig.slug,
         interval: billingInterval,
       },
@@ -274,7 +272,7 @@ async function handleDeploy(req: NextRequest) {
 
   // ── Dev mode: skip Stripe, auto-activate ──────────────────────────
   const instanceId = instance.id
-  const userId = effectiveUserId
+  const userId = session.user.id
 
   ;(async () => {
     try {

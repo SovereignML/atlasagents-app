@@ -114,15 +114,8 @@ export default async function BillingPage() {
     db.query.subscriptions.findMany({
       where: eq(subscriptions.userId, userId),
       with: {
-        // Scope every nested relation to the columns this page actually reads.
-        // `instance` is a very wide table; selecting it (plus serverConfig +
-        // region) whole makes Drizzle build a JSON row function that exceeds
-        // Postgres's 100-argument-per-function cap. Region is unused here.
-        plan: { columns: { creditsPerPeriod: true, name: true, slug: true } },
-        instance: {
-          columns: { id: true, name: true, status: true },
-          with: { serverConfig: { columns: { priceMonthly: true } } },
-        },
+        plan: true,
+        instance: { with: { serverConfig: true, region: true } },
       },
       orderBy: desc(subscriptions.createdAt),
     }),
@@ -278,7 +271,8 @@ export default async function BillingPage() {
                   className="hover:text-foreground"
                 >
                   {sub.instance.name}
-                </Link>
+                </Link>{" "}
+                · {sub.instance.serverConfig.label}
               </p>
             ) : null}
             {sub.currentPeriodEnd && (

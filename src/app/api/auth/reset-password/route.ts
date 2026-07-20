@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 import { db, users, verificationTokens, eq, and } from "@/db"
 import { hashPassword } from "@/lib/password"
 import { rateLimit } from "@/lib/rate-limit"
-import { clientIp } from "@/lib/client-ip"
 import crypto from "crypto"
 
 export async function POST(request: Request) {
@@ -18,7 +17,7 @@ export async function POST(request: Request) {
 
     // Throttle token guessing before any DB work: per-email (an attacker who
     // knows the address can't brute-force the token) and per-IP.
-    const ip = clientIp(request.headers)
+    const ip = request.headers.get("x-forwarded-for") || "unknown"
     if (
       !(await rateLimit(`reset-password:${email.toLowerCase()}`, 10, 15 * 60 * 1000)) ||
       !(await rateLimit(`reset-password-ip:${ip}`, 30, 15 * 60 * 1000))

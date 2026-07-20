@@ -45,20 +45,20 @@ interface PhaseDef {
 const VPS_PHASES: PhaseDef[] = [
   {
     id: "provision",
-    title: "Provision agent",
-    description: "Prepare your agent.",
+    title: "Provision server",
+    description: "Create the VM in your selected cloud region.",
     stages: [
-      { stage: "create_vm", enterLog: "Creating VM", title: "Prepare agent", description: "Preparing your agent." },
-      { stage: "wait_boot", enterLog: "Waiting for boot", title: "Boot agent", description: "Booting your agent." },
+      { stage: "create_vm", enterLog: "Creating VM", title: "Create server", description: "Creating your VM in the cloud region you selected." },
+      { stage: "wait_boot", enterLog: "Waiting for boot", title: "Boot server", description: "Waiting for the server to finish booting." },
     ],
   },
   {
     id: "connect",
     title: "Connect & bootstrap",
-    description: "Establish a secure connection and prepare the environment.",
+    description: "Connect over SSH and prepare the server environment.",
     stages: [
-      { stage: "waiting_ssh", enterLog: "Waiting for SSH", title: "Connect", description: "Establishing a secure connection." },
-      { stage: "bootstrap", enterLog: "Bootstrapping server", title: "Bootstrap", description: "Setting up the environment." },
+      { stage: "waiting_ssh", enterLog: "Waiting for SSH", title: "Connect over SSH", description: "Connecting to the server over SSH." },
+      { stage: "bootstrap", enterLog: "Bootstrapping server", title: "Bootstrap server", description: "Setting up the server environment." },
     ],
   },
   {
@@ -74,7 +74,7 @@ const VPS_PHASES: PhaseDef[] = [
     title: "Start service",
     description: "Install and start the agent gateway, then verify health.",
     stages: [
-      { stage: "installing_service", enterLog: "systemd service active", title: "Install service", description: "Installing services." },
+      { stage: "installing_service", enterLog: "systemd service active", title: "Install service", description: "Installing services (Caddy + systemd)." },
       { stage: "starting_service", enterLog: "Gateway port listening", title: "Start gateway", description: "Starting the agent gateway." },
       { stage: "health_check", enterLog: "HTTP health check passed", title: "Health check", description: "Verifying the gateway is responding." },
     ],

@@ -1,5 +1,4 @@
 import { db, eq, instances, subscriptions } from "@/db"
-import { requireAdminPage } from "@/lib/admin-guard"
 import {
   Card,
   CardContent,
@@ -26,7 +25,6 @@ import {
 } from "@/components/ui/table"
 
 export default async function AdminRevenuePage() {
-  await requireAdminPage()
   const [activeSubs, runningInstances] = await Promise.all([
     db.query.subscriptions.findMany({
       where: eq(subscriptions.status, "active"),

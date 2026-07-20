@@ -13,7 +13,7 @@
 // also ratchets the cap down to the falling balance between funding events.
 
 import type { InferSelectModel } from "drizzle-orm"
-import { db, pool, instances, eq, and, isNotNull, sql } from "@/db"
+import { db, instances, eq, and, isNotNull, sql } from "@/db"
 import { getRuntimeKey, updateRuntimeKey } from "@/lib/openrouter-provisioning"
 import { deductWithinTx, isAboveMinimum, getWalletCredits } from "@/lib/wallet"
 import { maybeWarnLowBalance } from "@/lib/low-balance"
@@ -53,54 +53,6 @@ export type UsageSyncReport = {
   /** Instances we enforced against (key disabled + bot paused). */
   enforced: number
   errors: string[]
-  /** True when a concurrent run already held the lock and this call did no work. */
-  skipped?: boolean
-}
-
-/** Fleet-wide advisory-lock key serializing usage-sync runs ("ORUS" in hex). */
-const USAGE_SYNC_LOCK_KEY = 0x4f_52_55_53
-
-/**
- * Serialized entry point for the usage-sync cron. The endpoint fires on a timer
- * and a slow run (many instances × one OpenRouter network call each) can overlap
- * the next — the curl `--max-time` aborts the client, not this handler. Two
- * overlapping runs would read the same pointer and double-charge the wallet for
- * the same real usage. A fleet-wide Postgres advisory lock makes an overlapping
- * run a no-op (returns `skipped: true`). Uses a dedicated session client so the
- * lock is tied to a connection we control for the whole run.
- */
-export async function runOpenRouterUsageSyncLocked(): Promise<UsageSyncReport> {
-  const client = await pool.connect()
-  let locked = false
-  try {
-    const res = await client.query<{ ok: boolean }>(
-      "SELECT pg_try_advisory_lock($1) AS ok",
-      [USAGE_SYNC_LOCK_KEY],
-    )
-    locked = res.rows[0]?.ok === true
-    if (!locked) {
-      return {
-        scanned: 0,
-        charged: 0,
-        creditsDeducted: 0,
-        enforced: 0,
-        errors: [],
-        skipped: true,
-      }
-    }
-    return await runOpenRouterUsageSync()
-  } finally {
-    if (locked) {
-      try {
-        await client.query("SELECT pg_advisory_unlock($1)", [
-          USAGE_SYNC_LOCK_KEY,
-        ])
-      } catch {
-        // session ending / lock already released — harmless
-      }
-    }
-    client.release()
-  }
 }
 
 export async function runOpenRouterUsageSync(): Promise<UsageSyncReport> {
@@ -127,16 +79,27 @@ export async function runOpenRouterUsageSync(): Promise<UsageSyncReport> {
     ),
   })
 
+  // Reseller agents under a white-label tenant mint their runtime key against
+  // the TENANT's OpenRouter account, which the platform provisioning key can't
+  // read. Skip them here (and the tenant carries their LLM cost). See
+  // getOrMintInstanceOpenRouterKey in src/lib/provisioner.ts.
+  const tenantKeyedTeams = new Set<string>()
+  {
+    const res = await db.execute(sql`
+      SELECT child.id AS id
+      FROM "Team" child
+      JOIN "TenantConfig" tc ON tc."teamId" = child."parentTeamId"
+      WHERE tc."openRouterProvisioningKeyEnc" IS NOT NULL
+    `)
+    for (const r of res.rows as { id: string }[]) tenantKeyedTeams.add(r.id)
+  }
+
   for (const row of rows) {
     // Skip BYOS own-key instances — they spend on the customer's own key and
     // never draw on our wallet.
     if (row.byosLlmMode === "own_key" || !row.openRouterKeyId) continue
-    // Skip reseller agents whose key lives on a tenant's OpenRouter account — the
-    // platform provisioning key can't read them and the tenant carries the cost.
-    // `tenantKeyed` is stamped at mint time (getOrMintInstanceOpenRouterKey) and
-    // correctly covers a tenant's own-team agents too, unlike the old child-only
-    // JOIN which left those to 404 on every run.
-    if (row.tenantKeyed) continue
+    // Skip reseller agents on a tenant's own OpenRouter account.
+    if (tenantKeyedTeams.has(row.teamId)) continue
     report.scanned++
 
     let state: Awaited<ReturnType<typeof getRuntimeKey>>
@@ -175,34 +138,19 @@ export async function runOpenRouterUsageSync(): Promise<UsageSyncReport> {
       const credits = openRouterUsdToCredits(delta)
       if (credits > 0) {
         const charged = await db.transaction(async (tx) => {
-          // Re-read the pointer under a row lock (SELECT … FOR UPDATE) and
-          // recompute the delta INSIDE the tx. The advisory lock already
-          // serializes runs; this makes exactly-once hold even if a future
-          // caller bypasses the wrapper, so two txs can't both deduct a delta
-          // computed from the same stale pointer. The snapshot `credits > 0`
-          // above stays as a cheap pre-filter; this recompute is authoritative.
-          const [fresh] = await tx
-            .select({ usd: instances.openRouterUsageUsd })
-            .from(instances)
-            .where(eq(instances.id, row.id))
-            .for("update")
-          const freshPrev = fresh?.usd ?? 0
-          const freshDelta = state.usageUsd - freshPrev
-          const freshCredits = openRouterUsdToCredits(freshDelta)
-          if (freshCredits <= 0) return 0
           const result = await deductWithinTx(
             tx,
             row.userId,
-            freshCredits,
+            credits,
             "api_usage",
             row.id,
-            `OpenRouter usage: $${freshDelta.toFixed(6)}`,
+            `OpenRouter usage: $${delta.toFixed(6)}`,
             { allowBelowMinimum: true },
           )
-          const c = freshCredits - result.shortfall
+          const c = credits - result.shortfall
           // USD these charged credits cover (inverse of the markup).
-          const pointer = freshPrev + (c / 100) * OPENROUTER_MARGIN
-          if (pointer !== freshPrev) {
+          const pointer = prev + (c / 100) * OPENROUTER_MARGIN
+          if (pointer !== prev) {
             await tx
               .update(instances)
               .set({ openRouterUsageUsd: pointer })
@@ -210,14 +158,9 @@ export async function runOpenRouterUsageSync(): Promise<UsageSyncReport> {
           }
           return c
         })
-        // Only count instances we actually deducted from — the in-tx recompute
-        // can return 0 (pointer already advanced by a concurrent run, or the
-        // wallet was fully drained), which must not inflate `charged`.
-        if (charged > 0) {
-          report.charged++
-          report.creditsDeducted += charged
-          chargedUsers.add(row.userId)
-        }
+        report.charged++
+        report.creditsDeducted += charged
+        if (charged > 0) chargedUsers.add(row.userId)
       }
       // credits === 0: sub-credit delta — leave the pointer so it accumulates.
     }

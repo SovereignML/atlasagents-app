@@ -10,11 +10,7 @@ import {
   AGENT_TOOLS,
   getTool,
   toolSupportedOn,
-  expandAutoEnabledTools,
 } from "@/configs/agent-tools"
-import { N8N_PATH_PREFIX, N8N_SYSTEM_USER } from "@/lib/runtimes/n8n-service"
-import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
-import { decryptSecret } from "@/lib/crypto-secret"
 import type { RuntimeId } from "@/lib/runtimes"
 
 /** GET — enabled tools + the full catalog + this agent's runtime (for availability). */
@@ -40,33 +36,10 @@ export async function GET(
     return NextResponse.json({ error: "Instance not found" }, { status: 404 })
   }
 
-  // n8n access (URL + seeded owner login) — surfaced once the tool is enabled so
-  // the user can open the editor. Only decrypt/return when the owner password has
-  // actually been minted (first successful enable).
-  const enabled = instance.enabledTools ?? []
-  let n8n: { url: string; ownerEmail: string; ownerPassword: string } | null =
-    null
-  if (enabled.includes("n8n") && instance.n8nOwnerPasswordEnc) {
-    const base = buildPublicGatewayUrl({
-      domain: instance.domain,
-      managedSubdomain: instance.managedSubdomain,
-      tlsStatus: instance.domain ? instance.tlsStatus : null,
-      ipAddress: instance.ipAddress,
-    })?.url
-    if (base) {
-      n8n = {
-        url: `${base.replace(/\/$/, "")}${N8N_PATH_PREFIX}/`,
-        ownerEmail: `${N8N_SYSTEM_USER}+${instance.id.slice(0, 8)}@sovereignml.local`,
-        ownerPassword: decryptSecret(instance.n8nOwnerPasswordEnc),
-      }
-    }
-  }
-
   return NextResponse.json({
-    enabledTools: enabled,
+    enabledTools: instance.enabledTools ?? [],
     catalog: AGENT_TOOLS,
     runtime: instance.runtime,
-    n8n,
   })
 }
 
@@ -93,9 +66,8 @@ export async function PATCH(
       { status: 400 },
     )
   }
-  // De-dupe while preserving order, then pull in any implied tools (e.g. n8n
-  // auto-enables browser, which the agent uses to drive the n8n UI).
-  const ids = expandAutoEnabledTools([...new Set(enabledTools as string[])])
+  // De-dupe while preserving order.
+  const ids = [...new Set(enabledTools as string[])]
 
   const isAdmin = (session.user as { role?: string }).role === "admin"
   const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id

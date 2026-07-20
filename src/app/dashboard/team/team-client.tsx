@@ -81,7 +81,7 @@ export function TeamClient({
   activeTeamId,
   embedded = false,
 }: {
-  team: { id: string; name: string; seatLimit: number | null; planLabel: string }
+  team: { id: string; name: string; seatLimit: number; planLabel: string }
   myRole: TeamRole
   members: Member[]
   invites: Invite[]
@@ -106,14 +106,6 @@ export function TeamClient({
     myRole === "owner" ? ["admin", "developer", "viewer"] : ["developer", "viewer"]
 
   const seatsUsed = members.length + invites.length
-  // seatLimit is null when the plan grants unlimited seats (Enterprise).
-  const unlimitedSeats = team.seatLimit == null
-  const atSeatLimit = !unlimitedSeats && seatsUsed >= team.seatLimit!
-  const seatLimitLabel = unlimitedSeats ? "Unlimited" : String(team.seatLimit)
-  const seatPct =
-    unlimitedSeats || team.seatLimit! <= 0
-      ? 0
-      : Math.min(100, (seatsUsed / team.seatLimit!) * 100)
 
   function refresh() {
     router.refresh()
@@ -238,7 +230,7 @@ export function TeamClient({
             <Dialog open={showInvite} onOpenChange={setShowInvite}>
               <DialogTrigger
                 render={
-                  <Button variant="gradient" size="pill" disabled={atSeatLimit}>
+                  <Button variant="gradient" size="pill" disabled={seatsUsed >= team.seatLimit}>
                     <Plus data-icon="inline-start" />
                     Invite Member
                   </Button>
@@ -318,9 +310,7 @@ export function TeamClient({
             <CardTitle className="font-mono text-2xl">{team.planLabel}</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-muted-foreground">
-              {unlimitedSeats ? "Unlimited seats" : `Up to ${team.seatLimit} seats`}
-            </p>
+            <p className="text-xs text-muted-foreground">Up to {team.seatLimit} seats</p>
           </CardContent>
         </Card>
         <Card size="sm">
@@ -328,14 +318,16 @@ export function TeamClient({
             <CardDescription className="text-xs">Seats Used</CardDescription>
             <CardTitle className="font-mono text-2xl text-foreground">
               {seatsUsed}{" "}
-              <span className="text-muted-foreground">/ {seatLimitLabel}</span>
+              <span className="text-muted-foreground">/ {team.seatLimit}</span>
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
               <div
                 className="h-full rounded-full bg-primary"
-                style={{ width: `${seatPct}%` }}
+                style={{
+                  width: `${Math.min(100, team.seatLimit > 0 ? (seatsUsed / team.seatLimit) * 100 : 0)}%`,
+                }}
               />
             </div>
           </CardContent>

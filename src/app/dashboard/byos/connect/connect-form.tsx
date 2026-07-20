@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Check, Copy, KeyRound, Wallet } from "lucide-react"
@@ -17,12 +17,6 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { AGENT_CATEGORIES } from "@/configs/agent-categories"
-import {
-  BYO_LLM_PROVIDERS,
-  getByoProvider,
-  requiresHermes,
-  type ByoProviderId,
-} from "@/configs/llm-providers"
 import { cn } from "@/lib/utils"
 
 type LlmMode = "managed_credits" | "own_key"
@@ -79,14 +73,6 @@ export function ByosConnectForm({
   const [user, setUser] = useState("root")
   const [llmMode, setLlmMode] = useState<LlmMode>("managed_credits")
   const [ownApiKey, setOwnApiKey] = useState("")
-  const [ownProvider, setOwnProvider] = useState<ByoProviderId>("openrouter")
-  const [ownBaseUrl, setOwnBaseUrl] = useState("")
-  const [ownModel, setOwnModel] = useState("")
-  // Optional user-supplied fallback (their OWN second key — never our credits).
-  const [fallbackEnabled, setFallbackEnabled] = useState(false)
-  const [fallbackProvider, setFallbackProvider] = useState<ByoProviderId>("openrouter")
-  const [fallbackApiKey, setFallbackApiKey] = useState("")
-  const [fallbackBaseUrl, setFallbackBaseUrl] = useState("")
 
   // Project step
   const [name, setName] = useState("")
@@ -108,33 +94,10 @@ export function ByosConnectForm({
     ? `mkdir -p ~/.ssh && echo '${fleetPublicKey}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`
     : ""
 
-  // A non-OpenRouter direct key (primary or fallback) only runs on Hermes —
-  // OpenClaw's package is hardwired to OpenRouter. When the user picks one, the
-  // runtime is forced to Hermes and OpenClaw is disabled on the agent step.
-  const ownDef = getByoProvider(ownProvider)
-  const forcesHermes =
-    llmMode === "own_key" &&
-    (requiresHermes(ownProvider) ||
-      (fallbackEnabled && requiresHermes(fallbackProvider)))
-
-  useEffect(() => {
-    if (forcesHermes && runtime !== "hermes") setRuntime("hermes")
-  }, [forcesHermes, runtime])
-
-  // Server-step completeness for the own-key path.
-  const ownKeyReady =
-    llmMode !== "own_key" ||
-    (ownApiKey.trim().length > 0 &&
-      (ownProvider !== "custom" || ownBaseUrl.trim().length > 0) &&
-      (!requiresHermes(ownProvider) || ownModel.trim().length > 0) &&
-      (!fallbackEnabled ||
-        (fallbackApiKey.trim().length > 0 &&
-          (fallbackProvider !== "custom" || fallbackBaseUrl.trim().length > 0))))
-
   const canNext = (() => {
     switch (step) {
       case "server":
-        return host.trim().length > 0 && ownKeyReady
+        return host.trim().length > 0 && (llmMode !== "own_key" || ownApiKey.trim().length > 0)
       case "agent":
         return true
       case "project":
@@ -168,20 +131,8 @@ export function ByosConnectForm({
     if (!name.trim()) return toast.error("Give your agent a name")
     if (!host.trim()) return toast.error("Enter your server's host / IP")
     if (!useCase) return toast.error("Pick a use case")
-    if (llmMode === "own_key") {
-      if (!ownApiKey.trim())
-        return toast.error("Enter your API key, or switch to our credits")
-      if (ownProvider === "custom" && !ownBaseUrl.trim())
-        return toast.error("Enter the base URL for your custom provider")
-      if (requiresHermes(ownProvider) && !ownModel.trim())
-        return toast.error(`Enter the model to use with your ${ownDef?.label ?? ownProvider} key`)
-      if (fallbackEnabled) {
-        if (!fallbackApiKey.trim())
-          return toast.error("Enter your fallback key, or remove the fallback")
-        if (fallbackProvider === "custom" && !fallbackBaseUrl.trim())
-          return toast.error("Enter the base URL for your custom fallback provider")
-      }
-    }
+    if (llmMode === "own_key" && !ownApiKey.trim())
+      return toast.error("Enter your API key, or switch to our credits")
 
     setSubmitting(true)
     try {
@@ -196,23 +147,6 @@ export function ByosConnectForm({
           billingInterval: interval,
           llmMode,
           ownApiKey: llmMode === "own_key" ? ownApiKey.trim() : undefined,
-          ownProvider: llmMode === "own_key" ? ownProvider : undefined,
-          ownBaseUrl:
-            llmMode === "own_key" && ownProvider === "custom"
-              ? ownBaseUrl.trim()
-              : undefined,
-          ownModel:
-            llmMode === "own_key" && requiresHermes(ownProvider)
-              ? ownModel.trim()
-              : undefined,
-          fallbackProvider:
-            llmMode === "own_key" && fallbackEnabled ? fallbackProvider : undefined,
-          fallbackApiKey:
-            llmMode === "own_key" && fallbackEnabled ? fallbackApiKey.trim() : undefined,
-          fallbackBaseUrl:
-            llmMode === "own_key" && fallbackEnabled && fallbackProvider === "custom"
-              ? fallbackBaseUrl.trim()
-              : undefined,
           agentConfig: {
             use_case: useCase,
             target_user: "",
@@ -380,7 +314,7 @@ export function ByosConnectForm({
                     )}
                   >
                     <div className="flex items-center gap-2 font-medium text-foreground">
-                      <Wallet className="size-4" /> Use SovereignML Credits
+                      <Wallet className="size-4" /> Use our OpenRouter credits
                     </div>
                     <p className="mt-1.5 text-sm text-muted-foreground">
                       Includes 100 starter credits, then pay-as-you-go from your wallet. We
@@ -405,168 +339,20 @@ export function ByosConnectForm({
                   </ToggleGroupItem>
                 </ToggleGroup>
                 {llmMode === "own_key" && (
-                  <div className="space-y-4 rounded-lg border bg-muted/30 p-4">
-                    <Field>
-                      <FieldLabel>Where is your key from?</FieldLabel>
-                      <ToggleGroup
-                        value={[ownProvider]}
-                        onValueChange={(v) => {
-                          if (!v[0]) return
-                          const next = v[0] as ByoProviderId
-                          setOwnProvider(next)
-                          if (requiresHermes(next)) setRuntime("hermes")
-                        }}
-                        className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3"
-                        spacing={1}
-                      >
-                        {BYO_LLM_PROVIDERS.map((p) => (
-                          <ToggleGroupItem
-                            key={p.id}
-                            value={p.id}
-                            variant="outline"
-                            className={cn("h-auto justify-start p-2.5 text-left", SELECTED_GLOW)}
-                          >
-                            <span className="text-sm font-medium text-foreground">{p.label}</span>
-                          </ToggleGroupItem>
-                        ))}
-                      </ToggleGroup>
-                      {requiresHermes(ownProvider) && (
-                        <FieldDescription>
-                          Direct provider keys run on the Hermes runtime — we&apos;ve set
-                          your runtime to Hermes.
-                        </FieldDescription>
-                      )}
-                    </Field>
-
-                    {ownProvider === "custom" && (
-                      <Field>
-                        <FieldLabel htmlFor="byos-base-url">Base URL</FieldLabel>
-                        <Input
-                          id="byos-base-url"
-                          placeholder="https://api.example.com/v1"
-                          value={ownBaseUrl}
-                          onChange={(e) => setOwnBaseUrl(e.target.value)}
-                        />
-                        <FieldDescription>
-                          An OpenAI-compatible endpoint (must be a public https URL).
-                        </FieldDescription>
-                      </Field>
-                    )}
-
-                    <Field>
-                      <FieldLabel htmlFor="byos-key">Your API key</FieldLabel>
-                      <Input
-                        id="byos-key"
-                        type="password"
-                        placeholder={ownDef?.apiKeyPlaceholder ?? "your-api-key"}
-                        value={ownApiKey}
-                        onChange={(e) => setOwnApiKey(e.target.value)}
-                      />
-                      <FieldDescription>
-                        Stored encrypted at rest and only written to your server&apos;s
-                        runtime config.
-                      </FieldDescription>
-                    </Field>
-
-                    {requiresHermes(ownProvider) && (
-                      <Field>
-                        <FieldLabel htmlFor="byos-model">Model</FieldLabel>
-                        <Input
-                          id="byos-model"
-                          placeholder="e.g. gpt-5.5"
-                          value={ownModel}
-                          onChange={(e) => setOwnModel(e.target.value)}
-                        />
-                        <FieldDescription>
-                          The exact model id for your provider — we can&apos;t default it
-                          for a direct provider.
-                        </FieldDescription>
-                      </Field>
-                    )}
-
-                    {/* Optional user-supplied fallback — the user's OWN second key. */}
-                    {!fallbackEnabled ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setFallbackEnabled(true)}
-                      >
-                        + Add a fallback key
-                      </Button>
-                    ) : (
-                      <div className="space-y-4 rounded-md border border-dashed p-3">
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm font-medium text-foreground">Fallback key</p>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setFallbackEnabled(false)}
-                          >
-                            Remove
-                          </Button>
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          Your own second key. If your primary key fails, switch to it from
-                          the agent&apos;s page — we never fall back to our credits.
-                        </p>
-                        <Field>
-                          <FieldLabel>Fallback provider</FieldLabel>
-                          <ToggleGroup
-                            value={[fallbackProvider]}
-                            onValueChange={(v) => {
-                              if (!v[0]) return
-                              const next = v[0] as ByoProviderId
-                              setFallbackProvider(next)
-                              if (requiresHermes(next)) setRuntime("hermes")
-                            }}
-                            className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3"
-                            spacing={1}
-                          >
-                            {BYO_LLM_PROVIDERS.map((p) => (
-                              <ToggleGroupItem
-                                key={p.id}
-                                value={p.id}
-                                variant="outline"
-                                className={cn(
-                                  "h-auto justify-start p-2.5 text-left",
-                                  SELECTED_GLOW
-                                )}
-                              >
-                                <span className="text-sm font-medium text-foreground">
-                                  {p.label}
-                                </span>
-                              </ToggleGroupItem>
-                            ))}
-                          </ToggleGroup>
-                        </Field>
-                        {fallbackProvider === "custom" && (
-                          <Field>
-                            <FieldLabel htmlFor="byos-fallback-base-url">Base URL</FieldLabel>
-                            <Input
-                              id="byos-fallback-base-url"
-                              placeholder="https://api.example.com/v1"
-                              value={fallbackBaseUrl}
-                              onChange={(e) => setFallbackBaseUrl(e.target.value)}
-                            />
-                          </Field>
-                        )}
-                        <Field>
-                          <FieldLabel htmlFor="byos-fallback-key">Fallback API key</FieldLabel>
-                          <Input
-                            id="byos-fallback-key"
-                            type="password"
-                            placeholder={
-                              getByoProvider(fallbackProvider)?.apiKeyPlaceholder ?? "your-api-key"
-                            }
-                            value={fallbackApiKey}
-                            onChange={(e) => setFallbackApiKey(e.target.value)}
-                          />
-                        </Field>
-                      </div>
-                    )}
-                  </div>
+                  <Field>
+                    <FieldLabel htmlFor="byos-key">Your API key</FieldLabel>
+                    <Input
+                      id="byos-key"
+                      type="password"
+                      placeholder="sk-or-..."
+                      value={ownApiKey}
+                      onChange={(e) => setOwnApiKey(e.target.value)}
+                    />
+                    <FieldDescription>
+                      Stored encrypted at rest and only written to your server&apos;s
+                      runtime config.
+                    </FieldDescription>
+                  </Field>
                 )}
               </div>
             </div>
@@ -587,42 +373,25 @@ export function ByosConnectForm({
                 </p>
                 <ToggleGroup
                   value={[runtime]}
-                  onValueChange={(v) => {
-                    if (!v[0]) return
-                    // A direct-provider key forces Hermes — ignore attempts to
-                    // switch back to OpenClaw.
-                    if (forcesHermes && v[0] !== "hermes") return
-                    setRuntime(v[0] as Runtime)
-                  }}
+                  onValueChange={(v) => v[0] && setRuntime(v[0] as Runtime)}
                   className="grid w-full grid-cols-1 gap-2 md:grid-cols-2"
                   spacing={1}
                 >
-                  {RUNTIME_OPTIONS.map((r) => {
-                    const disabled = forcesHermes && r.value !== "hermes"
-                    return (
-                      <ToggleGroupItem
-                        key={r.value}
-                        value={r.value}
-                        variant="outline"
-                        disabled={disabled}
-                        className={cn(
-                          "h-auto flex-col items-start whitespace-normal p-4 text-left",
-                          SELECTED_GLOW,
-                          disabled && "opacity-50"
-                        )}
-                      >
-                        <p className="text-sm font-medium text-foreground">{r.label}</p>
-                        <p className="text-xs text-muted-foreground">{r.hint}</p>
-                      </ToggleGroupItem>
-                    )
-                  })}
+                  {RUNTIME_OPTIONS.map((r) => (
+                    <ToggleGroupItem
+                      key={r.value}
+                      value={r.value}
+                      variant="outline"
+                      className={cn(
+                        "h-auto flex-col items-start whitespace-normal p-4 text-left",
+                        SELECTED_GLOW
+                      )}
+                    >
+                      <p className="text-sm font-medium text-foreground">{r.label}</p>
+                      <p className="text-xs text-muted-foreground">{r.hint}</p>
+                    </ToggleGroupItem>
+                  ))}
                 </ToggleGroup>
-                {forcesHermes && (
-                  <p className="text-xs text-muted-foreground">
-                    Your chosen key provider runs on Hermes, so OpenClaw isn&apos;t
-                    available for this agent.
-                  </p>
-                )}
                 {runtime === "hermes" && (
                   <p className="text-xs text-muted-foreground">
                     Hermes ships with the Open WebUI chat interface bundled. Your server must have
@@ -749,12 +518,11 @@ export function ByosConnectForm({
                     <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       {llmMode === "own_key" ? (
                         <>
-                          <KeyRound className="size-3.5" /> Your {ownDef?.label ?? "own"} key
-                          {fallbackEnabled ? " (+ fallback)" : ""}
+                          <KeyRound className="size-3.5" /> Your own API key
                         </>
                       ) : (
                         <>
-                          <Wallet className="size-3.5" /> SovereignML Credits
+                          <Wallet className="size-3.5" /> Our OpenRouter credits
                         </>
                       )}
                     </p>

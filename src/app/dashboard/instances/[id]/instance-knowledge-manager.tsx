@@ -109,7 +109,6 @@ export function KnowledgeManager({ instanceId }: { instanceId: string }) {
             <Button
               size="sm"
               variant={mode === "url" ? "default" : "outline"}
-              className="rounded-full"
               onClick={() => setMode("url")}
             >
               <Globe className="mr-1 size-3.5" /> URL
@@ -117,7 +116,6 @@ export function KnowledgeManager({ instanceId }: { instanceId: string }) {
             <Button
               size="sm"
               variant={mode === "text" ? "default" : "outline"}
-              className="rounded-full"
               onClick={() => setMode("text")}
             >
               <FileText className="mr-1 size-3.5" /> Text

@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { auth } from "@/auth"
-import { db, teams, teamBranding, eq } from "@/db"
+import { db, teams, eq } from "@/db"
 import { logAuditEvent } from "@/lib/audit"
-import { deleteCustomHostname, cfSaasConfigured } from "@/lib/cloudflare-saas"
 
 const schema = z.object({
   whiteLabelEnabled: z.boolean(),
@@ -51,39 +50,6 @@ export async function PATCH(
     .update(teams)
     .set({ whiteLabelEnabled })
     .where(eq(teams.id, teamId))
-
-  // Revocation teardown: the entitlement contract (white-label.ts) is that
-  // flipping the flag off stops cert renewal immediately. Tear down the team's
-  // Cloudflare-for-SaaS custom hostname so its DV cert stops auto-renewing and
-  // the domain no longer resolves to a tenant. Best-effort — a CF failure must
-  // not block the toggle (the branding row is cleared regardless; a reconciler
-  // sweep can catch a stranded CF hostname). Stored config is preserved apart
-  // from the domain fields, so re-enabling re-registers cleanly.
-  if (!whiteLabelEnabled) {
-    const branding = await db.query.teamBranding.findFirst({
-      where: eq(teamBranding.teamId, teamId),
-      columns: { cfCustomHostnameId: true },
-    })
-    if (branding?.cfCustomHostnameId && cfSaasConfigured()) {
-      try {
-        await deleteCustomHostname(branding.cfCustomHostnameId)
-      } catch (err) {
-        console.error(`[admin.whitelabel_toggle] CF hostname teardown failed for team ${teamId}:`, err)
-      }
-    }
-    if (branding) {
-      await db
-        .update(teamBranding)
-        .set({
-          cfCustomHostnameId: null,
-          customDomain: null,
-          domainVerifiedAt: null,
-          dnsStatus: null,
-          tlsStatus: null,
-        })
-        .where(eq(teamBranding.teamId, teamId))
-    }
-  }
 
   await logAuditEvent({
     userId: session.user.id,

@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
+import { Progress } from "@/components/ui/progress"
 import {
   Select,
   SelectContent,
@@ -244,6 +245,16 @@ export function InstancesFilter({ items: initialItems }: { items: Item[] }) {
     return list
   }, [items, q, status, sort])
 
+  // Highest daily cost among running agents, for relative usage bars.
+  const maxDailyCost = useMemo(
+    () =>
+      Math.max(
+        0.01,
+        ...items.filter((i) => i.status === "running").map((i) => i.priceMonthly / 30)
+      ),
+    [items]
+  )
+
   return (
     <>
       <div className="flex flex-wrap items-center gap-3">
@@ -263,7 +274,9 @@ export function InstancesFilter({ items: initialItems }: { items: Item[] }) {
               key={f.value}
               size="sm"
               variant={status === f.value ? "default" : "outline"}
-              className="rounded-full"
+              className={`h-auto rounded-full px-3.5 py-1.5 text-xs ${
+                status === f.value ? "" : "bg-secondary"
+              }`}
               onClick={() => setStatus(f.value)}
             >
               {f.label}
@@ -304,6 +317,7 @@ export function InstancesFilter({ items: initialItems }: { items: Item[] }) {
       ) : (
         <div className="flex flex-col gap-3.5">
           {filtered.map((instance) => {
+            const dailyCost = instance.priceMonthly / 30
             const isRunning = instance.status === "running"
             const canDelete = DELETABLE_STUCK_STATES.has(instance.status)
             const runtimeId = instance.runtime ?? "openclaw"
@@ -382,6 +396,39 @@ export function InstancesFilter({ items: initialItems }: { items: Item[] }) {
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── Footer: 3-up sub-tiles ── */}
+                <div className="mt-4 grid grid-cols-3 gap-3">
+                  <div className="rounded-[11px] border border-border bg-sidebar p-[13px_15px]">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+                      Server
+                    </p>
+                    <p className="mt-1 truncate text-sm text-foreground">{instance.serverLabel}</p>
+                  </div>
+                  <div className="rounded-[11px] border border-border bg-sidebar p-[13px_15px]">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+                      Specs
+                    </p>
+                    <p className="mt-1 truncate text-sm text-foreground">
+                      {instance.vcpu} vCPU · {instance.ramGb} GB
+                    </p>
+                  </div>
+                  <div className="rounded-[11px] border border-border bg-sidebar p-[13px_15px]">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+                      Cost / day
+                    </p>
+                    {isRunning ? (
+                      <div className="mt-1 space-y-1.5">
+                        <span className="font-mono text-sm text-foreground">
+                          ${dailyCost.toFixed(2)}
+                        </span>
+                        <Progress value={(dailyCost / maxDailyCost) * 100} />
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-sm text-muted-foreground">—</p>
                     )}
                   </div>
                 </div>

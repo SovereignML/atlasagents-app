@@ -13,7 +13,6 @@
 import { createHmac } from "node:crypto"
 import { decryptSecret } from "./crypto-secret"
 import { getTenantForTeam, getTenantConfig } from "./tenant"
-import { assertPublicHost } from "@/lib/net-guard"
 
 /** Everything needed to talk to one Chatwoot account/inbox via the API. */
 export type ChatwootConfig = {
@@ -22,9 +21,6 @@ export type ChatwootConfig = {
   accountId: string
   inboxId: string
   hmacToken: string | null
-  /** True when the base URL came from a tenant-admin (untrusted) config row,
-   * so `cwFetch` must SSRF-guard the host before each outbound request. */
-  tenantSourced?: boolean
 }
 
 /** Public config the live-chat widget needs (no secrets). */
@@ -77,46 +73,11 @@ export async function resolveChatwootForTeam(
           accountId: cfg.chatwootAccountId,
           inboxId: cfg.chatwootInboxId,
           hmacToken: cfg.chatwootHmacTokenEnc ? decryptSecret(cfg.chatwootHmacTokenEnc) : null,
-          tenantSourced: true,
         }
       }
     }
   }
   return platformChatwootConfig()
-}
-
-/**
- * A tenant's OWN Chatwoot config, or null — NEVER the platform fallback. Use
- * this for the reseller (tenant-admin) agent-facing surfaces: the support inbox
- * and conversation actions. `resolveChatwootForTeam`'s platform fallback is
- * correct for CUSTOMER ticket creation (graceful degradation), but on the
- * tenant-admin side it would point the reseller's inbox at the PLATFORM's
- * Chatwoot account — exposing (and letting them reply to / resolve) every
- * platform customer's conversations. A tenant without their own Chatwoot must
- * simply see an empty, unconfigured inbox.
- *
- * `tenantTeamId` is the tenant's own team id (the reseller), not a child team.
- */
-export async function resolveTenantChatwootOrNull(
-  tenantTeamId: string,
-): Promise<ChatwootConfig | null> {
-  const cfg = await getTenantConfig(tenantTeamId)
-  if (
-    cfg?.chatwootBaseUrl &&
-    cfg.chatwootApiTokenEnc &&
-    cfg.chatwootAccountId &&
-    cfg.chatwootInboxId
-  ) {
-    return {
-      baseUrl: cfg.chatwootBaseUrl.replace(/\/$/, ""),
-      apiToken: decryptSecret(cfg.chatwootApiTokenEnc),
-      accountId: cfg.chatwootAccountId,
-      inboxId: cfg.chatwootInboxId,
-      hmacToken: cfg.chatwootHmacTokenEnc ? decryptSecret(cfg.chatwootHmacTokenEnc) : null,
-      tenantSourced: true,
-    }
-  }
-  return null
 }
 
 /** Widget (public) config for a team: tenant's if set, else platform. */
@@ -160,13 +121,6 @@ type ContactInbox = { source_id: string; inbox?: { id: number } }
 type SearchContact = { id: number; email?: string | null; contact_inboxes?: ContactInbox[] }
 
 async function cwFetch(cfg: ChatwootConfig, path: string, init: RequestInit): Promise<unknown> {
-  if (cfg.tenantSourced) {
-    const url = new URL(cfg.baseUrl)
-    if (url.protocol !== "https:" && url.protocol !== "http:") {
-      throw new Error(`Chatwoot base URL has unsupported protocol: ${url.protocol}`)
-    }
-    await assertPublicHost(url.hostname)
-  }
   const res = await fetch(`${cfg.baseUrl}/api/v1/accounts/${cfg.accountId}${path}`, {
     ...init,
     // Fail fast: a slow/unreachable Chatwoot host must not hang the request

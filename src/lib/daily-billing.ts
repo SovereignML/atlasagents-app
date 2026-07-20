@@ -1,15 +1,4 @@
-import {
-  db,
-  instances,
-  walletTransactions,
-  warmVms,
-  and,
-  eq,
-  gt,
-  desc,
-  inArray,
-  sql,
-} from "@/db"
+import { db, instances, walletTransactions, and, eq, gt, desc, sql } from "@/db"
 import { deductWithinTx, depositWithinTx } from "@/lib/wallet"
 import type { InferSelectModel } from "drizzle-orm"
 import { accrueProviderUsage } from "@/lib/provider-billing"
@@ -30,21 +19,6 @@ export type DailyBillingReport = {
   alreadyBilled: number
   errors: string[]
   billingDay: string
-  /** Warm-pool compute accrued against provider budgets this run. */
-  pool: WarmPoolBillingReport
-}
-
-export type WarmPoolBillingReport = {
-  /** Live (unclaimed) pool VMs considered. */
-  processed: number
-  /** Pool VMs whose daily cost was accrued this run. */
-  charged: number
-  /** Pool VMs already accrued for this day (idempotent re-run). */
-  alreadyBilled: number
-  /** Pool VMs with no resolvable provider/plan cost — accrued nothing. */
-  skippedNoCost: number
-  /** Total USD accrued against provider budgets for the pool this run. */
-  usdAccrued: number
 }
 
 /**
@@ -73,7 +47,6 @@ export async function runDailyBilling(): Promise<DailyBillingReport> {
     alreadyBilled: 0,
     errors: [],
     billingDay,
-    pool: { processed: 0, charged: 0, alreadyBilled: 0, skippedNoCost: 0, usdAccrued: 0 },
   }
 
   const runningInstances = await db.query.instances.findMany({
@@ -195,91 +168,7 @@ export async function runDailyBilling(): Promise<DailyBillingReport> {
     }
   }
 
-  // Warm-pool compute: pre-baked VMs cost real provider money but carry no user
-  // instance to bill, so without this they stay invisible to the provider budget
-  // / burn rate. Accrue their daily provider cost here (best-effort — a failure
-  // only nudges the internal estimate, never user money).
-  try {
-    await accrueWarmPoolCompute(billingDay, report.pool)
-  } catch (err) {
-    report.errors.push(
-      `warm-pool accrual: ${err instanceof Error ? err.message : String(err)}`,
-    )
-  }
-
   return report
-}
-
-/** Non-claimed pool statuses whose droplet exists at the provider and bills. */
-const BILLABLE_POOL_STATUSES = ["creating", "bootstrapping", "ready", "failed"] as const
-
-/**
- * Accrue one day of compute for each live warm-pool VM against the budget of the
- * provider that hosts it, so pre-baked capacity shows up in provider
- * currentUsage / burn rate (runProviderBillingSync re-derives the rate).
- *
- * Cost basis is `providerPlans.monthlyCostUsd` — OUR real per-plan cost at the
- * provider — since a pool VM has no retail price. `claimed` VMs are excluded:
- * once claimed they belong to an Instance that runDailyBilling charges above, so
- * counting them here would double-bill the provider budget.
- *
- * Idempotency: a per-VM-per-day claim (`pool_compute:<day>:<warmVmId>`) makes a
- * re-run (cron retry / manual admin run) a no-op. Claim-first, then accrue: a
- * crash mid-accrual loses at most one VM-day of an internal estimate that the
- * next cycle resets — far cheaper than the double-accrual a claim-on-success
- * retry would risk.
- */
-async function accrueWarmPoolCompute(
-  billingDay: string,
-  report: WarmPoolBillingReport,
-): Promise<void> {
-  const vms = await db.query.warmVms.findMany({
-    where: inArray(warmVms.status, [...BILLABLE_POOL_STATUSES]),
-    columns: { id: true, providerId: true, providerPlanCode: true },
-  })
-  if (vms.length === 0) return
-
-  // Resolve per-provider plan cost once: `${providerId}|${planCode}` → USD/month.
-  const plans = await db.query.providerPlans.findMany({
-    columns: { providerId: true, providerPlanCode: true, monthlyCostUsd: true },
-  })
-  const costByKey = new Map(
-    plans.map((p) => [`${p.providerId}|${p.providerPlanCode}`, p.monthlyCostUsd]),
-  )
-
-  for (const vm of vms) {
-    report.processed++
-
-    // No hosting provider (legacy row) or no priced plan → nothing to attribute.
-    const monthlyCostUsd = vm.providerId
-      ? costByKey.get(`${vm.providerId}|${vm.providerPlanCode}`)
-      : undefined
-    const dailyCostUsd = (monthlyCostUsd ?? 0) / DAYS_PER_MONTH
-    if (!vm.providerId || !(dailyCostUsd > 0)) {
-      report.skippedNoCost++
-      continue
-    }
-
-    const eventId = `${billingDay}:${vm.id}`
-    try {
-      const claimed = await claimEventOn(db, "pool_compute", eventId, {
-        warmVmId: vm.id,
-        dailyCostUsd,
-      })
-      if (!claimed) {
-        report.alreadyBilled++
-        continue
-      }
-      await accrueProviderUsage(vm.providerId, dailyCostUsd)
-      report.charged++
-      report.usdAccrued += dailyCostUsd
-    } catch {
-      // Best-effort per VM: a transient DB error here only nudges an internal
-      // estimate. Leave this VM for the next run (the claim is idempotent) and
-      // keep accruing the rest rather than aborting the whole pass.
-      report.skippedNoCost++
-    }
-  }
 }
 
 

@@ -82,7 +82,7 @@ export default async function InstanceDetailPage({
       serverConfig: true,
       logs: {
         orderBy: (logs, { desc }) => desc(logs.createdAt),
-        limit: 100,
+        limit: 50,
       },
     },
   })
@@ -192,68 +192,39 @@ export default async function InstanceDetailPage({
             Access
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent>
           {access ? (
             <>
-              <div className="rounded-lg border bg-muted/40 p-3">
-                <p className="font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">
-                  {instance.domain
-                    ? "Primary · Custom domain"
-                    : instance.managedSubdomain
-                      ? "Primary · Managed hostname"
-                      : "Primary · Direct IP"}
+              <a
+                href={access.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="break-all font-mono text-sm text-foreground hover:text-primary"
+              >
+                {access.url}
+              </a>
+              {access.scheme === "http" && instance.domain && (
+                <p className="mt-2 font-mono text-xs text-amber-500">
+                  TLS certificate pending. Accessed over HTTP until Let&apos;s Encrypt completes.
                 </p>
-                <a
-                  href={access.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-1 block break-all font-mono text-sm text-foreground hover:text-primary"
-                >
-                  {access.url}
-                </a>
-                {access.scheme === "http" && instance.domain && (
-                  <p className="mt-1.5 font-mono text-xs text-amber-500">
-                    TLS certificate pending. Accessed over HTTP until Let&apos;s Encrypt completes.
-                  </p>
-                )}
-                {access.scheme === "http" && !instance.domain && !instance.managedSubdomain && (
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    Raw IP access over HTTP. A managed hostname or custom domain enables HTTPS.
-                  </p>
-                )}
-                {access.scheme === "https" && instance.domain && (
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    {instance.tlsStatus === "issued"
-                      ? "Served with Let's Encrypt certificate."
-                      : "TLS certificate pending. Check DNS for your custom domain."}
-                  </p>
-                )}
-                {access.scheme === "https" && instance.managedSubdomain && !instance.domain && (
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    HTTPS via Cloudflare to your agent hostname.
-                  </p>
-                )}
-              </div>
-              {instance.ipAddress &&
-                (instance.managedSubdomain || instance.domain) &&
-                access.url !== `http://${instance.ipAddress}` && (
-                  <div className="rounded-lg border bg-muted/40 p-3">
-                    <p className="font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">
-                      Backup · Direct IP
-                    </p>
-                    <a
-                      href={`http://${instance.ipAddress}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-1 block break-all font-mono text-sm text-foreground hover:text-primary"
-                    >
-                      http://{instance.ipAddress}:80
-                    </a>
-                    <p className="mt-1.5 text-xs text-muted-foreground">
-                      Fallback when the managed hostname is unavailable. HTTP only; allow port 80 on the VM firewall.
-                    </p>
-                  </div>
-                )}
+              )}
+              {access.scheme === "http" && !instance.domain && !instance.managedSubdomain && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Raw IP access over HTTP. A managed hostname or custom domain enables HTTPS.
+                </p>
+              )}
+              {access.scheme === "https" && instance.domain && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {instance.tlsStatus === "issued"
+                    ? "Served with Let's Encrypt certificate."
+                    : "TLS certificate pending. Check DNS for your custom domain."}
+                </p>
+              )}
+              {access.scheme === "https" && instance.managedSubdomain && !instance.domain && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  HTTPS via Cloudflare to your agent hostname. Direct IP access may use HTTP on port 80.
+                </p>
+              )}
             </>
           ) : (
             <p className="font-mono text-sm text-muted-foreground">
@@ -301,19 +272,6 @@ export default async function InstanceDetailPage({
           byosLlmMode: instance.byosLlmMode ?? null,
           costUsd: instance.openRouterUsageUsd ?? 0,
           lastEventAt: instance.lastEventAt ? instance.lastEventAt.toISOString() : null,
-          hwCpuCores: instance.hwCpuCores ?? null,
-          hwCpuLoad1: instance.hwCpuLoad1 ?? null,
-          hwRamTotalMb: instance.hwRamTotalMb ?? null,
-          hwRamUsedMb: instance.hwRamUsedMb ?? null,
-          hwDiskTotalGb: instance.hwDiskTotalGb ?? null,
-          hwDiskUsedGb: instance.hwDiskUsedGb ?? null,
-          hwOsName: instance.hwOsName ?? null,
-          hwOsVersion: instance.hwOsVersion ?? null,
-          hwKernel: instance.hwKernel ?? null,
-          hwUptimeSec: instance.hwUptimeSec ?? null,
-          hwHealth: instance.hwHealth ?? null,
-          hwCheckedAt: instance.hwCheckedAt ? instance.hwCheckedAt.toISOString() : null,
-          hwError: instance.hwError ?? null,
         }}
         logs={instance.logs.map((l) => ({
           id: l.id,

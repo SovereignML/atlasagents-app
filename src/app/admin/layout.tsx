@@ -5,7 +5,6 @@ import { DashboardTopbar } from "@/components/layout/dashboard-topbar"
 import { ConsoleThemePortalSync } from "@/components/layout/console-theme-portal-sync"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { getConsoleTheme } from "@/lib/console-theme.server"
-import { requireAdminPage } from "@/lib/admin-guard"
 
 // Admin pages query the DB on every render; never prerender them at build time.
 // Cascades to every route under /admin/*.
@@ -13,10 +12,6 @@ export const dynamic = "force-dynamic"
 export const revalidate = 0
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  // Shell-level gate (redirects non-admins before any admin chrome renders).
-  // Per-page requireAdminPage() calls still guard each server page's data fetch.
-  await requireAdminPage()
-
   const cookieStore = await cookies()
   const defaultOpen = cookieStore.get("sidebar_state")?.value !== "false"
   const consoleTheme = await getConsoleTheme()

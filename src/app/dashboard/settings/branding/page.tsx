@@ -1,8 +1,7 @@
 import { redirect } from "next/navigation"
 
-// White-label branding now lives in the Reseller Admin Panel
-// (/tenant-admin/settings, the canonical home). This route is kept as a
-// redirect so existing links/bookmarks keep working.
+// Branding now lives under the Team page as a tab (the canonical home).
+// This route is kept as a redirect so existing links/bookmarks keep working.
 export default function BrandingSettingsPage() {
-  redirect("/tenant-admin/settings")
+  redirect("/dashboard/team?tab=branding")
 }

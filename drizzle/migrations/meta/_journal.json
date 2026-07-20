@@ -176,27 +176,6 @@
       "when": 1782899933260,
       "tag": "0024_calm_hitman",
       "breakpoints": true
-    },
-    {
-      "idx": 25,
-      "version": "7",
-      "when": 1784008109972,
-      "tag": "0025_faulty_carlie_cooper",
-      "breakpoints": true
-    },
-    {
-      "idx": 26,
-      "version": "7",
-      "when": 1784037474676,
-      "tag": "0026_warmvm_dns",
-      "breakpoints": true
-    },
-    {
-      "idx": 27,
-      "version": "7",
-      "when": 1784375128863,
-      "tag": "0027_n8n_tool_service",
-      "breakpoints": true
     }
   ]
 }

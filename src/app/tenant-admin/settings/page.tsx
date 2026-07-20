@@ -1,16 +1,13 @@
+import Link from "next/link"
 import { redirect } from "next/navigation"
 
-import { db, eq, desc, tenantPlans, teamBranding } from "@/db"
 import { requireTenantAdmin, isTenantGuardError } from "@/lib/tenant-admin-access"
 import { getTenantConfig } from "@/lib/tenant"
 import { PageContainer, PageHeader, PageSection } from "@/components/layout/page-container"
-import {
-  BrandingClient,
-  type BrandingState,
-} from "@/app/dashboard/settings/branding/branding-client"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ChatwootClient, type ChatwootState } from "./chatwoot-client"
 import { ResellerOpsClient, type ResellerOpsState } from "./reseller-ops-client"
-import { PlansClient, type TenantPlan } from "./plans-client"
 
 export const dynamic = "force-dynamic"
 
@@ -35,38 +32,6 @@ export default async function TenantSettingsPage() {
     hasOpenRouterKey: Boolean(cfg?.openRouterProvisioningKeyEnc),
   }
 
-  // White-label branding for this tenant team (logos, colors, custom domain).
-  // Mirrors the mapping that used to live on the team page's Branding tab.
-  const brandingRow = await db.query.teamBranding.findFirst({
-    where: eq(teamBranding.teamId, admin.tenantTeamId),
-  })
-  const branding: BrandingState = {
-    brandName: brandingRow?.brandName ?? "",
-    supportEmail: brandingRow?.supportEmail ?? "",
-    logoUrl: brandingRow?.logoUrl ?? "",
-    logoMarkUrl: brandingRow?.logoMarkUrl ?? "",
-    faviconUrl: brandingRow?.faviconUrl ?? "",
-    primaryLight: brandingRow?.primaryLight ?? "",
-    accentLight: brandingRow?.accentLight ?? "",
-    primaryDark: brandingRow?.primaryDark ?? "",
-    accentDark: brandingRow?.accentDark ?? "",
-    brandingEnabled: brandingRow?.brandingEnabled ?? true,
-  }
-
-  const planRows = await db.query.tenantPlans.findMany({
-    where: eq(tenantPlans.teamId, admin.tenantTeamId),
-    orderBy: desc(tenantPlans.createdAt),
-  })
-  const plans: TenantPlan[] = planRows.map((p) => ({
-    id: p.id,
-    name: p.name,
-    priceCents: p.priceCents,
-    interval: p.interval,
-    agentLimit: p.agentLimit,
-    seatLimit: p.seatLimit,
-    active: p.active,
-  }))
-
   return (
     <PageContainer>
       <PageHeader
@@ -74,11 +39,18 @@ export default async function TenantSettingsPage() {
         description="Customize your white-label look and connect your own support stack."
       />
 
-      <PageSection
-        title="Branding & custom domain"
-        description="Logos, colors, and your custom dashboard domain — the white-label look your customers see."
-      >
-        <BrandingClient initial={branding} />
+      <PageSection title="Branding & custom domain">
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle>White-label branding</CardTitle>
+            <CardDescription>
+              Logos, colors, and your custom dashboard domain are managed in the Team Branding tab.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button variant="outline" render={<Link href="/dashboard/team?tab=branding">Open branding settings</Link>} />
+          </CardContent>
+        </Card>
       </PageSection>
 
       <PageSection
@@ -93,13 +65,6 @@ export default async function TenantSettingsPage() {
         description="Collect payments from your customers on your own Stripe, and run their agents on your own OpenRouter account."
       >
         <ResellerOpsClient initial={ops} />
-      </PageSection>
-
-      <PageSection
-        title="Plans"
-        description="Define the plans your customers can subscribe to. Each creates a price on your own Stripe; on subscribe, the plan's caps apply to that customer."
-      >
-        <PlansClient plans={plans} connected={Boolean(cfg?.stripeConnectAccountId)} />
       </PageSection>
     </PageContainer>
   )

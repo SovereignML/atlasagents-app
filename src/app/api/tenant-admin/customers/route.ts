@@ -1,22 +1,8 @@
-import crypto from "node:crypto"
 import { NextResponse } from "next/server"
 import { z } from "zod"
-import {
-  db,
-  eq,
-  and,
-  inArray,
-  sql,
-  users,
-  memberships,
-  instances,
-  verificationTokens,
-  notInArray,
-} from "@/db"
+import { db, eq, and, inArray, sql, users, memberships, instances, notInArray } from "@/db"
 import { requireTenantAdmin, isTenantGuardError } from "@/lib/tenant-admin-access"
 import { createChildTeam, getTenantConfig, listChildTeams } from "@/lib/tenant"
-import { hashPassword } from "@/lib/password"
-import { sendPasswordResetEmail } from "@/lib/email"
 import { logAuditEvent } from "@/lib/audit"
 
 // GET — list this tenant's end-customer (child) teams with agent + member counts.
@@ -64,20 +50,14 @@ export async function GET() {
 
 const createSchema = z.object({
   name: z.string().min(1).max(120),
-  ownerName: z.string().min(1).max(120).optional(),
   ownerEmail: z.string().email(),
   agentLimit: z.number().int().positive().optional(),
   seatLimit: z.number().int().positive().optional(),
 })
 
-// POST — create a child end-customer team with a FRESH owner account.
-//
-// SECURITY: this endpoint provisions a brand-new user for the owner email and
-// never attaches an EXISTING account. Attaching an existing arbitrary user would
-// grant the tenant admin impersonation over that user (impersonation scope is
-// derived from child-team membership — see effective-user.ts / isUserInTenantScopeOf),
-// i.e. a cross-account takeover. Existing users must instead self-serve via
-// signup on the tenant's domain (open registration attaches them consensually).
+// POST — create a child end-customer team owned by an existing user (by email).
+// New users self-serve via signup on the tenant's domain (open registration),
+// so this path requires the owner to already have an account.
 export async function POST(req: Request) {
   const admin = await requireTenantAdmin()
   if (isTenantGuardError(admin)) {
@@ -89,36 +69,17 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid input" }, { status: 400 })
   }
-  const { name, ownerName, agentLimit, seatLimit } = parsed.data
-  const ownerEmail = parsed.data.ownerEmail.toLowerCase()
+  const { name, ownerEmail, agentLimit, seatLimit } = parsed.data
 
-  const existing = await db.query.users.findFirst({
+  const owner = await db.query.users.findFirst({
     where: eq(users.email, ownerEmail),
     columns: { id: true },
   })
-  if (existing) {
-    return NextResponse.json(
-      {
-        error:
-          "An account with that email already exists. Have them sign up on your domain to be added — existing accounts can't be claimed.",
-      },
-      { status: 409 },
-    )
-  }
-
-  // Fresh owner account. A random password makes it login-only via the
-  // set-password invite below (or the standard "forgot password" flow); the
-  // tenant admin never learns or sets the customer's password.
-  const [owner] = await db
-    .insert(users)
-    .values({
-      name: ownerName ?? name,
-      email: ownerEmail,
-      hashedPassword: await hashPassword(crypto.randomBytes(24).toString("hex")),
-    })
-    .returning({ id: users.id })
   if (!owner) {
-    return NextResponse.json({ error: "Failed to create owner account" }, { status: 500 })
+    return NextResponse.json(
+      { error: "No account with that email. Ask them to sign up on your domain first." },
+      { status: 400 },
+    )
   }
 
   const cfg = await getTenantConfig(admin.tenantTeamId)
@@ -129,24 +90,6 @@ export async function POST(req: Request) {
     agentLimit: agentLimit ?? cfg?.defaultChildAgentLimit,
     seatLimit: seatLimit ?? cfg?.defaultChildSeatLimit,
   })
-  await db.update(users).set({ activeTeamId: child.id }).where(eq(users.id, owner.id))
-
-  // Set-password invite: reuse the password-reset token flow so the new owner
-  // can pick their own password and log in. Best-effort — never fail creation
-  // over email delivery (the tenant can resend, or the owner uses forgot-password).
-  try {
-    await db.delete(verificationTokens).where(eq(verificationTokens.identifier, ownerEmail))
-    const token = crypto.randomBytes(32).toString("hex")
-    const hashedToken = crypto.createHash("sha256").update(token).digest("hex")
-    await db.insert(verificationTokens).values({
-      identifier: ownerEmail,
-      token: hashedToken,
-      expires: new Date(Date.now() + 24 * 60 * 60 * 1000),
-    })
-    await sendPasswordResetEmail(ownerEmail, token)
-  } catch (err) {
-    console.error("[tenant.customer.create] invite email failed:", err)
-  }
 
   await logAuditEvent({
     userId: admin.userId,
@@ -155,7 +98,6 @@ export async function POST(req: Request) {
     targetType: "team",
     targetId: child.id,
     targetLabel: name,
-    meta: { ownerEmail },
   })
 
   return NextResponse.json({ id: child.id }, { status: 201 })

@@ -2,7 +2,7 @@ import crypto from "node:crypto"
 import { isIP } from "node:net"
 import { lookup } from "node:dns/promises"
 import type { InferSelectModel } from "drizzle-orm"
-import { db, instances, instanceLogs, instanceKnowledge, regions, serverConfigs, providerHealthLogs, sshKeys, eq, and } from "@/db"
+import { db, instances, instanceLogs, instanceKnowledge, regions, serverConfigs, providerHealthLogs, eq } from "@/db"
 import {
   logInstanceEvent,
   transitionInstance,
@@ -22,8 +22,6 @@ import {
   sshRun,
   sshRunScriptLogged,
   sshVmHasCloudflareOriginCerts,
-  sshInstallCaddyfile,
-  sshInstallUserAuthorizedKeys,
   type SshStepResult,
   sshSystemctlRestart,
   sshSystemctlStart,
@@ -37,7 +35,7 @@ import { decryptSecret, encryptSecret } from "@/lib/crypto-secret"
 import { mintRuntimeKey, revokeRuntimeKey } from "@/lib/openrouter-provisioning"
 import { computeKeyLimitUsd } from "@/lib/openrouter-billing"
 import { refundProratedDailyCompute } from "@/lib/daily-billing"
-import { getTenantOpenRouterKey, isResellerChildTeam } from "@/lib/tenant"
+import { getTenantOpenRouterKey } from "@/lib/tenant"
 import {
   generateAdminPassword,
   generateGatewayToken,
@@ -66,28 +64,13 @@ import {
   isValidOpenRouterSlug,
   resolveLlmProvider,
   nvidiaKeyForSlot,
-  OPENROUTER_BASE_URL,
   type LlmProvider,
 } from "@/lib/model-router"
-import {
-  resolveByoBaseUrl,
-  isOpenRouterProvider,
-  type ByoProviderId,
-} from "@/configs/llm-providers"
 import { parseAgentConfig, type BudgetTier } from "@/lib/agent-config"
 import { generateIdentityMd } from "@/lib/agent-identity"
 import { generateSoul } from "@/lib/soul"
 import { defaultSkillsForCategory } from "@/configs/agent-skills"
-import {
-  enabledToolsForRuntime,
-  knowledgeBaseEnabled,
-  expandAutoEnabledTools,
-  toolServicesForIds,
-  AGENT_TOOLS,
-  type AgentTool,
-} from "@/configs/agent-tools"
-import type { ToolService, ToolServiceRoute } from "@/lib/runtimes/types"
-import { claimWarmVm, isPoolEnabled } from "@/lib/warm-pool"
+import { enabledToolsForRuntime, knowledgeBaseEnabled, type AgentTool } from "@/configs/agent-tools"
 
 type Instance = InferSelectModel<typeof instances>
 
@@ -160,15 +143,6 @@ export async function getOrMintInstanceOpenRouterKey(
   // the platform wallet (the tenant's OpenRouter account governs spend) and are
   // excluded from the platform usage-sync poller (see src/lib/openrouter-usage.ts).
   const tenantKey = await getTenantOpenRouterKey(instance.teamId)
-  // Fail closed: a reseller child team whose tenant has NOT configured an
-  // OpenRouter provisioning key must never fall back to the platform key (that
-  // would silently bill the platform for the tenant's customer). Block the
-  // provision instead — the tenant sets their key in the reseller settings.
-  if (!tenantKey && (await isResellerChildTeam(instance.teamId))) {
-    throw new Error(
-      "This reseller has not configured an OpenRouter account yet. Ask your provider to add one before deploying.",
-    )
-  }
   // Otherwise cap the fresh key at the owner's CURRENT spendable balance ×
   // margin (USD) — usage starts at 0, so computeKeyLimitUsd returns exactly the
   // remaining headroom. This is the hard floor on our cost, enforced
@@ -192,7 +166,6 @@ export async function getOrMintInstanceOpenRouterKey(
       openRouterKeyId: keyId,
       openRouterKeyEnc: encryptSecret(key),
       openRouterLimitUsd: limitUsd,
-      tenantKeyed: Boolean(tenantKey),
     })
     .where(eq(instances.id, instance.id))
   return key
@@ -212,171 +185,6 @@ async function resolveRuntimeOpenRouterKey(
   return getOrMintInstanceOpenRouterKey(instance)
 }
 
-/** The LLM credential the runtime `.env`/config is written with. */
-type ByosLlmCreds = {
-  /** The API key that authenticates against `baseUrl`. */
-  apiKey: string
-  /** OpenAI-compatible base URL the key authenticates against. */
-  baseUrl: string
-  /** BYO catalog provider id. "openrouter" for managed/non-BYOS instances. */
-  providerId: ByoProviderId
-  /**
-   * Provider token handed to Hermes' `config set model.provider`. "openrouter"
-   * for OpenRouter; "openai" for every direct BYO provider (they are all
-   * OpenAI-compatible, reached via `model.base_url`).
-   */
-  providerToken: string
-  /** True when the active key is the customer's own (not our minted key). */
-  isOwnKey: boolean
-}
-
-/** Map a BYO provider id to the token Hermes recognizes for `model.provider`. */
-function hermesProviderToken(providerId: ByoProviderId): string {
-  return providerId === "openrouter" ? "openrouter" : "openai"
-}
-
-/**
- * Resolve which LLM credential + endpoint a BYOS instance's runtime should be
- * provisioned with. Centralizes what used to be a duplicated ternary at the two
- * injection sites so the "own key vs managed key" decision — and the
- * provider/base-URL that comes with it — lives in exactly one place.
- *
- * Hard invariant: a BYO own-key instance NEVER reaches
- * `resolveRuntimeOpenRouterKey` (which mints our managed key). Managed OpenRouter
- * access is structurally reachable only via `byosLlmMode !== "own_key"`, so a
- * customer bringing their own key can never silently fall back to our credits.
- *
- * The active key honors `byosActiveKeySlot`: when it is "fallback" and a
- * fallback key is configured, the fallback provider/key/base-URL become the
- * active credential — this is how the "switch to fallback" action takes effect
- * on the next reprovision.
- */
-async function resolveByosLlmCredentials(instance: Instance): Promise<ByosLlmCreds> {
-  const isOwnKey = instance.byosLlmMode === "own_key" && !!instance.byosOwnApiKeyEnc
-
-  if (isOwnKey) {
-    const useFallback =
-      instance.byosActiveKeySlot === "fallback" &&
-      !!instance.byosFallbackProvider &&
-      !!instance.byosFallbackApiKeyEnc
-
-    if (useFallback) {
-      const providerId = (instance.byosFallbackProvider ?? "openrouter") as ByoProviderId
-      const baseUrl =
-        resolveByoBaseUrl(providerId, instance.byosFallbackBaseUrl) ?? OPENROUTER_BASE_URL
-      return {
-        apiKey: decryptSecret(instance.byosFallbackApiKeyEnc!),
-        baseUrl,
-        providerId,
-        providerToken: hermesProviderToken(providerId),
-        isOwnKey: true,
-      }
-    }
-
-    const providerId = (instance.byosOwnProvider ?? "openrouter") as ByoProviderId
-    const baseUrl =
-      resolveByoBaseUrl(providerId, instance.byosOwnBaseUrl) ?? OPENROUTER_BASE_URL
-    return {
-      apiKey: decryptSecret(instance.byosOwnApiKeyEnc!),
-      baseUrl,
-      providerId,
-      providerToken: hermesProviderToken(providerId),
-      isOwnKey: true,
-    }
-  }
-
-  // Managed / non-BYOS: mint or reuse our OpenRouter key (skipped for the
-  // platform NVIDIA switch, which returns "" and pins NVIDIA via routeModel).
-  const provider = resolveLlmProvider(instance)
-  const apiKey = await resolveRuntimeOpenRouterKey(instance, provider)
-  return {
-    apiKey,
-    baseUrl: routeModel((instance.modelTier ?? "mid") as BudgetTier, provider).baseUrl,
-    providerId: "openrouter",
-    // Preserve the platform NVIDIA switch: the provider token stays whatever
-    // resolveLlmProvider picked ("openrouter" | "nvidia"), which Hermes'
-    // renderInitScript already knows how to register.
-    providerToken: provider,
-    isOwnKey: false,
-  }
-}
-
-/**
- * Resolve the full LLM provisioning config a runtime's `.env`/config/init-script
- * is written with: the credential (from {@link resolveByosLlmCredentials}) plus
- * the model + fallback model + the provider token/base-URL Hermes needs.
- *
- * - OpenRouter (managed, NVIDIA switch, or a BYO *OpenRouter* key): keeps the
- *   historical path — `effectiveModel` picks the slug and it must pass
- *   `isValidOpenRouterSlug` before a Hermes init runs.
- * - A BYO *direct* provider (OpenAI/Groq/DeepSeek/NVIDIA-key/custom): Hermes-only
- *   (enforced at the API and defensively here). The model is the user-supplied
- *   `modelSlug` verbatim — we can't validate an arbitrary provider's catalog, so
- *   the OpenRouter-slug guard is skipped and the fallback model mirrors it.
- */
-async function resolveRuntimeLlmConfig(
-  instance: Instance,
-  runtime: RuntimeEngine,
-): Promise<{
-  apiKey: string
-  baseUrl: string
-  providerToken: string
-  model: string
-  fallbackModel: string
-}> {
-  const creds = await resolveByosLlmCredentials(instance)
-  const tier = (instance.modelTier ?? "mid") as BudgetTier
-
-  if (creds.isOwnKey && !isOpenRouterProvider(creds.providerId)) {
-    // Defensive: OpenClaw's package cannot target a non-OpenRouter endpoint.
-    // The API layer already blocks this combination; fail loudly if it slips through.
-    if (runtime.id !== "hermes") {
-      throw new Error(
-        `Provider "${creds.providerId}" requires the Hermes runtime; ` +
-          `OpenClaw only supports OpenRouter.`,
-      )
-    }
-    const model = instance.modelSlug?.trim()
-    if (!model) {
-      throw new Error(
-        `A model is required when bringing a ${creds.providerId} key ` +
-          `(no default catalog for a direct provider).`,
-      )
-    }
-    return {
-      apiKey: creds.apiKey,
-      baseUrl: creds.baseUrl,
-      providerToken: creds.providerToken,
-      model,
-      fallbackModel: model,
-    }
-  }
-
-  // OpenRouter path (managed / NVIDIA switch / BYO OpenRouter key).
-  const llmProvider = resolveLlmProvider(instance)
-  const route = routeModel(tier, llmProvider)
-  const model = effectiveModel({
-    runtimeId: runtime.id,
-    llmProvider,
-    tier,
-    modelSlug: instance.modelSlug,
-    routedModel: route.model,
-  })
-  if (runtime.renderInitScript && !isValidOpenRouterSlug(model)) {
-    throw new Error(
-      `${runtime.displayName} model "${model}" is not a valid OpenRouter <author>/<slug> ` +
-        `(≥64k context required). Set HERMES_MODELS in src/lib/model-router.ts or the HERMES_MODEL env var.`,
-    )
-  }
-  return {
-    apiKey: creds.apiKey,
-    baseUrl: creds.baseUrl,
-    providerToken: creds.providerToken,
-    model,
-    fallbackModel: route.fallback,
-  }
-}
-
 /**
  * Revoke the per-instance OpenRouter runtime key (if any) and clear the
  * persisted ciphertext. Called from `deleteBot` before the state machine
@@ -386,12 +194,7 @@ async function resolveRuntimeLlmConfig(
 async function revokeInstanceOpenRouterKey(instance: Instance): Promise<void> {
   if (!instance.openRouterKeyId) return
   try {
-    // Tenant-keyed reseller keys live on the tenant's OpenRouter account — revoke
-    // with the tenant's provisioning key or the DELETE 404s and the key stays live.
-    const override = instance.tenantKeyed
-      ? (await getTenantOpenRouterKey(instance.teamId)) ?? undefined
-      : undefined
-    await revokeRuntimeKey(instance.openRouterKeyId, override)
+    await revokeRuntimeKey(instance.openRouterKeyId)
     await db
       .update(instances)
       .set({ openRouterKeyId: null, openRouterKeyEnc: null })
@@ -903,90 +706,6 @@ function sshTargetFor(instance: Instance): SshTarget {
 }
 
 /* ------------------------------------------------------------------ */
-/* Team SSH keys → agent boxes                                         */
-/*                                                                     */
-/* SSH keys are managed team-wide (Team → SSH tab / the SshKey table)  */
-/* and installed on every managed-VPS agent the team owns. Adding or   */
-/* removing a key reconciles the full set on each running box, so the  */
-/* team's key list is the single source of truth. BYOS is excluded —   */
-/* the customer already owns and reaches that server.                  */
-/* ------------------------------------------------------------------ */
-
-/** Public keys currently registered to a team. */
-async function teamPublicKeys(teamId: string): Promise<string[]> {
-  const rows = await db.query.sshKeys.findMany({
-    where: eq(sshKeys.teamId, teamId),
-    columns: { publicKey: true },
-  })
-  return rows.map((r) => r.publicKey.trim()).filter(Boolean)
-}
-
-/**
- * Reconcile the team's SSH keys onto one running managed-VPS instance. Skips
- * anything we can't (or shouldn't) reach over SSH: BYOS, non-running, no IP,
- * and non-VPS (shared/serverless have no dedicated host). Best-effort — returns
- * a status instead of throwing so callers can fan out over many boxes.
- */
-export async function syncInstanceSshKeys(
-  instance: Instance,
-): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
-  if (
-    instance.deploymentTarget !== "vps" ||
-    instance.status !== "running" ||
-    !instance.ipAddress
-  ) {
-    return { ok: true, skipped: true }
-  }
-  try {
-    const keys = await teamPublicKeys(instance.teamId)
-    const res = await sshInstallUserAuthorizedKeys(sshTargetFor(instance), keys)
-    if (res.code === 0 || res.code === null) return { ok: true }
-    return { ok: false, error: (res.stderr || res.stdout || `exit ${res.code}`).trim() }
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
-  }
-}
-
-/**
- * Reconcile the team's SSH keys across all of the team's running managed-VPS
- * agents. Best-effort and isolated per instance — one unreachable box never
- * blocks the rest. Call after a key is added or removed. Safe to run in the
- * background (fire-and-forget) from an API route.
- */
-export async function syncTeamSshKeys(
-  teamId: string,
-): Promise<{ synced: number; failed: number }> {
-  const rows = await db.query.instances.findMany({
-    where: and(
-      eq(instances.teamId, teamId),
-      eq(instances.status, "running"),
-      eq(instances.deploymentTarget, "vps"),
-    ),
-  })
-  let synced = 0
-  let failed = 0
-  await Promise.all(
-    rows.map(async (inst) => {
-      const r = await syncInstanceSshKeys(inst)
-      if (r.skipped) return
-      if (r.ok) synced++
-      else {
-        failed++
-        console.warn(
-          JSON.stringify({
-            kind: "ssh_key_sync_failed",
-            instanceId: inst.id,
-            teamId,
-            error: r.error,
-          }),
-        )
-      }
-    }),
-  )
-  return { synced, failed }
-}
-
-/* ------------------------------------------------------------------ */
 /* provision                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -1355,19 +1074,6 @@ type AcquiredVm = {
    * completion marker that will never arrive.
    */
   supportsCloudInit: boolean
-  /**
-   * True when this VM came from the warm pool — already fully bootstrapped (and
-   * bake-finalized). The provisioner skips the bootstrap stage and runs the
-   * fast claim path in configureRuntimeOverSsh.
-   */
-  preBootstrapped?: boolean
-  /**
-   * Generic public URL pre-assigned to a claimed warm-pool VM (Cloudflare record
-   * already created + propagated). When set, provisionVpsBot reuses it and skips
-   * the per-instance createAgentSubdomain call on the hot path.
-   */
-  managedSubdomain?: string | null
-  cfRecordId?: string | null
 }
 
 /** Cloud-init capability for a provider — defaults true for the legacy VmProvider. */
@@ -1463,6 +1169,9 @@ async function handleFailedAttempt(
   err: unknown,
 ): Promise<void> {
   const reason = await describeProviderError(candidate.providerSlug, err)
+  // #region agent log
+  fetch('http://127.0.0.1:7305/ingest/880804f1-30d2-40e6-a578-5c94bee7e97e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'52ccd5'},body:JSON.stringify({sessionId:'52ccd5',runId:'pre-fix',hypothesisId:'F',location:'src/lib/provisioner.ts:handleFailedAttempt',message:'provider attempt failed',data:{provider:candidate.providerSlug,plan:candidate.providerPlanCode,region:candidate.providerRegionCode,reason:String(reason).slice(0,300)},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   await logInstanceEvent({
     instanceId: instance.id,
     level: "warn",
@@ -1535,76 +1244,9 @@ async function acquireBootedVm(
   }
   const decision = await routeDeployment(input)
 
-  // Warm pool: try to claim a ready, pre-bootstrapped VM matching a ranked
-  // candidate (runtime+provider+plan+region) before creating a cold one. On a
-  // hit we skip the whole bootstrap stage and run the fast claim path.
-  const webuiEnabled = Boolean(instance.webuiEnabled) && Boolean(runtime.sidecar)
-  const claimed = await claimWarmVm({
-    runtime: runtime.id,
-    webuiEnabled,
-    instanceId: instance.id,
-    candidates: decision.ranked.map((c) => ({
-      providerSlug: c.providerSlug,
-      planCode: c.providerPlanCode,
-      regionCode: c.providerRegionCode,
-    })),
-  })
-  if (claimed) {
-    const provider = await getVmProviderById(claimed.providerId)
-    // Persist VM identity + secrets + the baked host fingerprint onto the
-    // instance so the rest of provisioning treats it as a normal owned VM and
-    // connectAndPin matches the already-known key instead of re-pinning.
-    const set: Record<string, unknown> = {
-      vmId: claimed.vmId,
-      ipAddress: claimed.ipAddress,
-      providerId: claimed.providerId,
-    }
-    if (claimed.rootPasswordEnc) set.rootPasswordEnc = claimed.rootPasswordEnc
-    if (claimed.sshHostFingerprint) set.sshHostFingerprint = claimed.sshHostFingerprint
-    // Inherit the pool VM's pre-assigned generic URL: the Cloudflare record is
-    // already created + propagated, so the instance reuses it (no DNS call on the
-    // hot path — see provisionVpsBot step 2b, which skips createAgentSubdomain).
-    if (claimed.managedSubdomain) {
-      set.managedSubdomain = claimed.managedSubdomain
-      set.cfRecordId = claimed.cfRecordId
-      set.dnsStatus = "propagating"
-    }
-    await db.update(instances).set(set).where(eq(instances.id, instance.id))
-    await logInstanceEvent({
-      instanceId: instance.id,
-      stage: "create_vm",
-      action: "warm_pool_claimed",
-      result: "ok",
-      detail: { vmId: claimed.vmId, poolKey: claimed.poolKey },
-      message: `Claimed a warm pool VM (${claimed.poolKey}) — skipping bootstrap for a sub-25s deploy.`,
-    })
-    return {
-      provider,
-      providerId: claimed.providerId,
-      vmId: claimed.vmId,
-      ipAddress: claimed.ipAddress,
-      useGoldenImage: false,
-      supportsCloudInit: providerSupportsCloudInit(provider),
-      preBootstrapped: true,
-      managedSubdomain: claimed.managedSubdomain,
-      cfRecordId: claimed.cfRecordId,
-    }
-  }
-
-  // Warm pool is the primary delivery path. If it's enabled but had no ready VM
-  // matching this deploy, we fall through to cold provisioning (slower) — surface
-  // it as a warning so a drained/undersized pool is visible in the timeline.
-  if (isPoolEnabled()) {
-    await logInstanceEvent({
-      instanceId: instance.id,
-      level: "warn",
-      stage: "create_vm",
-      action: "warm_pool_miss",
-      result: "error",
-      message:
-        "Warm pool had no ready VM for this runtime/plan/region — falling back to cold provisioning. The pool may be draining or undersized (check POOL_SIZE_*).",
-    })
-  }
+  // #region agent log
+  fetch('http://127.0.0.1:7305/ingest/880804f1-30d2-40e6-a578-5c94bee7e97e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'52ccd5'},body:JSON.stringify({sessionId:'52ccd5',runId:'pre-fix',hypothesisId:'F',location:'src/lib/provisioner.ts:acquireBootedVm',message:'routing decision',data:{chosen:decision.chosen?.providerSlug??null,ranked:decision.ranked.map((c)=>c.providerSlug),rejected:decision.rejected.map((r)=>({slug:r.providerSlug,reason:r.reason}))},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
   // Backward-compat: no provider mapping yet → legacy env-default provider.
   if (decision.ranked.length === 0) {
@@ -1728,25 +1370,10 @@ async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
     providerId = acquired.providerId
     const useGoldenImage = acquired.useGoldenImage
     const supportsCloudInit = acquired.supportsCloudInit
-    const fromWarmPool = acquired.preBootstrapped === true
 
     /* --- 2b. Cloudflare managed subdomain --------------------------- */
-    // Warm-pool VMs arrive with a generic URL already created + propagated at
-    // bake (acquireBootedVm copied it onto the row). Reuse it and skip the
-    // Cloudflare call entirely so DNS never sits on the deploy hot path.
-    let managedSubdomainForProvision: string | null =
-      acquired.managedSubdomain ?? instance.managedSubdomain ?? null
-    const hasPreAssignedUrl = fromWarmPool && Boolean(acquired.managedSubdomain)
-    if (hasPreAssignedUrl) {
-      await logInstanceEvent({
-        instanceId: instance.id,
-        stage: currentStage,
-        action: "dns_preassigned",
-        result: "ok",
-        message: `Reusing warm pool pre-assigned URL: ${managedSubdomainForProvision} → ${ipAddress} (already propagated).`,
-      })
-    }
-    if (!hasPreAssignedUrl && process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ZONE_ID) {
+    let managedSubdomainForProvision: string | null = instance.managedSubdomain ?? null
+    if (process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ZONE_ID) {
       try {
         const { name, recordId } = await createAgentSubdomain(
           instance.id,
@@ -1793,7 +1420,7 @@ async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
 
     /* --- 4. Bootstrap: golden image (skip), cloud-init (poll), or run  */
     /*        the bootstrap over SSH for providers without cloud-init.    */
-    if (useGoldenImage || fromWarmPool) {
+    if (useGoldenImage) {
       currentStage = "bootstrap"
       await setProvisionStage(instance.id, currentStage)
       await logInstanceEvent({
@@ -1801,9 +1428,7 @@ async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
         stage: currentStage,
         action: "bootstrap_complete",
         result: "ok",
-        message: fromWarmPool
-          ? "Warm pool VM — already bootstrapped and bake-finalized. Skipping cloud-init."
-          : "Golden image — bootstrap already complete. Skipping cloud-init.",
+        message: "Golden image — bootstrap already complete. Skipping cloud-init.",
       })
     } else if (supportsCloudInit) {
       currentStage = "bootstrap"
@@ -1865,12 +1490,15 @@ async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
     /*           config write, Caddy + systemd install, health check,   */
     /*           commit). Shared verbatim with the BYOS path — the only  */
     /*           difference upstream is how we got here (Linode VM vs.   */
-    /*           the customer's own server). The LLM credential (managed */
-    /*           key vs. BYO key/provider) is resolved inside.           */
+    /*           the customer's own server).                             */
+    const openRouterApiKey = await resolveRuntimeOpenRouterKey(
+      instance,
+      resolveLlmProvider(instance),
+    )
     return await configureRuntimeOverSsh(instance, target, ipAddress, runtime, {
       managedSubdomain: managedSubdomainForProvision,
+      openRouterApiKey,
       vmId,
-      fromWarmPool,
     })
   } catch (err) {
     if (ipAddress) {
@@ -1901,67 +1529,11 @@ async function configureRuntimeOverSsh(
   target: SshTarget,
   ipAddress: string,
   runtime: RuntimeEngine,
-  opts: {
-    managedSubdomain: string | null
-    vmId: string | undefined
-    /**
-     * True when the VM came from the warm pool (already bootstrapped +
-     * bake-finalized). Enables the fast claim path: skip the runtime's
-     * setup/doctor (done at bake) and move the Open WebUI admin seed + the
-     * `/v1/models` verification OFF the critical path (run async after commit),
-     * so delivery lands under 25s.
-     */
-    fromWarmPool?: boolean
-  },
+  opts: { managedSubdomain: string | null; openRouterApiKey: string; vmId: string | undefined },
 ): Promise<ProvisionResult> {
-  const { managedSubdomain, vmId } = opts
-  const fromWarmPool = opts.fromWarmPool === true
-  // Resolve the LLM credential + endpoint + model (managed key, BYO OpenRouter
-  // key, or a BYO direct-provider key with its own base URL). One resolver owns
-  // the own-key-vs-managed decision and the model/guard rules. See
-  // resolveRuntimeLlmConfig / resolveByosLlmCredentials.
-  const llmConfig = await resolveRuntimeLlmConfig(instance, runtime)
+  const { managedSubdomain, openRouterApiKey, vmId } = opts
+  const llmProvider = resolveLlmProvider(instance)
   let currentStage: VpsStage = "writing_config"
-
-  // Give the team SSH access to their own managed VPS: install every SSH key on
-  // the owning team (managed on the Team → SSH tab) into root's authorized_keys
-  // alongside the fleet key. Skipped for BYOS — the customer already owns and
-  // can reach that box. Best-effort: a failure here must not fail an otherwise-
-  // healthy provision (the box is fully functional without owner SSH; the next
-  // key add/remove or re-provision reconciles it).
-  if (instance.deploymentTarget !== "byos") {
-    try {
-      const keys = await teamPublicKeys(instance.teamId)
-      const res = await sshInstallUserAuthorizedKeys(target, keys)
-      if (res.code === 0 || res.code === null) {
-        await logInstanceEvent({
-          instanceId: instance.id,
-          stage: currentStage,
-          message: keys.length
-            ? `Installed ${keys.length} team SSH key(s) for root access on the VPS.`
-            : "No team SSH keys to install.",
-        })
-      } else {
-        await logInstanceEvent({
-          instanceId: instance.id,
-          stage: currentStage,
-          level: "warn",
-          message: `Could not install team SSH keys (exit ${res.code}); continuing. ${
-            res.stderr || res.stdout
-          }`.trim(),
-        })
-      }
-    } catch (keyErr) {
-      await logInstanceEvent({
-        instanceId: instance.id,
-        stage: currentStage,
-        level: "warn",
-        message: `Could not install team SSH keys (continuing): ${
-          keyErr instanceof Error ? keyErr.message : String(keyErr)
-        }`,
-      })
-    }
-  }
 
   /* --- 5. Credentials --------------------------------------------- */
   // Open WebUI sidecar (Hermes only): provisioned when the instance opted in
@@ -1990,6 +1562,27 @@ async function configureRuntimeOverSsh(
   // gateway token) — injected into the env and persisted encrypted at commit.
   const eventIngestToken = generateGatewayToken()
   const webuiSecretKey = webuiEnabled ? generateGatewayToken() : ""
+  const tier = (instance.modelTier ?? "mid") as BudgetTier
+  const route = routeModel(tier, llmProvider)
+
+  // Hermes pins a ≥64k OpenRouter model via its own CLI (see renderInitScript); routeModel's
+  // small `:free` slugs would be rejected by Hermes at startup. Other runtimes keep the
+  // routed model. On the NVIDIA switch, Hermes uses the routed NVIDIA model directly.
+  // Validate the slug up front so a bad model fails the deploy with a clear
+  // error instead of a silent gateway crash loop.
+  const initModel = effectiveModel({
+    runtimeId: runtime.id,
+    llmProvider,
+    tier,
+    modelSlug: instance.modelSlug,
+    routedModel: route.model,
+  })
+  if (runtime.renderInitScript && !isValidOpenRouterSlug(initModel)) {
+    throw new Error(
+      `${runtime.displayName} model "${initModel}" is not a valid OpenRouter <author>/<slug> ` +
+        `(≥64k context required). Set HERMES_MODELS in src/lib/model-router.ts or the HERMES_MODEL env var.`,
+    )
+  }
 
   /* --- 6. Write .env ---------------------------------------------- */
   currentStage = "writing_config"
@@ -2005,8 +1598,7 @@ async function configureRuntimeOverSsh(
     adminEmail,
     adminPassword,
     gatewayToken,
-    openRouterApiKey: llmConfig.apiKey,
-    baseUrl: llmConfig.baseUrl,
+    openRouterApiKey,
   })
   // Observability ingest wiring — runtime-agnostic, so both OpenClaw and Hermes
   // emit to the same endpoint with the same token contract.
@@ -2034,9 +1626,6 @@ async function configureRuntimeOverSsh(
     useCfOriginTls,
     // Put the sidecar (Open WebUI :8080) in front; the gateway stays loopback-only.
     upstreamPort: webuiEnabled && runtime.sidecar ? runtime.sidecar.port : undefined,
-    // Companion-service routes (e.g. `/n8n/`) present from first boot; the
-    // service itself is installed/started by syncToolServices after health.
-    toolServices: toolServiceRoutesForInstance(instance),
   })
   const caddyB64 = Buffer.from(caddyContent, "utf8").toString("base64")
 
@@ -2077,15 +1666,14 @@ async function configureRuntimeOverSsh(
     : Buffer.from(
         runtime.renderConfig({
           gatewayToken,
-          openRouterApiKey: llmConfig.apiKey,
-          model: llmConfig.model,
-          fallbackModel: llmConfig.fallbackModel,
-          baseUrl: llmConfig.baseUrl,
+          openRouterApiKey,
+          model: initModel,
+          fallbackModel: route.fallback,
           domain: instance.domain,
           managedSubdomain,
           ipAddress,
           tlsStatus: instance.domain ? instance.tlsStatus : null,
-          enabledToolIds: expandAutoEnabledTools(instance.enabledTools ?? []),
+          enabledToolIds: instance.enabledTools ?? [],
         }),
         "utf8",
       ).toString("base64")
@@ -2144,12 +1732,10 @@ async function configureRuntimeOverSsh(
       systemUser: runtime.paths.systemUser,
       cliBinary: runtime.cliBinary,
       envPath: runtime.paths.envPath,
-      provider: llmConfig.providerToken,
-      model: llmConfig.model,
-      baseUrl: llmConfig.baseUrl,
-      enabledToolIds: expandAutoEnabledTools(instance.enabledTools ?? []),
-      // Warm-pool VMs already ran setup/doctor at bake — skip them at claim.
-      skipSetupAndDoctor: fromWarmPool,
+      provider: llmProvider,
+      model: initModel,
+      baseUrl: route.baseUrl,
+      enabledToolIds: instance.enabledTools ?? [],
     })
     if (initScript) {
       const initStep = await sshRunScriptLogged(
@@ -2279,8 +1865,7 @@ async function configureRuntimeOverSsh(
     // Hermes: assert the OpenAI-compatible API is actually serving models (provider wired,
     // model accepted) before we point Open WebUI at it. Hard gate — a failure here means the
     // gateway is up but the agent can't talk to a model, so fail the deploy.
-    // Warm-pool deploys move this OFF the critical path (run async after commit).
-    if (runtime.id === "hermes" && !fromWarmPool) {
+    if (runtime.id === "hermes") {
       const modelsStep = await sshRunScriptLogged(
         target,
         buildApiModelsCheckScript({ envPath: runtime.paths.envPath, port: runtime.gatewayPort }),
@@ -2306,8 +1891,8 @@ async function configureRuntimeOverSsh(
 
     // Seed the Open WebUI admin and lock signup. Best-effort: a failure here
     // leaves signup open (the first visitor self-registers as admin) but does
-    // not fail the deploy. Warm-pool deploys move this OFF the critical path.
-    if (webuiEnabled && runtime.sidecar && !fromWarmPool) {
+    // not fail the deploy.
+    if (webuiEnabled && runtime.sidecar) {
       const seedStep = await sshRunScriptLogged(
         target,
         buildSeedSidecarAdminScript({
@@ -2334,24 +1919,6 @@ async function configureRuntimeOverSsh(
           ? "Open WebUI admin account created and public signup disabled."
           : "Could not seed the Open WebUI admin; signup is left open so the first visitor becomes admin.",
       })
-    }
-
-    // Companion services (n8n): install + start + seed once the gateway is
-    // healthy. Kept off the warm-pool critical path (see runWarmPoolPostChecks).
-    // Best-effort — a failure logs a warning but doesn't fail the deploy.
-    if (!fromWarmPool) {
-      await syncToolServices(instance, instance.enabledTools ?? []).catch(
-        async (err) => {
-          await logInstanceEvent({
-            instanceId: instance.id,
-            level: "warn",
-            stage: currentStage,
-            action: "tool_service_sync",
-            result: "error",
-            message: `Companion service setup failed: ${err instanceof Error ? err.message : String(err)}`,
-          })
-        },
-      )
     }
   }
 
@@ -2390,115 +1957,12 @@ async function configureRuntimeOverSsh(
     }. Direct access: http://${ipAddress}:${runtime.gatewayPort}`,
   })
 
-  // Warm-pool fast path: the gateway is healthy and committed; run the
-  // non-essential post-checks (Hermes /v1/models verification + Open WebUI
-  // admin seed) asynchronously so they don't count against the <25s delivery
-  // budget. Best-effort — a failure only flips a warning event.
-  if (fromWarmPool) {
-    void runWarmPoolPostChecks({
-      instanceId: instance.id,
-      target,
-      runtime,
-      webuiEnabled,
-      adminEmail,
-      adminPassword,
-    }).catch(() => {
-      /* observability only — deploy already committed */
-    })
-  }
-
   return {
     ipAddress,
     containerName: runtime.serviceName,
     containerPort: runtime.gatewayPort,
     vmId,
     mocked: false,
-  }
-}
-
-/**
- * Off-critical-path post-checks for a warm-pool deploy: verify Hermes'
- * `/v1/models` and seed the Open WebUI admin. Runs AFTER the instance is
- * committed `running`, so it never counts against delivery time. Each step logs
- * its own outcome and is fully best-effort.
- */
-async function runWarmPoolPostChecks(opts: {
-  instanceId: string
-  target: SshTarget
-  runtime: RuntimeEngine
-  webuiEnabled: boolean
-  adminEmail: string
-  adminPassword: string
-}): Promise<void> {
-  const { instanceId, target, runtime, webuiEnabled, adminEmail, adminPassword } = opts
-
-  if (runtime.id === "hermes") {
-    try {
-      const modelsStep = await sshRunScriptLogged(
-        target,
-        buildApiModelsCheckScript({ envPath: runtime.paths.envPath, port: runtime.gatewayPort }),
-        "health_check",
-        "provision:health (GET /v1/models) [async]",
-        { timeoutMs: 60_000 },
-      )
-      const ok = modelsStep.exitCode === 0 || modelsStep.exitCode === null
-      await logInstanceEvent({
-        instanceId,
-        level: ok ? "info" : "warn",
-        stage: "health_check",
-        action: "api_models_ok",
-        result: ok ? "ok" : "error",
-        message: ok
-          ? `${runtime.displayName} OpenAI-compatible API verified (/v1/models).`
-          : `${runtime.displayName} /v1/models post-check failed — the agent may not answer until the model wires up.`,
-      })
-    } catch {
-      /* best-effort */
-    }
-  }
-
-  if (webuiEnabled && runtime.sidecar) {
-    try {
-      const seedStep = await sshRunScriptLogged(
-        target,
-        buildSeedSidecarAdminScript({
-          port: runtime.sidecar.port,
-          signupPath: runtime.sidecar.seedAdmin.signupPath,
-          envPath: runtime.sidecar.envPath,
-          serviceName: runtime.sidecar.serviceName,
-          adminEmail,
-          adminPassword,
-        }),
-        "health_check",
-        "provision:seed (open-webui admin) [async]",
-        { timeoutMs: 120_000 },
-      )
-      const seedOk = seedStep.exitCode === 0 || seedStep.exitCode === null
-      await logInstanceEvent({
-        instanceId,
-        level: seedOk ? "info" : "warn",
-        stage: "health_check",
-        action: "webui_admin_seeded",
-        result: seedOk ? "ok" : "error",
-        message: seedOk
-          ? "Open WebUI admin account created and public signup disabled."
-          : "Could not seed the Open WebUI admin; signup is left open so the first visitor becomes admin.",
-      })
-    } catch {
-      /* best-effort */
-    }
-  }
-
-  // Companion services (n8n): install + start + seed off the warm-pool critical
-  // path. Loads the freshly-committed row so enabledTools + persisted secrets are
-  // current. Best-effort — the Caddy `/n8n/` route was already written at claim.
-  try {
-    const fresh = await db.query.instances.findFirst({
-      where: eq(instances.id, instanceId),
-    })
-    if (fresh) await syncToolServices(fresh, fresh.enabledTools ?? [])
-  } catch {
-    /* best-effort */
   }
 }
 
@@ -2679,11 +2143,16 @@ async function provisionByosBot(instance: Instance): Promise<ProvisionResult> {
       }
     }
 
-    /* --- 3+4. Shared configure-over-SSH (managed subdomain, no VM).    */
-    /*   The LLM credential (our minted key vs. the customer's own key + */
-    /*   provider/base-URL) is resolved inside via resolveRuntimeLlmConfig. */
+    /* --- 3. Resolve the LLM key (our minted key vs. customer's own) - */
+    const openRouterApiKey =
+      instance.byosLlmMode === "own_key" && instance.byosOwnApiKeyEnc
+        ? decryptSecret(instance.byosOwnApiKeyEnc)
+        : await resolveRuntimeOpenRouterKey(instance, resolveLlmProvider(instance))
+
+    /* --- 4. Shared configure-over-SSH (managed subdomain, no VM) ---- */
     return await configureRuntimeOverSsh(instance, target, host, runtime, {
       managedSubdomain: managedSubdomainForProvision,
+      openRouterApiKey,
       vmId: undefined,
     })
   } catch (err) {
@@ -2808,37 +2277,6 @@ export async function restartBot(instance: Instance): Promise<void> {
     stage: "restart",
     result: "ok",
     message: isLiveMode() ? "Service restarted." : "Restart signal received (mock).",
-  })
-}
-
-/**
- * Restart or gracefully reload the Caddy ingress on a self-hosted host.
- * `reload` swaps config with near-zero downtime; `restart` is a full stop/start
- * that briefly drops ingress. Only meaningful on systemd hosts (VPS/BYOS) — the
- * `caddy` unit does not exist on shared-container bots.
- */
-export async function restartCaddy(
-  instance: Instance,
-  mode: "reload" | "restart",
-): Promise<void> {
-  if (isLiveMode() && instance.ipAddress) {
-    if (!usesSystemd(instance)) {
-      throw new Error("Caddy is only managed on VPS/BYOS hosts.")
-    }
-    const target = sshTargetFor(instance)
-    const result =
-      mode === "restart"
-        ? await sshSystemctlRestart(target, "caddy")
-        : await sshRun(target, "systemctl reload caddy || systemctl restart caddy")
-    if (result.code !== 0 && result.code !== null) {
-      throw new Error(result.stderr?.trim() || `caddy ${mode} exited ${result.code}`)
-    }
-  }
-  await logInstanceEvent({
-    instanceId: instance.id,
-    stage: "restart",
-    result: "ok",
-    message: isLiveMode() ? `Caddy ${mode}ed.` : `Caddy ${mode} signal received (mock).`,
   })
 }
 
@@ -3042,7 +2480,7 @@ export async function deleteBot(instance: Instance): Promise<DeleteResult> {
       }
     }
     await transitionInstance(instance.id, ["deleting"], "deleted", {
-      set: { ipAddress: null, deletedIpAddress: instance.ipAddress ?? null },
+      set: { ipAddress: null },
     })
     await logInstanceEvent({
       instanceId: instance.id,
@@ -3071,12 +2509,7 @@ export async function deleteBot(instance: Instance): Promise<DeleteResult> {
       }
     }
     await transitionInstance(instance.id, ["deleting"], "deleted", {
-      set: {
-        ipAddress: null,
-        deletedIpAddress: instance.ipAddress ?? null,
-        containerName: null,
-        containerPort: null,
-      },
+      set: { ipAddress: null, containerName: null, containerPort: null },
     })
     await logInstanceEvent({
       instanceId: instance.id,
@@ -3091,7 +2524,7 @@ export async function deleteBot(instance: Instance): Promise<DeleteResult> {
 
   if (!isLiveMode() || !instance.vmId) {
     await transitionInstance(instance.id, ["deleting"], "deleted", {
-      set: { ipAddress: null, deletedIpAddress: instance.ipAddress ?? null, vmId: null },
+      set: { ipAddress: null, vmId: null },
     })
     await logInstanceEvent({
       instanceId: instance.id,
@@ -3115,7 +2548,7 @@ export async function deleteBot(instance: Instance): Promise<DeleteResult> {
       const after = await provider.getVMOrNull(vmId)
       if (after == null || deleted) {
         await transitionInstance(instance.id, ["deleting"], "deleted", {
-          set: { ipAddress: null, deletedIpAddress: instance.ipAddress ?? null, vmId: null },
+          set: { ipAddress: null, vmId: null },
         })
         await logInstanceEvent({
           instanceId: instance.id,
@@ -3248,222 +2681,6 @@ export async function installToolDependencies(
   }
 }
 
-/* --- Per-tool companion services (e.g. n8n) ------------------------------ */
-
-/** Caddy routes for the companion services an instance's enabled tools imply. */
-function toolServiceRoutesForInstance(instance: Instance): ToolServiceRoute[] {
-  return toolServicesForIds(instance.enabledTools ?? []).map((s) => ({
-    pathPrefix: s.caddyPathPrefix,
-    port: s.port,
-  }))
-}
-
-/** Every companion service the catalog can provision (enabled or not). */
-function allToolServices(): ToolService[] {
-  return AGENT_TOOLS.map((t) => t.service).filter((s): s is ToolService => !!s)
-}
-
-/**
- * Resolve (and, on first enable, mint + persist) the stable secrets a tool
- * service needs. The encryption key MUST survive restarts/reprovisions — n8n
- * encrypts its saved workflow credentials with it — so it's stored encrypted on
- * the instance and reused. The owner password gates the service's UI and is
- * surfaced to the user (and to the agent for browser control). Only n8n today.
- */
-async function resolveToolServiceSecrets(
-  instance: Instance,
-  service: ToolService,
-): Promise<{ encryptionKey: string; ownerEmail: string; ownerPassword: string }> {
-  const ownerEmail = `${service.serviceName}+${instance.id.slice(0, 8)}@sovereignml.local`
-  let encryptionKey = instance.n8nEncryptionKeyEnc
-    ? decryptSecret(instance.n8nEncryptionKeyEnc)
-    : ""
-  let ownerPassword = instance.n8nOwnerPasswordEnc
-    ? decryptSecret(instance.n8nOwnerPasswordEnc)
-    : ""
-
-  const patch: Partial<typeof instances.$inferInsert> = {}
-  if (!encryptionKey) {
-    encryptionKey = generateGatewayToken()
-    patch.n8nEncryptionKeyEnc = encryptSecret(encryptionKey)
-  }
-  if (!ownerPassword) {
-    // generateAdminPassword uses a mixed upper/lower/digit alphabet at length
-    // 24, satisfying n8n's owner-password policy (>=8 chars, a number + a
-    // capital) with overwhelming probability.
-    ownerPassword = generateAdminPassword()
-    patch.n8nOwnerPasswordEnc = encryptSecret(ownerPassword)
-  }
-  if (Object.keys(patch).length > 0) {
-    await db.update(instances).set(patch).where(eq(instances.id, instance.id))
-  }
-  return { encryptionKey, ownerEmail, ownerPassword }
-}
-
-/**
- * Self-contained bash to bring one companion service up on the box: install the
- * package (idempotent), write its env file + systemd unit, start it, wait for
- * its loopback health endpoint, then seed the owner account. Idempotent on
- * re-run (install upgrades in place; owner setup returning a 4xx is treated as
- * already-seeded). Best-effort seed — a seed failure doesn't fail the script.
- */
-function buildProvisionToolServiceScript(opts: {
-  service: ToolService
-  envB64: string
-  ownerEmail: string
-  ownerPassword: string
-}): string {
-  const { service } = opts
-  const owner = `${service.systemUser}:${service.systemUser}`
-  const setupUrl = `http://127.0.0.1:${service.port}${service.caddyPathPrefix}${service.seedOwner.setupPath}`
-  const healthUrl = `http://127.0.0.1:${service.port}${service.healthPath}`
-  const payload = JSON.stringify(
-    service.seedOwner.buildPayload({
-      email: opts.ownerEmail,
-      password: opts.ownerPassword,
-    }),
-  )
-  return `#!/bin/bash
-set -uo pipefail
-export DEBIAN_FRONTEND=noninteractive
-export NEEDRESTART_MODE=a
-${service.installSteps()}
-echo "=== tool-service: write_env (${service.serviceName}) ==="
-mkdir -p "$(dirname ${bashSingleQuoteForScript(service.envPath)})"
-echo ${bashSingleQuoteForScript(opts.envB64)} | base64 -d > ${bashSingleQuoteForScript(service.envPath)} || exit 1
-chmod 600 ${bashSingleQuoteForScript(service.envPath)}
-chown ${owner} ${bashSingleQuoteForScript(service.envPath)}
-
-echo "=== tool-service: systemd_unit (${service.serviceName}) ==="
-cat > "/etc/systemd/system/${service.serviceName}.service" <<'SVCEOF'
-${service.renderSystemdUnit()}SVCEOF
-systemctl daemon-reload
-systemctl enable ${bashSingleQuoteForScript(service.serviceName)}
-systemctl restart ${bashSingleQuoteForScript(service.serviceName)}
-
-echo "=== tool-service: wait_health (${service.serviceName}) ==="
-HEALTH_OK=0
-for _ in $(seq 1 90); do
-  if curl -sf -o /dev/null -m 5 ${bashSingleQuoteForScript(healthUrl)}; then
-    HEALTH_OK=1
-    break
-  fi
-  if ! systemctl is-active --quiet ${bashSingleQuoteForScript(service.serviceName)}; then
-    echo "${service.serviceName} is not active during health wait" >&2
-    journalctl -u ${bashSingleQuoteForScript(service.serviceName)} --no-pager -n 50 || true
-    break
-  fi
-  sleep 2
-done
-if [ "\${HEALTH_OK}" != "1" ]; then
-  echo "${service.serviceName} did not become healthy at ${healthUrl}" >&2
-  journalctl -u ${bashSingleQuoteForScript(service.serviceName)} --no-pager -n 50 || true
-  exit 1
-fi
-echo "=== tool-service: healthy (${service.serviceName}) ==="
-
-echo "=== tool-service: seed_owner (${service.serviceName}) ==="
-SEED_CODE=$(curl -s -o /tmp/toolsvc_seed.out -w '%{http_code}' -m 10 -X POST ${bashSingleQuoteForScript(setupUrl)} -H 'Content-Type: application/json' -d ${bashSingleQuoteForScript(payload)} || echo "000")
-if [ "\${SEED_CODE}" = "200" ] || [ "\${SEED_CODE}" = "201" ]; then
-  echo "owner account created"
-elif [ "\${SEED_CODE}" = "400" ] || [ "\${SEED_CODE}" = "403" ] || [ "\${SEED_CODE}" = "409" ]; then
-  echo "owner setup returned \${SEED_CODE} — treating as already-seeded"
-else
-  echo "warn: owner setup returned \${SEED_CODE} (leaving for manual setup)" >&2
-  cat /tmp/toolsvc_seed.out 2>/dev/null || true
-fi
-echo "=== tool-service: done (${service.serviceName}) ==="
-`
-}
-
-/**
- * Reconcile the box's companion services (n8n today) with the instance's enabled
- * tools: provision + start + seed each enabled service; stop+disable any that
- * are no longer enabled. Runs over SSH; best-effort per service so one bad
- * service never fails the surrounding reprovision. Caller owns the Caddy route
- * rewrite (see reprovisionBotEnv) — this only manages the service processes.
- * No-op in mock / non-systemd, or when there is nothing to add or remove.
- */
-export async function syncToolServices(
-  instance: Instance,
-  toolIds: string[],
-): Promise<void> {
-  if (!isLiveMode() || !instance.ipAddress) return
-  if (!usesSystemd(instance)) return
-
-  const enabledServices = toolServicesForIds(toolIds)
-  const enabledNames = new Set(enabledServices.map((s) => s.serviceName))
-  const toTeardown = allToolServices().filter(
-    (s) => !enabledNames.has(s.serviceName),
-  )
-  if (enabledServices.length === 0 && toTeardown.length === 0) return
-
-  const target = sshTargetFor(instance)
-
-  // Tear down removed services first (best-effort). `disable --now` stops +
-  // disables; the data dir is intentionally left in place so re-enabling keeps
-  // existing workflows.
-  for (const svc of toTeardown) {
-    await sshRun(
-      target,
-      `systemctl disable --now ${bashSingleQuoteForScript(svc.serviceName)} 2>/dev/null || true`,
-    )
-  }
-  if (toTeardown.length > 0 && enabledServices.length === 0) {
-    await db.insert(instanceLogs).values({
-      instanceId: instance.id,
-      level: "info",
-      message: `Companion service(s) stopped: ${toTeardown.map((s) => s.serviceName).join(", ")}.`,
-    })
-  }
-
-  if (enabledServices.length === 0) return
-
-  const publicUrl =
-    buildPublicGatewayUrl({
-      domain: instance.domain,
-      managedSubdomain: instance.managedSubdomain,
-      tlsStatus: instance.domain ? instance.tlsStatus : null,
-      ipAddress: instance.ipAddress,
-    })?.url ?? null
-
-  for (const svc of enabledServices) {
-    const secrets = await resolveToolServiceSecrets(instance, svc)
-    const envContent = renderEnvFile(
-      svc.renderEnv({
-        instance,
-        publicUrl,
-        pathPrefix: `${svc.caddyPathPrefix}/`,
-        encryptionKey: secrets.encryptionKey,
-        ownerEmail: secrets.ownerEmail,
-        ownerPassword: secrets.ownerPassword,
-      }),
-    )
-    const script = buildProvisionToolServiceScript({
-      service: svc,
-      envB64: Buffer.from(envContent, "utf8").toString("base64"),
-      ownerEmail: secrets.ownerEmail,
-      ownerPassword: secrets.ownerPassword,
-    })
-    const step = await sshRunScriptLogged(
-      target,
-      script,
-      "installing_service",
-      `tools:service ${svc.serviceName}`,
-      { timeoutMs: 420_000 }, // npm i -g n8n on a cold box can be slow
-    )
-    await logSshStep(instance.id, step)
-    const ok = step.exitCode === 0 || step.exitCode === null
-    await db.insert(instanceLogs).values({
-      instanceId: instance.id,
-      level: ok ? "info" : "warn",
-      message: ok
-        ? `Companion service ${svc.serviceName} is up at ${publicUrl ?? ""}${svc.caddyPathPrefix}/.`
-        : `Companion service ${svc.serviceName} did not come up cleanly; it will re-apply on the next restart.`,
-    })
-  }
-}
-
 /** Filesystem-safe, unique `.md` filename for a knowledge source. */
 function knowledgeFileName(name: string, used: Set<string>): string {
   const base =
@@ -3572,11 +2789,18 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
         : generateAdminPassword())
       : ""
 
-    // Resolve the LLM credential + endpoint + model in one place. BYOS
-    // "own_key" instances inject the customer's stored key (honoring the active
-    // primary/fallback slot and its provider/base-URL); everyone else uses (or
-    // mints) the per-instance OpenRouter key (skipped for NVIDIA-primary bots).
-    const llmConfig = await resolveRuntimeLlmConfig(instance, runtime)
+    const tier = (instance.modelTier ?? "mid") as BudgetTier
+    const llmProvider = resolveLlmProvider(instance)
+    const route = routeModel(tier, llmProvider)
+
+    // Resolve the LLM key. BYOS "own_key" instances inject the customer's
+    // stored key; everyone else uses (or mints) the per-instance OpenRouter
+    // runtime key (skipped for NVIDIA-primary bots). Restart-only paths decrypt
+    // the existing key rather than minting again.
+    const openRouterApiKey =
+      instance.byosLlmMode === "own_key" && instance.byosOwnApiKeyEnc
+        ? decryptSecret(instance.byosOwnApiKeyEnc)
+        : await resolveRuntimeOpenRouterKey(instance, llmProvider)
 
     const gatewayToken = instance.gatewayTokenEnc
       ? decryptSecret(instance.gatewayTokenEnc)
@@ -3588,13 +2812,26 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
       ? decryptSecret(instance.eventIngestTokenEnc)
       : generateGatewayToken()
 
+    const initModel = effectiveModel({
+      runtimeId: runtime.id,
+      llmProvider,
+      tier,
+      modelSlug: instance.modelSlug,
+      routedModel: route.model,
+    })
+    if (runtime.renderInitScript && !isValidOpenRouterSlug(initModel)) {
+      throw new Error(
+        `${runtime.displayName} model "${initModel}" is not a valid OpenRouter <author>/<slug> ` +
+          `(≥64k context required). Set HERMES_MODELS in src/lib/model-router.ts or the HERMES_MODEL env var.`,
+      )
+    }
+
     const env = runtime.buildEnv({
       instance: hasAdminLogin ? { ...instance, openclawAdminEmail: adminEmail } : instance,
       adminEmail,
       adminPassword,
       gatewayToken,
-      openRouterApiKey: llmConfig.apiKey,
-      baseUrl: llmConfig.baseUrl,
+      openRouterApiKey,
     })
     env.PLATFORM_EVENT_INGEST_URL = `${NEXT_PUBLIC_GATEWAY_BASE_URL()}/api/instances/${instance.id}/events`
     env.PLATFORM_EVENT_INGEST_TOKEN = eventIngestToken
@@ -3623,10 +2860,10 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
         systemUser,
         cliBinary: runtime.cliBinary,
         envPath,
-        provider: llmConfig.providerToken,
-        model: llmConfig.model,
-        baseUrl: llmConfig.baseUrl,
-        enabledToolIds: expandAutoEnabledTools(instance.enabledTools ?? []),
+        provider: llmProvider,
+        model: initModel,
+        baseUrl: route.baseUrl,
+        enabledToolIds: instance.enabledTools ?? [],
       })
       if (initScript) {
         const initStep = await sshRunScriptLogged(
@@ -3651,15 +2888,14 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
         configPath,
         runtime.renderConfig({
           gatewayToken,
-          openRouterApiKey: llmConfig.apiKey,
-          model: llmConfig.model,
-          fallbackModel: llmConfig.fallbackModel,
-          baseUrl: llmConfig.baseUrl,
+          openRouterApiKey,
+          model: initModel,
+          fallbackModel: route.fallback,
           domain: instance.domain,
           managedSubdomain: instance.managedSubdomain,
           ipAddress: instance.ipAddress,
           tlsStatus: instance.tlsStatus,
-          enabledToolIds: expandAutoEnabledTools(instance.enabledTools ?? []),
+          enabledToolIds: instance.enabledTools ?? [],
         }),
       )
       await sshRun(target, `chown -R ${owner} '${installDir}/${configSubdir}'`)
@@ -3691,36 +2927,6 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
     // read/cite it. Idempotent (rebuilds the dir from the DB each time).
     await writeKnowledgeFiles(target, workspaceDir, owner, instance.id)
 
-    // Rewrite the Caddyfile so companion-service routes (e.g. `/n8n/`) reflect
-    // the current enabled-tools set. reprovisionBotEnv historically never
-    // touched Caddy, so enabling/disabling n8n post-create would otherwise never
-    // get (or lose) its route. renderCaddyfile is the single source of truth
-    // (same args as first provision + instance-ingress), so with no companion
-    // service the output is unchanged and the reload is a no-op. Best-effort:
-    // Caddy runs graceful reload and keeps serving on a bad config.
-    const webuiEnabled =
-      Boolean(instance.webuiEnabled) && Boolean(runtime.sidecar)
-    const useCfOriginTls =
-      Boolean(instance.managedSubdomain) &&
-      (await sshVmHasCloudflareOriginCerts(target))
-    const caddyContent = runtime.renderCaddyfile({
-      domain: instance.domain,
-      managedSubdomain: instance.managedSubdomain,
-      useCfOriginTls,
-      domainUseInternalTls: Boolean(instance.domain) && instance.domainProxied,
-      upstreamPort:
-        webuiEnabled && runtime.sidecar ? runtime.sidecar.port : undefined,
-      toolServices: toolServiceRoutesForInstance(instance),
-    })
-    const caddyResult = await sshInstallCaddyfile(target, caddyContent)
-    if (caddyResult.code !== 0 && caddyResult.code !== null) {
-      await db.insert(instanceLogs).values({
-        instanceId: instance.id,
-        level: "warn",
-        message: `Caddy reload during reprovision returned exit ${caddyResult.code}; routing may be stale until the next deploy.`,
-      })
-    }
-
     await sshSystemctlRestart(target, runtime.serviceName)
 
     await db.insert(instanceLogs).values({
@@ -3728,11 +2934,6 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
       level: "info",
       message: `${runtime.displayName} service restarted with new config and identity files.`,
     })
-
-    // Reconcile companion services (n8n) with the enabled-tools set: provision +
-    // start + seed newly-enabled ones, stop+disable removed ones. Best-effort so
-    // a service hiccup never fails the surrounding config/env reprovision.
-    await syncToolServices(instance, instance.enabledTools ?? [])
   } else if (instance.containerName && instance.containerPort) {
     await sshDockerRun(
       target,
