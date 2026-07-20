@@ -1,137 +1,56 @@
-import Link from "next/link"
 import { redirect } from "next/navigation"
 
+import { db, and, inArray, sql, memberships, instances, notInArray } from "@/db"
 import { requireTenantAdmin, isTenantGuardError } from "@/lib/tenant-admin-access"
-import { getTenantConfig } from "@/lib/tenant"
-import { getTenantChildTeamIds } from "@/lib/tenant-scope"
-import { getAccountHealth, getFleetHealth } from "@/lib/admin-accounts"
-import { PageContainer, PageHeader, PageSection } from "@/components/layout/page-container"
-import { StatCard } from "@/components/admin/stat-card"
-import { StatusBadge } from "@/components/admin/status-badge"
-import { Card } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { listChildTeams } from "@/lib/tenant"
+import { PageContainer, PageHeader } from "@/components/layout/page-container"
+import { CustomersClient, type Customer } from "./customers-client"
 
 export const dynamic = "force-dynamic"
 
-export default async function TenantDashboardPage() {
+export default async function TenantCustomersPage() {
   const admin = await requireTenantAdmin()
   if (isTenantGuardError(admin)) redirect("/dashboard")
 
-  const teamIds = await getTenantChildTeamIds(admin.tenantTeamId)
-  const [accounts, fleet, cfg] = await Promise.all([
-    getAccountHealth({ teamIds }),
-    getFleetHealth({ teamIds }),
-    getTenantConfig(admin.tenantTeamId),
-  ])
+  const children = await listChildTeams(admin.tenantTeamId)
+  const ids = children.map((c) => c.id)
 
-  const totalAgents = fleet.rows.length
-  const runningAgents = fleet.rows.filter((r) => r.status === "running").length
-  const totalCustomers = accounts.rows.length
-  const suspendedCustomers = accounts.rows.filter((r) => r.suspended).length
+  const agentCounts = new Map<string, number>()
+  const memberCounts = new Map<string, number>()
+  if (ids.length) {
+    const agentRows = await db
+      .select({ teamId: instances.teamId, count: sql<number>`count(*)` })
+      .from(instances)
+      .where(and(inArray(instances.teamId, ids), notInArray(instances.status, ["deleted"])))
+      .groupBy(instances.teamId)
+    for (const r of agentRows) agentCounts.set(r.teamId, Number(r.count))
 
-  // Reseller readiness signals — surface unconfigured pieces that block the
-  // white-label from actually serving customers.
-  const readiness = [
-    { label: "Own OpenRouter account", ok: Boolean(cfg?.openRouterProvisioningKeyEnc) },
-    { label: "Stripe Connect (charges enabled)", ok: Boolean(cfg?.stripeConnectChargesEnabled) },
-    { label: "Own Chatwoot support", ok: Boolean(cfg?.chatwootApiTokenEnc) },
-  ]
+    const memberRows = await db
+      .select({ teamId: memberships.teamId, count: sql<number>`count(*)` })
+      .from(memberships)
+      .where(inArray(memberships.teamId, ids))
+      .groupBy(memberships.teamId)
+    for (const r of memberRows) memberCounts.set(r.teamId, Number(r.count))
+  }
+
+  const customers: Customer[] = children.map((c) => ({
+    id: c.id,
+    name: c.name,
+    suspended: c.suspendedAt != null,
+    agentLimit: c.agentLimit,
+    seatLimit: c.seatLimit,
+    agents: agentCounts.get(c.id) ?? 0,
+    members: memberCounts.get(c.id) ?? 0,
+    createdAt: c.createdAt.toISOString(),
+  }))
 
   return (
     <PageContainer>
       <PageHeader
-        title="Reseller Dashboard"
-        description="An overview of your white-label business — customers, agents, and setup."
+        title="Customers"
+        description="End-customer accounts under your white-label. New customers can self-register on your custom domain."
       />
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Customers" value={totalCustomers} href="/tenant-admin/customers" />
-        <StatCard
-          label="Suspended"
-          value={suspendedCustomers}
-          tone={suspendedCustomers > 0 ? "warning" : "muted"}
-        />
-        <StatCard label="Agents" value={totalAgents} href="/tenant-admin/agents" />
-        <StatCard
-          label="Running"
-          value={runningAgents}
-          tone={runningAgents > 0 ? "positive" : "muted"}
-        />
-      </div>
-
-      <PageSection
-        title="Account health"
-        description="Health across your customers — worst-of their agents, escalated for suspension or payment issues."
-      >
-        <div className="mb-4 grid gap-4 sm:grid-cols-3">
-          <StatCard label="Healthy" value={accounts.counts.healthy} tone="positive" />
-          <StatCard label="At risk" value={accounts.counts.at_risk} tone="warning" />
-          <StatCard label="Churn risk" value={accounts.counts.churn_risk} tone="danger" />
-        </div>
-        <Card className="overflow-hidden p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Customer</TableHead>
-                <TableHead>Owner</TableHead>
-                <TableHead>Agents</TableHead>
-                <TableHead>Members</TableHead>
-                <TableHead>Health</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {accounts.rows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
-                    No customers yet.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                accounts.rows.slice(0, 25).map((r) => (
-                  <TableRow key={r.teamId}>
-                    <TableCell className="font-medium">{r.name}</TableCell>
-                    <TableCell className="text-muted-foreground">{r.ownerEmail}</TableCell>
-                    <TableCell className="font-mono">{r.agents}</TableCell>
-                    <TableCell className="font-mono">{r.members}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={r.suspended ? "churn_risk" : r.tier} />
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </Card>
-      </PageSection>
-
-      <PageSection
-        title="Setup"
-        description="Complete these to serve customers on your own infrastructure and billing."
-      >
-        <Card size="sm" className="divide-y divide-border p-0">
-          {readiness.map((r) => (
-            <div key={r.label} className="flex items-center justify-between px-4 py-3">
-              <span className="text-sm">{r.label}</span>
-              <StatusBadge status={r.ok ? "ready" : "pending"} />
-            </div>
-          ))}
-          <div className="px-4 py-3">
-            <Button
-              variant="outline"
-              size="sm"
-              render={<Link href="/tenant-admin/settings">Open settings</Link>}
-            />
-          </div>
-        </Card>
-      </PageSection>
+      <CustomersClient customers={customers} />
     </PageContainer>
   )
 }

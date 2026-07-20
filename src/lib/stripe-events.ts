@@ -21,7 +21,7 @@ import { usdToCredits } from "@/lib/credit-pricing"
 import { BYOS_SIGNUP_CREDITS } from "@/configs/plans"
 import { notify } from "@/lib/notifications/dispatch"
 import { createAdminNotification } from "@/lib/admin-notify"
-import { claimEvent, releaseEvent } from "@/lib/idempotency"
+import { claimEvent } from "@/lib/idempotency"
 import { posthogServer } from "@/lib/posthog-server"
 import { adsConversions } from "@/lib/ads"
 import { creditGrantSchedule } from "@/lib/plan-period"
@@ -196,10 +196,6 @@ export async function handleSubscriptionUpdated(
     where: eq(subscriptions.stripeSubscriptionId, sub.id),
   })
   if (!local) return
-  // Reseller (Stripe Connect) subscriptions are owned by the tenant's connected
-  // account and handled exclusively by the connect webhook. A connected event
-  // must never be processed here (see handleConnect* in stripe-connect-events.ts).
-  if (local.connectAccountId) return
   await db
     .update(subscriptions)
     .set({
@@ -231,8 +227,6 @@ export async function handleSubscriptionDeleted(
     with: { instance: true },
   })
   if (!local) return
-  // Reseller (Connect) subscriptions belong to the connect webhook only.
-  if (local.connectAccountId) return
   await db
     .update(subscriptions)
     .set({ status: "canceled" })
@@ -334,11 +328,6 @@ export async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> 
     with: { plan: true, instance: { with: { serverConfig: true } } },
   })
   if (!local) return
-  // Never fund the platform wallet from a reseller (Connect) invoice — that money
-  // is the tenant's, paid to the tenant's own connected account. This replaces
-  // the fragile implicit invariant (reseller rows have planId=null → 0 credits)
-  // with an explicit guard. The connect webhook owns these rows.
-  if (local.connectAccountId) return
   await db
     .update(subscriptions)
     .set({ status: "active" })
@@ -364,36 +353,26 @@ export async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> 
       local.interval,
       local.currentPeriodEnd ?? null,
     )
-    // Let a failed deposit propagate so the route releases the event claim and
-    // Stripe retries (a 500). Guard with a per-invoice sub-claim so a partial
-    // failure elsewhere in this handler can't double-grant on retry: `planMode:
-    // "add"` stacks deposits, so re-running an already-succeeded grant would
-    // over-credit. The deposit and the `nextCreditGrantAt` update share one
-    // failure domain — if the deposit throws, the drip schedule is not updated.
-    const grantKey = `invoice_grant:${invoice.id}`
-    if (await claimEvent("stripe", grantKey)) {
-      try {
-        await fundWallet(
-          local.userId,
-          credits,
-          "plan_deposit",
-          `Plan ${action}: ${local.plan?.name ?? "unknown"} (${periodLabel})`,
-          (local.instance as { id?: string } | null)?.id,
-          { planExpiry: expireAt, planMode },
-        )
-        // Reset the drip schedule: a yearly (re)deposit re-seeds it; a monthly one
-        // clears it (Stripe's monthly invoice is the renewal, not a drip).
-        await db
-          .update(subscriptions)
-          .set({ nextCreditGrantAt })
-          .where(eq(subscriptions.id, local.id))
-        console.log(
-          `[stripe] Granted ${credits.toLocaleString()} credits to user ${local.userId} (invoice ${invoice.id}, ${planMode}, interval ${local.interval})`,
-        )
-      } catch (err) {
-        await releaseEvent("stripe", grantKey)
-        throw err
-      }
+    try {
+      await fundWallet(
+        local.userId,
+        credits,
+        "plan_deposit",
+        `Plan ${action}: ${local.plan?.name ?? "unknown"} (${periodLabel})`,
+        (local.instance as { id?: string } | null)?.id,
+        { planExpiry: expireAt, planMode },
+      )
+      // Reset the drip schedule: a yearly (re)deposit re-seeds it; a monthly one
+      // clears it (Stripe's monthly invoice is the renewal, not a drip).
+      await db
+        .update(subscriptions)
+        .set({ nextCreditGrantAt })
+        .where(eq(subscriptions.id, local.id))
+      console.log(
+        `[stripe] Granted ${credits.toLocaleString()} credits to user ${local.userId} (invoice ${invoice.id}, ${planMode}, interval ${local.interval})`,
+      )
+    } catch (err) {
+      console.error(`[stripe] depositToWallet failed for user ${local.userId}:`, err)
     }
   }
 
@@ -406,26 +385,20 @@ export async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> 
     byosInstance?.byosLlmMode === "managed_credits" &&
     invoice.billing_reason === "subscription_create"
   ) {
-    // Same propagate-and-retry contract as the plan grant above, with its own
-    // per-invoice sub-claim so the retry deposits at most once.
-    const byosGrantKey = `byos_signup_grant:${invoice.id}`
-    if (await claimEvent("stripe", byosGrantKey)) {
-      try {
-        await fundWallet(
-          local.userId,
-          BYOS_SIGNUP_CREDITS,
-          "plan_deposit",
-          "BYOS signup credits",
-          byosInstance.id,
-          { planMode: "add" },
-        )
-        console.log(
-          `[stripe] Granted ${BYOS_SIGNUP_CREDITS} BYOS signup credits to user ${local.userId} (invoice ${invoice.id})`,
-        )
-      } catch (err) {
-        await releaseEvent("stripe", byosGrantKey)
-        throw err
-      }
+    try {
+      await fundWallet(
+        local.userId,
+        BYOS_SIGNUP_CREDITS,
+        "plan_deposit",
+        "BYOS signup credits",
+        byosInstance.id,
+        { planMode: "add" },
+      )
+      console.log(
+        `[stripe] Granted ${BYOS_SIGNUP_CREDITS} BYOS signup credits to user ${local.userId} (invoice ${invoice.id})`,
+      )
+    } catch (err) {
+      console.error(`[stripe] BYOS signup credit grant failed for user ${local.userId}:`, err)
     }
   }
 }

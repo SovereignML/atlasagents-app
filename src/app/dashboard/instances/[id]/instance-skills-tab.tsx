@@ -191,8 +191,8 @@ export function SkillsTab({
                   )}
                   <Button
                     size="sm"
-                    variant={on ? "default" : "outline"}
-                    className="mt-3 rounded-full"
+                    variant={on ? "outline" : "default"}
+                    className="mt-3"
                     disabled={disabled}
                     onClick={() => toggle(skill)}
                   >

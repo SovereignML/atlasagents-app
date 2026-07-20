@@ -54,37 +54,6 @@ export async function isChildOf(
   return Boolean(row)
 }
 
-/**
- * True when `userId` is a tenant MANAGER (owner or admin) of the white-label
- * parent tenant that `childTeamId` belongs to. This is the membership-based
- * scope check the reseller stack should use — the older `isUserInTenantScopeOf`
- * / god-view keyed on the tenant's OWNER only, so a non-owner tenant admin (whom
- * `requireTenantAdmin` already admits) saw nothing. Gates act-as-team honoring
- * and the instance god-view.
- */
-export async function isTenantManagerOverChild(
-  userId: string,
-  childTeamId: string,
-): Promise<boolean> {
-  const child = await db.query.teams.findFirst({
-    where: eq(teams.id, childTeamId),
-    columns: { parentTeamId: true },
-  })
-  if (!child?.parentTeamId) return false
-
-  const parent = await db.query.teams.findFirst({
-    where: eq(teams.id, child.parentTeamId),
-    columns: { id: true, whiteLabelEnabled: true },
-  })
-  if (!parent?.whiteLabelEnabled) return false
-
-  const membership = await db.query.memberships.findFirst({
-    where: and(eq(memberships.teamId, parent.id), eq(memberships.userId, userId)),
-    columns: { role: true },
-  })
-  return membership?.role === "owner" || membership?.role === "admin"
-}
-
 /** The reseller config row for a tenant team, or null if it isn't a tenant. */
 export async function getTenantConfig(
   parentTeamId: string,
@@ -99,22 +68,6 @@ export async function getTenantConfig(
 /** True when `teamId` is a reseller tenant (has a tenantConfig row). */
 export async function isTenant(teamId: string): Promise<boolean> {
   return Boolean(await getTenantConfig(teamId))
-}
-
-/**
- * True when `teamId` is a CHILD end-customer team of a reseller tenant (its
- * `parentTeamId` points at a team that has a `tenantConfig`). Such teams MUST
- * mint their agents' LLM keys against the tenant's own OpenRouter account — if
- * the tenant hasn't configured one, the deploy fails closed rather than silently
- * billing the platform. See getOrMintInstanceOpenRouterKey.
- */
-export async function isResellerChildTeam(teamId: string): Promise<boolean> {
-  const team = await db.query.teams.findFirst({
-    where: eq(teams.id, teamId),
-    columns: { parentTeamId: true },
-  })
-  if (!team?.parentTeamId) return false
-  return Boolean(await getTenantConfig(team.parentTeamId))
 }
 
 /**
@@ -184,26 +137,11 @@ export async function getTenantOpenRouterKey(teamId: string): Promise<string | n
     : null
 }
 
-/**
- * True when a team is blocked from operating — either it was suspended directly
- * by its tenant admin (`suspendedAt`), OR it is a child end-customer whose
- * reseller tenant is itself suspended or has lost white-label entitlement. The
- * cascade means revoking/suspending a whole reseller instantly stops every one
- * of its child customers, without having to flag each child row individually.
- */
+/** True when a team has been suspended by its tenant admin. */
 export async function isTeamSuspended(teamId: string): Promise<boolean> {
   const team = await db.query.teams.findFirst({
     where: eq(teams.id, teamId),
-    columns: { suspendedAt: true, parentTeamId: true },
+    columns: { suspendedAt: true },
   })
-  if (!team) return false
-  if (team.suspendedAt) return true
-  if (team.parentTeamId) {
-    const parent = await db.query.teams.findFirst({
-      where: eq(teams.id, team.parentTeamId),
-      columns: { suspendedAt: true, whiteLabelEnabled: true },
-    })
-    if (parent && (parent.suspendedAt || !parent.whiteLabelEnabled)) return true
-  }
-  return false
+  return Boolean(team?.suspendedAt)
 }

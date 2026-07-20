@@ -17,6 +17,7 @@ import { AgentConfigurator } from "@/components/marketing/sections/agent-configu
 import { PricingElevation } from "@/components/marketing/sections/pricing-elevation"
 import { KnowledgeBaseFAQ } from "@/components/marketing/sections/knowledge-base-faq"
 import { ConvergenceCTA } from "@/components/marketing/sections/convergence-cta"
+import { LogoCloudSection } from "@/components/marketing/sections/logo-cloud-section"
 import { IntegrationConstellation } from "@/components/marketing/sections/integration-constellation"
 // import { BackedBy } from "@/components/marketing/sections/backed-by"
 
@@ -237,8 +238,8 @@ export default function Home() {
             confirmed (see backed-by.tsx). Intentionally left un-rendered. */}
         {/* <BackedBy /> */}
         <PricingElevation />
-        {/* Ecosystem/infrastructure strip intentionally not rendered — the product
-            does not surface the underlying cloud providers. See logo-cloud-section.tsx */}
+        {/* Ecosystem strip — "powered by" infrastructure; see logo-cloud-section.tsx */}
+        <LogoCloudSection />
         <KnowledgeBaseFAQ />
       </main>
       <Footer />

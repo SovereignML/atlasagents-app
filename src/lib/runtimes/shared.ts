@@ -8,77 +8,8 @@ import type {
   RenderConfigArgs,
   RuntimeEngine,
   RuntimeId,
-  ToolServiceRoute,
 } from "./types"
 import { buildBootstrapFraming, browserInstallStep } from "./bootstrap"
-
-/* --- Caddy building blocks (shared by both runtime renderers) ------------ */
-
-/**
- * A Caddy `reverse_proxy` block to a loopback port. The first line
- * (`reverse_proxy … {`) is emitted WITHOUT leading indent so the caller controls
- * where the block starts; the `header_up` lines sit at `indent + 2` and the
- * closing brace at `indent`. At indent "  " this is byte-identical to the
- * long-standing hand-written upstream blocks.
- */
-export function caddyReverseProxy(port: number, indent: string): string {
-  return `reverse_proxy localhost:${port} {
-${indent}  header_up Host {host}
-${indent}  header_up X-Real-IP {remote_host}
-${indent}}`
-}
-
-/**
- * A Caddy `handle` block wrapping a `reverse_proxy`. `pathGlob` null → a
- * catch-all `handle { … }`. `indent` is the block's base column (the
- * `handle`/closing-brace column); the first line is emitted without leading
- * indent so the caller places it.
- */
-function caddyHandleProxy(
-  pathGlob: string | null,
-  port: number,
-  indent: string,
-): string {
-  const matcher = pathGlob ? `${pathGlob} ` : ""
-  return `handle ${matcher}{
-${indent}  ${caddyReverseProxy(port, indent + "  ")}
-${indent}}`
-}
-
-/**
- * `handle <prefix>/*` blocks for per-tool companion services (e.g. n8n), with no
- * gateway catch-all — for splicing ahead of a body that already routes the
- * gateway (Hermes dual-route). Returns "" for an empty list. Each block's first
- * line is unindented; subsequent blocks carry `indent`.
- */
-export function renderToolServiceHandles(
-  toolServices: ToolServiceRoute[] | undefined,
-  indent: string,
-): string {
-  if (!toolServices || toolServices.length === 0) return ""
-  return toolServices
-    .map((ts) => caddyHandleProxy(`${ts.pathPrefix}/*`, ts.port, indent))
-    .join(`\n${indent}`)
-}
-
-/**
- * A full site-block body when companion services share the public host: one
- * `handle <prefix>/*` per service (ahead of the catch-all) plus a catch-all
- * `handle` to `gatewayPort`. First line unindented; subsequent blocks carry
- * `indent`.
- */
-export function renderToolServiceSiteBody(
-  toolServices: ToolServiceRoute[],
-  gatewayPort: number,
-  indent: string,
-): string {
-  return [
-    ...toolServices.map((ts) =>
-      caddyHandleProxy(`${ts.pathPrefix}/*`, ts.port, indent),
-    ),
-    caddyHandleProxy(null, gatewayPort, indent),
-  ].join(`\n${indent}`)
-}
 
 const PASSWORD_ALPHABET =
   "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
@@ -256,13 +187,10 @@ export function createRuntime(spec: RuntimeSpec): RuntimeEngine {
    * via either a baked CF origin cert or `tls internal` (self-signed).
    */
   function renderCaddyfile(args: RenderCaddyfileArgs): string {
-    // With no companion services this is byte-identical to the long-standing
-    // bare `reverse_proxy`; with services (e.g. n8n) it becomes `handle` blocks
-    // so `/n8n/*` can be routed ahead of the gateway catch-all.
-    const upstreamBlock =
-      args.toolServices && args.toolServices.length > 0
-        ? renderToolServiceSiteBody(args.toolServices, spec.gatewayPort, "  ")
-        : caddyReverseProxy(spec.gatewayPort, "  ")
+    const upstreamBlock = `reverse_proxy localhost:${spec.gatewayPort} {
+    header_up Host {host}
+    header_up X-Real-IP {remote_host}
+  }`
 
     const port80 = `:80 {
   ${upstreamBlock}

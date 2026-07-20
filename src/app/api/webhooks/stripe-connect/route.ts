@@ -5,7 +5,6 @@ import {
   handleConnectCheckoutCompleted,
   handleConnectSubscriptionUpdated,
   handleConnectSubscriptionDeleted,
-  handleConnectInvoicePaymentFailed,
 } from "@/lib/stripe-connect-events"
 import { claimEvent, releaseEvent } from "@/lib/idempotency"
 
@@ -54,13 +53,10 @@ export async function POST(req: NextRequest) {
         await handleConnectCheckoutCompleted(event.data.object, event.account)
         break
       case "customer.subscription.updated":
-        await handleConnectSubscriptionUpdated(event.data.object, event.account)
+        await handleConnectSubscriptionUpdated(event.data.object)
         break
       case "customer.subscription.deleted":
-        await handleConnectSubscriptionDeleted(event.data.object, event.account)
-        break
-      case "invoice.payment_failed":
-        await handleConnectInvoicePaymentFailed(event.data.object, event.account)
+        await handleConnectSubscriptionDeleted(event.data.object)
         break
       default:
         console.log(`[stripe connect webhook] Unhandled event type: ${event.type}`)

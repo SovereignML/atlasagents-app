@@ -14,29 +14,15 @@ export type RegionConfig = {
 }
 
 export const REGIONS: readonly RegionConfig[] = [
-  // SINGLE-LOCATION BASELINE: the warm pool warms exactly one location
-  // (`linode | g6-standard-2 | eu-central`), so Frankfurt is the ONLY available
-  // managed region — it must be the first available by sortOrder so it is picked
-  // as the default region for every deploy (the wizard sends no regionSlug). The
-  // other locations stay in the catalog (disabled) for FKs / future expansion.
-  // To move the baseline elsewhere, enable a different region here AND repoint the
-  // pool (POOL_REGION_CODE) to that region's Linode code, or claims will miss.
-  {
-    slug: "eu-central-1",
-    name: "Frankfurt",
-    country: "Germany",
-    flag: "\u{1F1E9}\u{1F1EA}",
-    available: true,
-    sortOrder: 10,
-    providerRegion: "fra1",
-  },
+  // US-only for now. The other locations are kept in the catalog but disabled so
+  // they don't appear in the region picker or get picked as the default region.
   {
     slug: "us-east-1",
     name: "Newark",
     country: "United States (East)",
     flag: "\u{1F1FA}\u{1F1F8}",
-    available: false,
-    sortOrder: 20,
+    available: true,
+    sortOrder: 10,
     providerRegion: "us-east",
   },
   {
@@ -44,9 +30,18 @@ export const REGIONS: readonly RegionConfig[] = [
     name: "Fremont",
     country: "United States (West)",
     flag: "\u{1F1FA}\u{1F1F8}",
+    available: true,
+    sortOrder: 20,
+    providerRegion: "us-west",
+  },
+  {
+    slug: "eu-central-1",
+    name: "Frankfurt",
+    country: "Germany",
+    flag: "\u{1F1E9}\u{1F1EA}",
     available: false,
     sortOrder: 30,
-    providerRegion: "us-west",
+    providerRegion: "fra1",
   },
   {
     slug: "eu-west-1",

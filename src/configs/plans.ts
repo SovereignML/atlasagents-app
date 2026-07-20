@@ -27,8 +27,6 @@ export type PlanConfig = {
   sortOrder: number
   /** Credits granted each billing period (seed + product logic) */
   creditsPerPeriod: number
-  /** Team seats incl. the owner (who always occupies one); `Infinity` = unlimited. */
-  seats: number
   /** Monthly list price (0 for Free) — this is the all-in customer-facing price (promo/live) */
   displayPriceMonthly: number
   /** Annual list price (0 for Free; Enterprise may omit use of this) — promo/live */
@@ -65,7 +63,6 @@ export const PLANS: readonly PlanConfig[] = [
       "10 credits included",
       "Limited workflows",
       "Basic agent deployment",
-      "1 team seat",
       "Community support",
     ],
     restrictions: ["No always-on agents"],
@@ -74,7 +71,6 @@ export const PLANS: readonly PlanConfig[] = [
     isActive: true,
     sortOrder: 0,
     creditsPerPeriod: 10,
-    seats: 1,
     displayPriceMonthly: 0,
     displayPriceYearly: 0,
     fullPriceMonthly: 0,
@@ -95,22 +91,19 @@ export const PLANS: readonly PlanConfig[] = [
       "Workflow automation",
       "Email support",
       "1 live agent included",
-      "2 team seats",
     ],
     stripePriceIdMonthly: process.env.STRIPE_PRICE_LITE_MONTHLY ?? "",
     stripePriceIdYearly: process.env.STRIPE_PRICE_LITE_YEARLY ?? "",
     isActive: true,
     sortOrder: 5,
     creditsPerPeriod: 500,
-    seats: 2,
     displayPriceMonthly: 9,
     displayPriceYearly: 90,
     fullPriceMonthly: 9,
     fullPriceYearly: 90,
     cta: "get-started",
-    // Every self-serve plan provisions the SAME baseline box (Linode g6-standard-2,
-    // 2 vCPU / 4GB, Frankfurt). Only creditsPerPeriod differs between tiers.
-    serverConfigSlug: "shared-4g",
+    // Smallest runtime-safe tier (>=2GB RAM) for the always-on agent.
+    serverConfigSlug: "shared-2g",
   },
   {
     slug: "builder",
@@ -124,14 +117,12 @@ export const PLANS: readonly PlanConfig[] = [
       "Basic integrations",
       "Email support",
       "1 live agent included",
-      "5 team seats",
     ],
     stripePriceIdMonthly: process.env.STRIPE_PRICE_BUILDER_MONTHLY ?? "",
     stripePriceIdYearly: process.env.STRIPE_PRICE_BUILDER_YEARLY ?? "",
     isActive: true,
     sortOrder: 10,
     creditsPerPeriod: 1_000,
-    seats: 5,
     displayPriceMonthly: 19,
     displayPriceYearly: 190,
     fullPriceMonthly: 29,
@@ -151,21 +142,19 @@ export const PLANS: readonly PlanConfig[] = [
       "Priority processing",
       "Standard support",
       "3 live agents included",
-      "10 team seats",
     ],
     stripePriceIdMonthly: process.env.STRIPE_PRICE_OPERATOR_MONTHLY ?? "",
     stripePriceIdYearly: process.env.STRIPE_PRICE_OPERATOR_YEARLY ?? "",
     isActive: true,
     sortOrder: 20,
     creditsPerPeriod: 2_000,
-    seats: 10,
     displayPriceMonthly: 69,
     displayPriceYearly: 690,
     fullPriceMonthly: 99,
     fullPriceYearly: 990,
     highlight: true,
     cta: "get-started",
-    serverConfigSlug: "shared-4g",
+    serverConfigSlug: "shared-8g",
   },
   {
     slug: "scale",
@@ -179,20 +168,18 @@ export const PLANS: readonly PlanConfig[] = [
       "Advanced monitoring",
       "Priority support",
       "10 live agents included",
-      "25 team seats",
     ],
     stripePriceIdMonthly: process.env.STRIPE_PRICE_SCALE_MONTHLY ?? "",
     stripePriceIdYearly: process.env.STRIPE_PRICE_SCALE_YEARLY ?? "",
     isActive: true,
     sortOrder: 30,
     creditsPerPeriod: 5_000,
-    seats: 25,
     displayPriceMonthly: 179,
     displayPriceYearly: 1_790,
     fullPriceMonthly: 249,
     fullPriceYearly: 2_490,
     cta: "get-started",
-    serverConfigSlug: "shared-4g",
+    serverConfigSlug: "shared-16g",
   },
   {
     slug: "enterprise",
@@ -201,19 +188,17 @@ export const PLANS: readonly PlanConfig[] = [
     description: "For high-scale organizations",
     features: [
       "Custom credit allocation",
-      "Volume credit pricing",
+      "Dedicated infrastructure",
       "SLA guarantees",
       "Custom integrations",
       "Dedicated support",
       "Scalable agent deployments",
-      "Unlimited team seats",
     ],
     stripePriceIdMonthly: process.env.STRIPE_PRICE_ENTERPRISE_MONTHLY ?? "",
     stripePriceIdYearly: process.env.STRIPE_PRICE_ENTERPRISE_YEARLY ?? "",
     isActive: true,
     sortOrder: 40,
     creditsPerPeriod: 0,
-    seats: Number.POSITIVE_INFINITY,
     displayPriceMonthly: 499,
     displayPriceYearly: 4_990,
     fullPriceMonthly: 999,
@@ -221,7 +206,7 @@ export const PLANS: readonly PlanConfig[] = [
     enterprisePriceLabel: "From $499/mo",
     enterpriseFullPriceLabel: "From $999/mo",
     cta: "contact-sales",
-    serverConfigSlug: "shared-4g",
+    serverConfigSlug: "shared-16g",
   },
   {
     // Bring Your Own Server — Sovereign acts purely as the management panel
@@ -241,14 +226,12 @@ export const PLANS: readonly PlanConfig[] = [
       "100 AI credits included (managed mode)",
       "Or bring your own API key",
       "Logs, restart, and config controls",
-      "5 team seats",
     ],
     stripePriceIdMonthly: process.env.STRIPE_PRICE_BYOS_MONTHLY ?? "",
     stripePriceIdYearly: process.env.STRIPE_PRICE_BYOS_YEARLY ?? "",
     isActive: true,
     sortOrder: 50,
     creditsPerPeriod: 0,
-    seats: 5,
     displayPriceMonthly: 2.5,
     displayPriceYearly: 30,
     fullPriceMonthly: 2.5,
@@ -283,14 +266,6 @@ export const CREDIT_TOOLTIP =
 
 export function findPlanBySlug(slug: string): PlanConfig | undefined {
   return PLANS.find((p) => p.slug === slug)
-}
-
-/**
- * Team seats for a plan tier (incl. the owner, who always occupies one seat).
- * `Infinity` = unlimited (Enterprise). Defaults to Free (1) for unknown tiers.
- */
-export function seatsForTier(tier: PlanTier): number {
-  return PLANS.find((p) => p.tier === tier)?.seats ?? 1
 }
 
 /**

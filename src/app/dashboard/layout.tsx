@@ -8,10 +8,9 @@ import { ConsoleThemePortalSync } from "@/components/layout/console-theme-portal
 import { ImpersonationBanner } from "@/components/layout/impersonation-banner"
 import { VerifyEmailBanner } from "@/components/dashboard/verify-email-banner"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
-import { getEffectiveUserId, getHonoredImpersonatedUserId, getEffectiveTeam } from "@/lib/effective-user"
+import { getEffectiveUserId, getHonoredImpersonatedUserId } from "@/lib/effective-user"
 import { getUserTeam, canManageTeam, listUserTeams } from "@/lib/team"
 import { teamHasWhiteLabel } from "@/lib/white-label"
-import { isTeamSuspended } from "@/lib/tenant"
 import {
   buildBrandingCss,
   getDefaultBranding,
@@ -20,7 +19,7 @@ import {
   type ResolvedBranding,
 } from "@/lib/tenant-branding"
 import { getConsoleTheme } from "@/lib/console-theme.server"
-import { db, users, teams, eq } from "@/db"
+import { db, users, eq } from "@/db"
 
 export const dynamic = "force-dynamic"
 export const revalidate = 0
@@ -68,18 +67,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
     if (u) impersonatedUser = u
   }
 
-  // "Act as customer" banner label: when a tenant admin is acting inside a child
-  // team, show the team name (not the child owner's identity).
-  let actingAsTeamName: string | null = null
-  const effTeam = await getEffectiveTeam()
-  if (effTeam?.actingAsTeam) {
-    const t = await db.query.teams.findFirst({
-      where: eq(teams.id, effTeam.teamId),
-      columns: { name: true },
-    })
-    actingAsTeamName = t?.name ?? "Customer"
-  }
-
   const cookieStore = await cookies()
   const defaultOpen = cookieStore.get("sidebar_state")?.value !== "false"
   const consoleTheme = await getConsoleTheme()
@@ -87,11 +74,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const branding = await resolveBranding()
   const brandingCss = buildBrandingCss(branding)
 
-  // Show the Reseller (tenant admin) entry only to owners/admins of a
-  // white-label-entitled team (based on the user's active team, independent of
-  // the host being viewed). The white-label branding editor lives inside that
-  // panel now (/tenant-admin/settings).
-  let canManageTenant = false
+  // Show the Branding nav item only to owners/admins of an entitled team
+  // (based on the user's active team, independent of the host being viewed).
+  let canManageBranding = false
   let teamList: { teamId: string; name: string; role: string }[] = []
   let activeTeamId: string | undefined
   // Show the soft "verify your email" banner only for an unverified credentials
@@ -99,14 +84,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // (and are auto-verified anyway), so they never qualify; hidden while
   // impersonating to avoid confusing an admin with someone else's prompt.
   let showVerifyBanner = false
-  let teamSuspended = false
   const effectiveUserId = await getEffectiveUserId()
   if (effectiveUserId) {
     const managedTeam = await getUserTeam(effectiveUserId)
     activeTeamId = managedTeam?.teamId
-    if (activeTeamId) teamSuspended = await isTeamSuspended(activeTeamId)
     if (managedTeam && canManageTeam(managedTeam.role)) {
-      canManageTenant = await teamHasWhiteLabel(managedTeam.teamId)
+      canManageBranding = await teamHasWhiteLabel(managedTeam.teamId)
     }
     teamList = await listUserTeams(effectiveUserId)
 
@@ -132,7 +115,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
           brandName={branding.brandName}
           logoUrl={branding.logoUrl}
           logoMarkUrl={branding.logoMarkUrl}
-          canManageTenant={canManageTenant}
+          canManageBranding={canManageBranding}
+          canManageTenant={canManageBranding}
         />
         <SidebarInset>
           {impersonatedUser && (
@@ -140,8 +124,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
               userId={impersonatedUser.id}
               email={impersonatedUser.email}
               name={impersonatedUser.name}
-              actingAsTeamName={actingAsTeamName}
-              returnTo={actingAsTeamName ? "/tenant-admin" : "/admin/users"}
             />
           )}
           <DashboardTopbar
@@ -160,18 +142,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           />
           <main className="flex-1 overflow-auto bg-background px-8 pt-[30px] pb-[60px]">
             {showVerifyBanner && <VerifyEmailBanner />}
-            {teamSuspended ? (
-              <div className="mx-auto mt-24 max-w-md rounded-lg border border-border bg-card p-8 text-center">
-                <h1 className="text-lg font-semibold text-foreground">Account suspended</h1>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  This account has been suspended. Your agents remain in place, but new
-                  deployments and changes are paused. Please contact your administrator to
-                  restore access.
-                </p>
-              </div>
-            ) : (
-              children
-            )}
+            {children}
           </main>
         </SidebarInset>
       </SidebarProvider>

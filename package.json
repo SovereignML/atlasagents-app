@@ -12,7 +12,6 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
     "bootstrap:pg": "bash scripts/bootstrap-pg.sh",
     "bootstrap:host": "tsx scripts/bootstrap-shared-host.ts",
     "db:push": "node --env-file=.env node_modules/drizzle-kit/bin.cjs push",

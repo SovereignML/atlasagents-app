@@ -19,13 +19,6 @@ export type RenderConfigArgs = {
   tlsStatus?: string | null
   /** Catalog tool ids enabled on the instance (e.g. ["browser"]); see agent-tools.ts. */
   enabledToolIds?: string[]
-  /**
-   * OpenAI-compatible base URL the primary/fallback models are served from
-   * (e.g. OpenRouter's `https://openrouter.ai/api/v1`, or a BYO provider's
-   * endpoint). OpenClaw ignores this (its package is hardwired to OpenRouter);
-   * Hermes/base-URL-aware renderers honor it. See resolveByosLlmCredentials().
-   */
-  baseUrl?: string
 }
 
 /**
@@ -42,26 +35,14 @@ export type RenderInitScriptArgs = {
   cliBinary: string
   /** Absolute path of the `.env` already written in Phase A (the CLI reads it). */
   envPath: string
-  /**
-   * Provider token to register with Hermes (`config set model.provider`).
-   * "openrouter" by default; "nvidia" for the NVIDIA platform fallback; a BYO
-   * OpenAI-compatible token (e.g. "openai") for a customer's own direct key.
-   * A non-"openrouter" value also triggers the `model.base_url` set.
-   */
-  provider: LlmProvider | string
+  /** Provider to register (OpenRouter by default; "nvidia" for the NVIDIA fallback). */
+  provider: LlmProvider
   /** Validated model slug (<author>/<slug>, ≥64k context) to pin as the default. */
   model: string
   /** OpenAI-compatible base URL for the provider (e.g. NVIDIA's endpoint). */
   baseUrl: string
   /** Catalog tool ids enabled on the instance (e.g. ["browser"]); see agent-tools.ts. */
   enabledToolIds?: string[]
-  /**
-   * Warm-pool fast path: skip the slow-once, per-instance-independent steps
-   * (`setup --quick`, `doctor --fix`) that already ran at bake. Only the
-   * per-instance config deltas + a fast `config check` run at claim. Ignored by
-   * runtimes without an init script.
-   */
-  skipSetupAndDoctor?: boolean
 }
 
 /** Inputs to the `.env` builder. */
@@ -74,12 +55,6 @@ export type BuildEnvArgs = {
   /** Bearer token for the gateway API. Hermes maps this to API_SERVER_KEY. */
   gatewayToken: string
   openRouterApiKey: string
-  /**
-   * OpenAI-compatible base URL the LLM key authenticates against. Optional /
-   * back-compat: undefined ⇒ the runtime's default (OpenRouter). OpenClaw
-   * ignores it; Hermes uses it (via renderInitScript) for BYO providers.
-   */
-  baseUrl?: string
 }
 
 export type RenderCaddyfileArgs = {
@@ -100,22 +75,6 @@ export type RenderCaddyfileArgs = {
    * on :8080) in front of the gateway, which stays loopback-only.
    */
   upstreamPort?: number
-  /**
-   * Per-tool companion services (e.g. n8n) to path-route on the SAME public
-   * host: each `pathPrefix/*` is proxied to the loopback `port` with a Caddy
-   * `handle` block placed AHEAD of the gateway/sidecar catch-all. An
-   * empty/undefined list renders byte-identically to the pre-tool-service
-   * output, so existing instances see no Caddyfile diff. See `ToolService`.
-   */
-  toolServices?: ToolServiceRoute[]
-}
-
-/** Minimal Caddy routing info for a per-tool companion service. */
-export type ToolServiceRoute = {
-  /** URL path prefix, no trailing slash, e.g. "/n8n". Routed as `<prefix>/*`. */
-  pathPrefix: string
-  /** Loopback port the service binds; Caddy proxies `<prefix>/*` here. */
-  port: number
 }
 
 /** Absolute remote paths the provisioner needs, all derived from installDir. */
@@ -192,71 +151,6 @@ export type SidecarSpec = {
   renderSystemdUnit(): string
   /** Admin bootstrap: POST to this path to create the first (admin) account. */
   seedAdmin: { signupPath: string }
-}
-
-/** Inputs to a per-tool service's `.env` builder (e.g. n8n). */
-export type ToolServiceEnvArgs = {
-  instance: Instance
-  /**
-   * Public URL the instance is reached at (absolute links / webhooks behind the
-   * Cloudflare/Caddy proxy). Null when the instance has no resolvable host yet.
-   */
-  publicUrl: string | null
-  /** URL path prefix the service is mounted under, with trailing slash (e.g. "/n8n/"). */
-  pathPrefix: string
-  /**
-   * Stable per-instance encryption key. Persisted encrypted and reused on every
-   * reprovision — regenerating it would orphan any credentials the service has
-   * already stored (n8n encrypts its saved credentials with this).
-   */
-  encryptionKey: string
-  /** Seeded owner login, surfaced to the user and to the agent (browser control). */
-  ownerEmail: string
-  ownerPassword: string
-}
-
-/**
- * A self-hosted companion web app that a *tool* brings onto the box (n8n is the
- * first). Unlike `SidecarSpec` — which is one-per-runtime, gated by the
- * `webuiEnabled` boolean, and fronts the gateway — a `ToolService` is
- * provisioned per enabled catalog tool, independently toggleable at any time,
- * and mounted at its own URL subpath behind Caddy. The gateway (and any sidecar)
- * are left untouched; Caddy path-routes `caddyPathPrefix/*` to the service's
- * loopback port. Native process supervised by systemd — no Docker, matching the
- * rest of the stack.
- */
-export type ToolService = {
-  /** systemd unit name (without ".service"), e.g. "n8n". */
-  serviceName: string
-  /** Dedicated system user the process runs as (HOME=installDir). */
-  systemUser: string
-  /** Install / HOME dir, e.g. /opt/n8n. */
-  installDir: string
-  /** Persistent data dir (chowned to systemUser); holds the service's DB + state. */
-  dataDir: string
-  /** Loopback port the service binds; Caddy proxies `caddyPathPrefix/*` here. */
-  port: number
-  /** URL path prefix Caddy routes to this service, no trailing slash, e.g. "/n8n". */
-  caddyPathPrefix: string
-  /** HTTP path (absolute, including the prefix) the service returns 200 on once ready. */
-  healthPath: string
-  /** Absolute path of the service's env file (referenced by its systemd unit). */
-  envPath: string
-  /** Idempotent bash: create the system user + dirs and install the package. Run over SSH as root. */
-  installSteps(): string
-  /** Build the service's env file contents (key/value map). */
-  renderEnv(args: ToolServiceEnvArgs): Record<string, string>
-  /** systemd unit that runs the service process. */
-  renderSystemdUnit(): string
-  /**
-   * Owner bootstrap: POST `buildPayload(...)` to `setupPath` (under the prefix)
-   * to create the first (owner) account. Idempotent handling (already-set-up ->
-   * a 4xx we treat as success) lives in the provisioner's seed script.
-   */
-  seedOwner: {
-    setupPath: string
-    buildPayload(args: { email: string; password: string }): Record<string, unknown>
-  }
 }
 
 /**

@@ -26,15 +26,12 @@ import {
 } from "@/db"
 import { describeVmError } from "@/lib/vm-provider"
 import { getVmProviderById, getAllEnabledProviders } from "@/lib/providers"
-import { getWarmVmIds } from "@/lib/warm-pool"
 import { logInstanceEvent, transitionInstance } from "@/lib/instance-state"
 import {
   listRuntimeKeys,
   revokeRuntimeKey,
   updateRuntimeKey,
 } from "@/lib/openrouter-provisioning"
-import { getTenantOpenRouterKey } from "@/lib/tenant"
-import { reconcilePendingCustomHostnames } from "@/lib/tenant-branding"
 
 const ORPHAN_GRACE_MS = 15 * 60 * 1000 // 15 minutes — gives in-flight creates room to commit
 const PROVISIONING_TTL_MS = 20 * 60 * 1000 // 20 minutes
@@ -51,8 +48,6 @@ type ReconcileReport = {
   openRouterKeysRevoked: number
   /** OpenRouter keys whose spend cap drifted from our intended value and was re-PATCHed. */
   openRouterLimitsHealed: number
-  /** White-label custom domains whose CF cert went active and were marked verified. */
-  customHostnamesVerified: number
   errors: string[]
 }
 
@@ -68,7 +63,6 @@ export async function runReconciler(): Promise<ReconcileReport> {
     stuckProvisioning: 0,
     openRouterKeysRevoked: 0,
     openRouterLimitsHealed: 0,
-    customHostnamesVerified: 0,
     errors: [],
   }
 
@@ -86,7 +80,6 @@ export async function runReconciler(): Promise<ReconcileReport> {
       status: true,
       vmId: true,
       providerId: true,
-      ipAddress: true,
       createdAt: true,
       lastTransitionAt: true,
     },
@@ -108,15 +101,10 @@ export async function runReconciler(): Promise<ReconcileReport> {
       { providerId: "", slug: "linode", name: "Linode", provider: await getVmProviderById(null) },
     ]
   }
-  // Warm pool VMs are live (or in-flight) but owned by no instance row until
-  // claimed. Without this they'd match the orphan sweep and the pool would
-  // self-destruct — so treat every tracked pool vmId as owned on every provider.
-  const warmVmIds = await getWarmVmIds()
   const ownedSetFor = (t: (typeof sweepTargets)[number]): Set<string> => {
     const set = new Set<string>(ownedByProvider.get(t.providerId) ?? [])
     // null/legacy VMs live on Linode.
     if (t.slug === "linode") for (const v of ownedByProvider.get("") ?? []) set.add(v)
-    for (const v of warmVmIds) set.add(v)
     return set
   }
 
@@ -149,7 +137,6 @@ export async function runReconciler(): Promise<ReconcileReport> {
         .values({
           vmId: vm.id,
           action: "detected",
-          ipAddress: vm.ipv4?.[0] ?? null,
           detail: `provider=${target.slug}; label=${vm.label ?? ""}; createdAt=${vm.created ?? ""}`,
         })
         .returning()
@@ -186,7 +173,7 @@ export async function runReconciler(): Promise<ReconcileReport> {
       const vm = await provider.getVMOrNull(row.vmId)
       if (!vm) {
         await transitionInstance(row.id, ["deleting"], "deleted", {
-          set: { vmId: null, ipAddress: null, deletedIpAddress: row.ipAddress ?? null },
+          set: { vmId: null, ipAddress: null },
         })
         report.deletingCompleted++
         await logInstanceEvent({
@@ -232,11 +219,9 @@ export async function runReconciler(): Promise<ReconcileReport> {
       const provider = await getVmProviderById(row.providerId)
       const deleted = await provider.deleteVM(row.vmId!)
       report.failedCleanups += deleted ? 1 : 0
-      // Record the released IP. A later retry/reprovision overwrites `ipAddress`
-      // but leaves `deletedIpAddress` as the last IP this row released.
       await db
         .update(instances)
-        .set({ vmId: null, ipAddress: null, deletedIpAddress: row.ipAddress ?? null })
+        .set({ vmId: null, ipAddress: null })
         .where(eq(instances.id, row.id))
       await logInstanceEvent({
         instanceId: row.id,
@@ -273,10 +258,7 @@ export async function runReconciler(): Promise<ReconcileReport> {
     try {
       await transitionInstance(row.id, ["provisioning"], "failed_provisioning", {
         error: "timed out — reclaimed by reconciler",
-        // Retain the released IP when we actually destroyed the VM (see Pass 3).
-        set: vmDeleted
-          ? { vmId: null, ipAddress: null, deletedIpAddress: row.ipAddress ?? null }
-          : {},
+        set: vmDeleted ? { vmId: null, ipAddress: null } : {},
       })
       await logInstanceEvent({
         instanceId: row.id,
@@ -313,16 +295,12 @@ export async function runReconciler(): Promise<ReconcileReport> {
         eq(instances.status, "deleted"),
         isNotNull(instances.openRouterKeyId),
       ),
-      columns: { id: true, openRouterKeyId: true, teamId: true, tenantKeyed: true },
+      columns: { id: true, openRouterKeyId: true },
     })
     for (const row of leftover) {
       if (!row.openRouterKeyId) continue
       try {
-        // Reseller keys live on the tenant's account — revoke with the tenant key.
-        const override = row.tenantKeyed
-          ? (await getTenantOpenRouterKey(row.teamId)) ?? undefined
-          : undefined
-        await revokeRuntimeKey(row.openRouterKeyId, override)
+        await revokeRuntimeKey(row.openRouterKeyId)
         await db
           .update(instances)
           .set({ openRouterKeyId: null, openRouterKeyEnc: null })
@@ -437,18 +415,6 @@ export async function runReconciler(): Promise<ReconcileReport> {
       const msg = err instanceof Error ? err.message : String(err)
       report.errors.push(`or-list: ${msg}`)
     }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // White-label custom domains: stamp domainVerifiedAt once the Cloudflare
-  // cert goes active, so a tenant's domain activates on its own instead of only
-  // when a branding manager reopens the status card. No-op without CF-for-SaaS.
-  // ─────────────────────────────────────────────────────────────────────
-  try {
-    const { verified } = await reconcilePendingCustomHostnames()
-    report.customHostnamesVerified = verified
-  } catch (err) {
-    report.errors.push(`cf-hostnames: ${err instanceof Error ? err.message : String(err)}`)
   }
 
   // ─────────────────────────────────────────────────────────────────────

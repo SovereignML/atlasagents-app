@@ -3,7 +3,6 @@ import { db, users, verificationTokens, eq } from "@/db"
 import { rateLimit } from "@/lib/rate-limit"
 import { sendPasswordResetEmail } from "@/lib/email"
 import { verifyTurnstileToken } from "@/lib/turnstile"
-import { clientIp } from "@/lib/client-ip"
 import crypto from "crypto"
 
 export async function POST(request: Request) {
@@ -18,8 +17,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 })
     }
 
-    const ip = clientIp(request.headers)
-    if (!(await verifyTurnstileToken(turnstileToken, ip === "unknown" ? undefined : ip))) {
+    const ip = request.headers.get("x-forwarded-for") || undefined
+    if (!(await verifyTurnstileToken(turnstileToken, ip))) {
       return NextResponse.json(
         { error: "Verification failed. Please try again." },
         { status: 400 },

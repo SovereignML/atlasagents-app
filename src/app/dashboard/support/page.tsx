@@ -179,6 +179,13 @@ export default async function SupportPage() {
                 Email support
               </a>
             </div>
+            <div className="mt-5 flex items-center gap-2 border-t border-border pt-5 text-xs text-muted-foreground">
+              <span className="relative flex size-2">
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400/70" />
+                <span className="relative inline-flex size-2 rounded-full bg-emerald-400" />
+              </span>
+              All systems operational
+            </div>
           </div>
         </aside>
       </div>

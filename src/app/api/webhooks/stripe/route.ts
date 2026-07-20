@@ -37,15 +37,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 })
   }
 
-  // Connected-account events belong to the Connect webhook (/api/webhooks/
-  // stripe-connect), never here. If this endpoint is ever (mis)configured to
-  // also receive connected events, ignore them — otherwise a reseller sub's
-  // status could be mutated by platform handlers. Symmetric to the connect
-  // route's `if (!event.account) return`.
-  if (event.account) {
-    return NextResponse.json({ received: true, ignored: "connected-account" })
-  }
-
   // Idempotency — Stripe retries on 5xx and sometimes redelivers on its own.
   // Without dedup, `invoice.paid` retries cause duplicate plan-credit deposits.
   // We claim the event up-front; on handler error we release so the retry can

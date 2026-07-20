@@ -8,15 +8,10 @@ import type {
   RuntimeEngine,
   SidecarEnvArgs,
   SidecarSpec,
-  ToolServiceRoute,
 } from "./types"
 import { buildGatewayAllowedOrigins } from "@/lib/instance-gateway-access"
 import { resolveLlmProvider, nvidiaKeyForSlot } from "@/lib/model-router"
 import { enabledToolsForRuntime } from "@/configs/agent-tools"
-import {
-  renderToolServiceHandles,
-  renderToolServiceSiteBody,
-} from "./shared"
 
 /**
  * Real Hermes runtime — Python package `hermes-agent` installed into a venv,
@@ -112,11 +107,7 @@ function corsOriginRegex(origins: string[]): string {
  * or any runtime without a sidecar). Matches today's `${corsBlock}  ${upstreamBlock}`
  * splice point — every line is indented 2 spaces relative to the surrounding site block.
  */
-function buildSingleUpstreamBody(
-  allowed: string[],
-  upstreamPort: number,
-  toolServices?: ToolServiceRoute[],
-): string {
+function buildSingleUpstreamBody(allowed: string[], upstreamPort: number): string {
   const cors =
     allowed.length > 0
       ? `  @cors_origin header_regexp Origin "${corsOriginRegex(allowed)}"
@@ -129,12 +120,6 @@ function buildSingleUpstreamBody(
   respond @cors_preflight 204
 `
       : ""
-  // With companion services (e.g. n8n) the bare upstream becomes `handle`
-  // blocks so `/n8n/*` routes ahead of the gateway catch-all; the site-scope
-  // CORS block above still applies globally. Byte-identical when none.
-  if (toolServices && toolServices.length > 0) {
-    return `${cors}  ${renderToolServiceSiteBody(toolServices, upstreamPort, "  ")}`
-  }
   return `${cors}  reverse_proxy localhost:${upstreamPort} {
     header_up Host {host}
     header_up X-Real-IP {remote_host}
@@ -156,11 +141,7 @@ function buildSingleUpstreamBody(
  * own headers and runs same-origin from the browser, so adding cross-origin
  * headers to its handler would break it.
  */
-function buildDualRouteBody(
-  allowed: string[],
-  sidecarPort: number,
-  toolServices?: ToolServiceRoute[],
-): string {
+function buildDualRouteBody(allowed: string[], sidecarPort: number): string {
   const cors =
     allowed.length > 0
       ? `    @cors_origin header_regexp Origin "${corsOriginRegex(allowed)}"
@@ -173,11 +154,7 @@ function buildDualRouteBody(
     respond @cors_preflight 204
 `
       : ""
-  // Companion-service handles (e.g. `/n8n/*`) go FIRST — `handle` is first-match,
-  // so they must sit above `/v1/*` and the catch-all. Empty → no prefix.
-  const toolHandles = renderToolServiceHandles(toolServices, "  ")
-  const toolPrefix = toolHandles ? `  ${toolHandles}\n` : ""
-  return `${toolPrefix}  handle /v1/* {
+  return `  handle /v1/* {
 ${cors}    reverse_proxy localhost:${HERMES_GATEWAY_PORT} {
       header_up Host {host}
       header_up X-Real-IP {remote_host}
@@ -553,8 +530,8 @@ model:
     })
 
     const body = args.upstreamPort
-      ? buildDualRouteBody(allowed, args.upstreamPort, args.toolServices)
-      : buildSingleUpstreamBody(allowed, HERMES_GATEWAY_PORT, args.toolServices)
+      ? buildDualRouteBody(allowed, args.upstreamPort)
+      : buildSingleUpstreamBody(allowed, HERMES_GATEWAY_PORT)
 
     const port80 = `:80 {
 ${body}
@@ -694,31 +671,15 @@ WantedBy=multi-user.target
       ? `${run("config set browser.provider local")} || echo "warn: could not set browser.provider" >&2\n`
       : ""
 
-    // Warm-pool fast path: `setup --quick` and `doctor --fix` already ran at
-    // bake, so at claim we only apply the per-instance config deltas + a fast
-    // `config check`. This is the single biggest saving toward the <25s target.
-    const setupStep = args.skipSetupAndDoctor
-      ? `echo "=== provision: hermes_setup (skipped — bake-finalized) ==="\n`
-      : `echo "=== provision: hermes_setup ==="
+    return `#!/bin/bash
+set -uo pipefail
+
+echo "=== provision: hermes_setup ==="
 if ! ${run("setup --non-interactive --quick")}; then
   echo "hermes setup failed" >&2
   exit 1
 fi
-`
-    const doctorStep = args.skipSetupAndDoctor
-      ? `echo "=== provision: hermes_doctor (skipped — bake-finalized) ==="\n`
-      : `echo "=== provision: hermes_doctor ==="
-if ! ${run("doctor --fix")}; then
-  echo "hermes doctor failed" >&2
-  ${run("config show")} 2>/dev/null || true
-  exit 1
-fi
-`
 
-    return `#!/bin/bash
-set -uo pipefail
-
-${setupStep}
 echo "=== provision: hermes_config ==="
 ${run(`config set model.provider ${bashSingleQuote(args.provider)}`)} || exit 1
 ${run(`config set model.default ${bashSingleQuote(args.model)}`)} || exit 1
@@ -733,7 +694,13 @@ if ! ${run("config check")}; then
   exit 1
 fi
 
-${doctorStep}
+echo "=== provision: hermes_doctor ==="
+if ! ${run("doctor --fix")}; then
+  echo "hermes doctor failed" >&2
+  ${run("config show")} 2>/dev/null || true
+  exit 1
+fi
+
 echo "=== provision: hermes_init_done ==="
 `
   },

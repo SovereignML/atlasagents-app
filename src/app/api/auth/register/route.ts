@@ -12,11 +12,10 @@ import { posthogServer } from "@/lib/posthog-server"
 import { adsConversions } from "@/lib/ads"
 import { AD_CLICK_COOKIE, parseAdClickCookie } from "@/lib/ads/click-ids"
 import { CONSENT_COOKIE, parseConsentCookie } from "@/lib/consent"
-import { clientIp } from "@/lib/client-ip"
 
 export async function POST(req: Request) {
   try {
-    const ip = clientIp(req.headers)
+    const ip = req.headers.get("x-forwarded-for") || "unknown"
     if (!(await rateLimit(`register:${ip}`, 5, 60 * 60 * 1000))) {
       return NextResponse.json(
         { error: "Too many registration attempts. Try again later." },

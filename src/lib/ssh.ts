@@ -135,37 +135,6 @@ async function connectAndPin(target: SshTarget, instanceId: string): Promise<Nod
 }
 
 /**
- * Observe the remote host's SHA256 fingerprint without pinning it to any
- * instance row. Used by the warm pool to capture a generic VM's fingerprint at
- * bake time; the value is copied onto the claiming instance so `connectAndPin`
- * matches the already-known key instead of re-pinning (which would look like a
- * TOFU mismatch on the second connect). Returns `sha256:<hash>`.
- */
-export async function sshObserveHostFingerprint(target: SshTarget): Promise<string> {
-  const ssh = new NodeSSH()
-  let observed: string | null = null
-  await ssh.connect({
-    host: target.host,
-    port: target.port ?? 22,
-    username: target.username ?? "root",
-    privateKey: loadPrivateKey(),
-    hostHash: "sha256",
-    hostVerifier: (hash: string) => {
-      observed = `sha256:${hash}`
-      return true
-    },
-    readyTimeout: 20_000,
-    keepaliveInterval: 10_000,
-    keepaliveCountMax: 3,
-  })
-  ssh.dispose()
-  if (!observed) {
-    throw new Error(`SSH host fingerprint not observed for ${target.host}`)
-  }
-  return observed
-}
-
-/**
  * Transient SSH errors worth retrying. Excludes auth failures and host-key
  * mismatches — those are not transient and a retry would waste time or risk
  * an account lockout. "Connection lost before handshake" is the ssh2 error
@@ -633,40 +602,6 @@ export async function sshWriteFile(
     .filter(Boolean)
     .join(" && ")
   return sshRun(target, cmd)
-}
-
-/**
- * Reconcile the set of team SSH public keys installed in root's
- * `authorized_keys` so the owners can SSH into their own managed VPS. The keys
- * live inside a marked block that is fully rewritten on each call: any prior
- * block is stripped first, so keys removed from the team are revoked, keys
- * added are installed, and nothing ever accumulates duplicates. The fleet key
- * (and any other lines) outside the block are preserved.
- *
- * An empty `publicKeys` strips the block entirely (revokes all user access).
- *
- * The caller is responsible for validating each key (see `isValidPublicKey` in
- * src/lib/instance.ts); we still base64 the block in transit so arbitrary bytes
- * can't break the remote shell.
- */
-export async function sshInstallUserAuthorizedKeys(
-  target: SshTarget,
-  publicKeys: string[],
-): Promise<SshRunResult> {
-  const keys = publicKeys.map((k) => k.trim()).filter(Boolean)
-  const lines = [
-    "set -e",
-    "mkdir -p ~/.ssh && chmod 700 ~/.ssh",
-    "touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys",
-    // Drop any previously-managed block first so removed keys are revoked.
-    "sed -i '/# sovereignml-user-key BEGIN/,/# sovereignml-user-key END/d' ~/.ssh/authorized_keys",
-  ]
-  if (keys.length > 0) {
-    const block = `# sovereignml-user-key BEGIN\n${keys.join("\n")}\n# sovereignml-user-key END\n`
-    const b64 = Buffer.from(block, "utf8").toString("base64")
-    lines.push(`echo ${shellEscape(b64)} | base64 -d >> ~/.ssh/authorized_keys`)
-  }
-  return sshRunScript(target, lines.join("\n"))
 }
 
 /** Idempotent ufw bootstrap: allow ssh/http/https/gateway and enable. */

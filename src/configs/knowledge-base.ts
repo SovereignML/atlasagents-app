@@ -114,13 +114,13 @@ export const KB_FAQS: KbFaq[] = [
   {
     question: "How do I deploy my first agent?",
     answer:
-      "Head to the Deploy page, pick your runtime and a plan, and we provision and launch your agent automatically. You can watch progress live from the instance page.",
+      "Head to the Deploy page, pick a region and a server size, and we provision the box and launch your agent automatically. You can watch progress live from the instance page.",
     anchor: "quickstart",
   },
   {
     question: "How does billing & credits work?",
     answer:
-      "You buy credits that cover real LLM usage at cost plus a small margin. Managed agents are billed daily; BYOS is a flat monthly fee per connected server.",
+      "You buy credits that cover real LLM usage at cost plus a small margin. Managed servers are billed daily; BYOS is a flat monthly fee per connected server.",
     anchor: "billing",
   },
   {
