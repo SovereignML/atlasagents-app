@@ -4,6 +4,7 @@ import { db, sshKeys, eq, and, desc } from "@/db"
 import { getUserTeam, requireTeamManage } from "@/lib/team"
 import { computeSshFingerprint, isValidPublicKey } from "@/lib/instance"
 import { logAuditEvent } from "@/lib/audit"
+import { syncTeamSshKeys } from "@/lib/provisioner"
 
 /**
  * GET /api/team/ssh-keys
@@ -80,6 +81,11 @@ export async function POST(req: NextRequest) {
     targetId: created.id,
     targetLabel: name,
   })
+
+  // Reconcile the key onto the team's running managed-VPS agents. Best-effort
+  // and non-blocking — the key is saved regardless of box reachability, and a
+  // re-provision would reconcile any box missed here.
+  void syncTeamSshKeys(team.teamId).catch(() => {})
 
   return NextResponse.json({
     key: {

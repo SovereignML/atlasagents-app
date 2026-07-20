@@ -16,6 +16,7 @@ import { verifyTotpToken } from "@/lib/totp"
 import { consumeBackupCode, decryptTotpSecret } from "@/lib/two-factor"
 import { verifyTurnstileToken } from "@/lib/turnstile"
 import { rateLimit } from "@/lib/rate-limit"
+import { clientIp } from "@/lib/client-ip"
 
 /**
  * `code` is overridden so the client can distinguish the 2FA challenge step
@@ -108,9 +109,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // every attempt (incl. 2FA re-submits), so caps are generous — they
         // only bite on credential-stuffing patterns, not real users.
         const email = (credentials.email as string).toLowerCase().trim()
-        const ip =
-          request?.headers?.get?.("x-forwarded-for")?.split(",")[0]?.trim() ||
-          "unknown"
+        const ip = clientIp(request?.headers)
         const [emailOk, ipOk] = await Promise.all([
           rateLimit(`login:email:${email}`, 10, 15 * 60 * 1000),
           rateLimit(`login:ip:${ip}`, 30, 15 * 60 * 1000),

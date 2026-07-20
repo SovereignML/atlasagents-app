@@ -45,7 +45,7 @@ interface Team {
   id: string
   name: string
   whiteLabelEnabled: boolean
-  seatLimit: number
+  seatLimit: number | null
   agentLimit: number | null
   parentTeamId: string | null
   suspendedAt: string | null

@@ -70,18 +70,45 @@ export async function refreshConnectStatus(
 }
 
 /**
+ * Create a recurring Price (with an inline Product) ON the tenant's connected
+ * account. This is how a tenant builds their plan catalog — the returned
+ * priceId is stored on a `tenantPlans` row and used at checkout.
+ */
+export async function createTenantPrice(args: {
+  connectAccountId: string
+  name: string
+  amountCents: number
+  interval: "month" | "year"
+  currency?: string
+}): Promise<string> {
+  const price = await stripe.prices.create(
+    {
+      currency: args.currency ?? "usd",
+      unit_amount: args.amountCents,
+      recurring: { interval: args.interval },
+      product_data: { name: args.name },
+    } satisfies Stripe.PriceCreateParams,
+    { stripeAccount: args.connectAccountId },
+  )
+  return price.id
+}
+
+/**
  * Open a subscription Checkout session ON the tenant's connected account
- * (direct charges, no application fee). `childTeamId` is threaded through
- * metadata so the connect webhook can attribute the resulting subscription.
+ * (direct charges, no application fee). `childTeamId` + `tenantPlanId` are
+ * threaded through subscription metadata so the connect webhook can attribute
+ * the subscription AND stamp the child team's entitlement from the plan.
  */
 export async function createConnectedCheckout(args: {
   connectAccountId: string
   priceId: string
   customerEmail: string
   childTeamId: string
+  tenantPlanId: string
   successUrl: string
   cancelUrl: string
 }): Promise<{ url: string | null }> {
+  const metadata = { childTeamId: args.childTeamId, tenantPlanId: args.tenantPlanId }
   const session = await stripe.checkout.sessions.create(
     {
       mode: "subscription",
@@ -89,8 +116,8 @@ export async function createConnectedCheckout(args: {
       customer_email: args.customerEmail,
       success_url: args.successUrl,
       cancel_url: args.cancelUrl,
-      metadata: { childTeamId: args.childTeamId },
-      subscription_data: { metadata: { childTeamId: args.childTeamId } },
+      metadata,
+      subscription_data: { metadata },
     } satisfies Stripe.Checkout.SessionCreateParams,
     { stripeAccount: args.connectAccountId },
   )

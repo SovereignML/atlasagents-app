@@ -18,6 +18,7 @@ export const ADMIN_NOTIFICATION_RETENTION_DAYS = 30
 export type AuditAction =
   | "instance.deploy"
   | "instance.restart"
+  | "instance.restart_caddy"
   | "instance.stop"
   | "instance.delete"
   | "instance.agent_type_change"
@@ -26,6 +27,7 @@ export type AuditAction =
   | "instance.skills_change"
   | "instance.knowledge_add"
   | "instance.model_change"
+  | "instance.byos_key_switch"
   | "instance.file_save"
   | "instance.file_delete"
   | "instance.file_mkdir"
@@ -85,6 +87,7 @@ export type AuditAction =
   | "admin.backup.create"
   | "admin.backup.delete"
   | "admin.backup.restore"
+  | "admin.warm_pool.destroy"
   | "tenant.customer.create"
   | "tenant.customer.update"
   | "tenant.customer.suspend"
@@ -93,14 +96,27 @@ export type AuditAction =
   | "tenant.support.reply"
   | "tenant.support.status"
   | "tenant.impersonate"
+  | "tenant.act_as.start"
+  | "tenant.act_as.stop"
+  | "tenant.plan.create"
+  | "tenant.plan.archive"
+  | "tenant.checkout.create"
 
 export async function logAuditEvent(params: {
+  /** The REAL actor who performed the action (the row's userId). */
   userId: string
   action: AuditAction
   teamId?: string | null
   targetType?: string
   targetId?: string
   targetLabel?: string
+  /**
+   * When the actor operated "on behalf of" another identity — e.g. a tenant
+   * admin acting as a child-team owner, or a platform admin impersonating — the
+   * effective user id. Folded into `meta.onBehalfOf` so the actor↔target
+   * distinction survives without a schema change.
+   */
+  onBehalfOfUserId?: string | null
   meta?: Record<string, unknown>
 }) {
   let ipAddress: string | null = null
@@ -116,6 +132,10 @@ export async function logAuditEvent(params: {
     // headers() unavailable outside request context
   }
 
+  const meta = params.onBehalfOfUserId
+    ? { ...(params.meta ?? {}), onBehalfOf: params.onBehalfOfUserId }
+    : params.meta
+
   try {
     await db.insert(auditLogs).values({
       userId: params.userId,
@@ -126,7 +146,7 @@ export async function logAuditEvent(params: {
       targetLabel: params.targetLabel ?? null,
       ipAddress,
       userAgent,
-      meta: (params.meta as never) ?? null,
+      meta: (meta as never) ?? null,
     })
   } catch (err) {
     console.error("[audit] failed to write audit event:", err)

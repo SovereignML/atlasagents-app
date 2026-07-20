@@ -1,4 +1,5 @@
-import type { RuntimeId } from "@/lib/runtimes/types"
+import type { RuntimeId, ToolService } from "@/lib/runtimes/types"
+import { n8nToolService } from "@/lib/runtimes/n8n-service"
 
 /**
  * Per-runtime realization of a tool. `null` means the tool is not available on
@@ -50,6 +51,20 @@ export type AgentTool = {
    * `support` entries are null. See `toolSupportedOn`.
    */
   providesKnowledge?: boolean
+  /**
+   * A self-hosted companion web app this tool provisions on the box (e.g. n8n),
+   * mounted at its own URL subpath behind Caddy and supervised by systemd. Like
+   * `providesKnowledge`, this is realized outside the runtime's tool allowlist,
+   * so a tool with a `service` is "supported" on every runtime even with both
+   * `support` entries null. See `ToolService` and `syncToolServices`.
+   */
+  service?: ToolService
+  /**
+   * Catalog ids this tool implicitly turns on (server-side) when enabled. n8n
+   * uses this to pull in `browser`, since the agent controls n8n by driving its
+   * web UI through the browser tool.
+   */
+  autoEnables?: string[]
   support: ToolRuntimeSupport
 }
 
@@ -136,6 +151,24 @@ export const AGENT_TOOLS: readonly AgentTool[] = [
       hermes: { toolset: "mcp" },
     },
   },
+  {
+    id: "n8n",
+    name: "n8n",
+    icon: "Workflow",
+    description:
+      "Give the agent a self-hosted n8n automation server with its own web UI. The agent builds and runs workflows by driving the n8n interface.",
+    // The agent controls n8n by operating its web UI, so it needs the browser
+    // (and the Chromium it drives). Enabling n8n auto-enables the browser tool.
+    requiresChromium: true,
+    autoEnables: ["browser"],
+    // Realized as a self-hosted companion service (systemd + Caddy `/n8n/`),
+    // not a runtime tool-allowlist entry — hence both `support` sides are null.
+    service: n8nToolService,
+    support: {
+      openclaw: null,
+      hermes: null,
+    },
+  },
 ]
 
 /** Look up a tool by its catalog id. */
@@ -145,9 +178,41 @@ export function getTool(id: string): AgentTool | undefined {
 
 /** True when `tool` is realizable on the given runtime. */
 export function toolSupportedOn(tool: AgentTool, runtimeId: RuntimeId): boolean {
-  // Host-side knowledge tools work on every runtime (they don't add a runtime
-  // allowlist entry), so they're "supported" even with both `support` null.
-  return tool.providesKnowledge === true || tool.support[runtimeId] != null
+  // Host-side tools (Knowledge Base, or a companion `service` like n8n) work on
+  // every runtime — they don't add a runtime allowlist entry — so they're
+  // "supported" even with both `support` null.
+  return (
+    tool.providesKnowledge === true ||
+    tool.service != null ||
+    tool.support[runtimeId] != null
+  )
+}
+
+/**
+ * Expand an enabled-tool id list with any ids implied by `autoEnables`
+ * (e.g. n8n -> browser). Order-preserving and de-duped; implied ids are
+ * appended after the explicit ones. Applied server-side when tools are saved so
+ * the runtime render + dep install treat the implied tool as enabled.
+ */
+export function expandAutoEnabledTools(ids: string[]): string[] {
+  const out = [...ids]
+  const seen = new Set(ids)
+  for (const id of ids) {
+    for (const implied of getTool(id)?.autoEnables ?? []) {
+      if (!seen.has(implied)) {
+        seen.add(implied)
+        out.push(implied)
+      }
+    }
+  }
+  return out
+}
+
+/** The per-tool companion services (e.g. n8n) implied by an enabled-tool id list. */
+export function toolServicesForIds(ids: string[]): ToolService[] {
+  return ids
+    .map((id) => getTool(id)?.service)
+    .filter((s): s is ToolService => !!s)
 }
 
 /** True when the given enabled-tool ids include a host-side Knowledge Base tool. */

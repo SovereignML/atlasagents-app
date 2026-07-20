@@ -185,24 +185,17 @@ export default function NotificationsPage() {
       ) : (
         <>
           <div className="flex flex-wrap gap-2">
-            {FILTERS.map((f) => {
-              const active = filter === f.key
-              return (
-                <button
-                  key={f.key}
-                  type="button"
-                  onClick={() => setFilter(f.key)}
-                  className={cn(
-                    "rounded-full px-4 py-2 text-sm transition-colors",
-                    active
-                      ? "bg-primary font-semibold text-primary-foreground"
-                      : "border border-border bg-secondary text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {f.label}
-                </button>
-              )
-            })}
+            {FILTERS.map((f) => (
+              <Button
+                key={f.key}
+                size="sm"
+                variant={filter === f.key ? "default" : "outline"}
+                className="rounded-full"
+                onClick={() => setFilter(f.key)}
+              >
+                {f.label}
+              </Button>
+            ))}
           </div>
 
           <Card>

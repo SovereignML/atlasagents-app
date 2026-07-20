@@ -396,6 +396,50 @@ The app runs at `http://localhost:3000`. In dev mode, everything works without S
 
 ---
 
+## Testing
+
+Two independent suites:
+
+- **Unit tests** — `npm run test`. Pure logic only, no DB or network (see the
+  header in `vitest.config.ts`). Fast (<5s) and the default in CI. Files:
+  `src/**/*.test.ts`.
+- **Integration tests** — `npm run test:integration`. Run against a **real,
+  disposable** PostgreSQL database. These cover the highest-consequence billing
+  code — the credit ledger (`src/lib/wallet.ts`) and the idempotency primitive
+  (`src/lib/idempotency.ts`) — whose invariants (row locking, non-negative
+  balance, atomic claim/release) can't be exercised without a live DB. Files:
+  `src/lib/__integration__/*.itest.ts`, config `vitest.integration.config.ts`.
+
+### Running the integration tests
+
+```bash
+# 1. Have a local Postgres (bootstrap:pg sets one up if you don't).
+npm run bootstrap:pg
+
+# 2. Create a DISPOSABLE database whose name contains "test". The harness
+#    REFUSES any database name without "test" in it, because it runs
+#    drizzle-kit push --force and truncates tables — never point it at dev/prod.
+createdb sovereignml_test
+
+# 3. Run the suite. The global setup (src/lib/__integration__/setup.ts) pushes
+#    the schema to the test DB automatically; each test truncates what it uses.
+TEST_DATABASE_URL=postgresql://localhost:5432/sovereignml_test npm run test:integration
+```
+
+CI runs this as its own `integration` job with a `postgres:16` service (see
+`.github/workflows/ci.yml`) — keep that image's major version aligned with
+production.
+
+**Writing a new `.itest.ts`:** `src/db/index.ts` reads `DATABASE_URL` once at
+first import and caches a connection pool, so every `.itest.ts` must redirect
+the ORM at the test DB **before** anything imports `@/db`. Do this by importing
+the side-effect module `./db-env` on the **first line**, ahead of any import
+that reaches `@/db` (ESM evaluates imports in source order, so a bare
+`process.env.DATABASE_URL = …` written above an import would still run too
+late). Every future billing change should add or extend an `.itest.ts` here.
+
+---
+
 ## Key Design Decisions
 
 1. **No migration files** — Schema synced via `drizzle-kit push` directly from `schema.ts`. Simple but means no rollback history.

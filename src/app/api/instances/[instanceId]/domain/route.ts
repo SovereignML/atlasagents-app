@@ -5,6 +5,12 @@ import { db, instances, eq } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { canOperateInstance } from "@/lib/instance-access"
 import { reconfigureInstanceIngress } from "@/lib/instance-ingress"
+import {
+  isValidHostname,
+  lookupDomainA,
+  lookupDomainNs,
+  normalizeHostname,
+} from "@/lib/domain-dns"
 
 export async function POST(
   req: NextRequest,
@@ -35,11 +41,39 @@ export async function POST(
     return NextResponse.json({ error: "Instance has no IP address" }, { status: 400 })
   }
 
-  const body = await req.json().catch(() => ({})) as { domain?: string }
-  const domain = body.domain?.trim().toLowerCase() || null
+  const body = await req.json().catch(() => ({})) as {
+    domain?: string
+    /** When true, only run format + NS (+ optional A) checks — no Caddy/DB write. */
+    checkOnly?: boolean
+  }
+  const domain = body.domain ? normalizeHostname(body.domain) || null : null
 
-  if (domain && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(domain)) {
+  if (domain && !isValidHostname(domain)) {
     return NextResponse.json({ error: "Invalid domain format" }, { status: 400 })
+  }
+
+  let nsInfo: { apex: string; nameservers: string[] } | null = null
+  let resolvedIps: string[] = []
+  if (domain) {
+    const ns = await lookupDomainNs(domain)
+    if (!ns.ok) {
+      return NextResponse.json({ error: ns.error }, { status: 400 })
+    }
+    nsInfo = { apex: ns.apex, nameservers: ns.nameservers }
+    resolvedIps = await lookupDomainA(domain)
+  }
+
+  if (body.checkOnly) {
+    return NextResponse.json({
+      ok: true,
+      domain,
+      apex: nsInfo?.apex ?? null,
+      nameservers: nsInfo?.nameservers ?? [],
+      resolvedIps,
+      expectedIp: instance.ipAddress,
+      aRecordMatches:
+        Boolean(instance.ipAddress) && resolvedIps.includes(instance.ipAddress!),
+    })
   }
 
   try {
@@ -76,5 +110,11 @@ export async function POST(
     dnsStatus: domain ? "pending" : null,
     tlsStatus: domain ? "pending" : null,
     ipAddress: instance.ipAddress,
+    apex: nsInfo?.apex ?? null,
+    nameservers: nsInfo?.nameservers ?? [],
+    resolvedIps,
+    aRecordMatches:
+      Boolean(domain && instance.ipAddress) &&
+      resolvedIps.includes(instance.ipAddress!),
   })
 }

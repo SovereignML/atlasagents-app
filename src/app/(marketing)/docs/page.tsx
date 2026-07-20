@@ -41,7 +41,7 @@ const faqItems = [
   {
     question: "Can I deploy multiple agents?",
     answer:
-      "Yes. How many agents you can run at once depends on your plan (live agent limits and credits). Higher tiers add more live agents, credits, and throughput. Each agent gets its own configuration, compute tier, and monitoring dashboard.",
+      "Yes. How many agents you can run at once depends on your plan (live agent limits and credits). Higher tiers add more live agents, credits, and throughput. Each agent gets its own configuration and monitoring dashboard.",
   },
 ]
 
@@ -158,11 +158,10 @@ const sections = [
         <p>The deploy wizard walks you through every configuration option:</p>
         <div className="space-y-3">
           {[
-            { step: "1. Project", desc: "Enter your agent name. A URL-safe slug is auto-generated (e.g. my-support-agent → my-support-agent)." },
-            { step: "2. Billing", desc: "Choose monthly or yearly billing. Yearly saves ~17% (2 months free). Price updates in real-time." },
-            { step: "3. Server", desc: "Pick a compute tier: Standard (CX), Performance AMD (CPX), ARM (CAX), or Dedicated (CCX). 16 configurations from 2–16 vCPU." },
-            { step: "4. Advanced", desc: "Optional: set a root password (AES-256-GCM encrypted at rest), add an SSH key, or provision up to 1000 GB extra storage at $0.05/GB/mo." },
-            { step: "5. Review", desc: "Full config summary with itemized price breakdown. Confirm and deploy." },
+            { step: "1. Agent", desc: "Pick the runtime that powers your bot (OpenClaw or Hermes)." },
+            { step: "2. Project", desc: "Enter your agent name and pick a use case. A URL-safe slug is auto-generated (e.g. My Support Agent → my-support-agent)." },
+            { step: "3. Plan", desc: "Choose a plan. Every plan runs the same managed agent — only the included monthly credits differ." },
+            { step: "4. Billing", desc: "Choose monthly or yearly billing (yearly saves ~17%, 2 months free), review your configuration, and deploy." },
           ].map((item) => (
             <div key={item.step} className="flex gap-4 border-l-2 border-[var(--border-color)] pl-4">
               <div>
@@ -215,7 +214,7 @@ const sections = [
         <div className="space-y-3">
           <div>
             <p className="font-bold text-[var(--text-primary)] mb-1">Plans</p>
-            <p>Plans are credit-based with included monthly credits and live agent limits per tier (see sovereignml.com/pricing). Enterprise adds custom credit allocation, infrastructure, and SLAs.</p>
+            <p>Plans are credit-based with included monthly credits and live agent limits per tier (see sovereignml.com/pricing). Enterprise adds custom credit allocation, volume pricing, and SLAs.</p>
           </div>
           <div>
             <p className="font-bold text-[var(--text-primary)] mb-1">Yearly Billing</p>

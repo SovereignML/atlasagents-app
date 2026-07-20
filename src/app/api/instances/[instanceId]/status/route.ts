@@ -27,6 +27,11 @@ export async function GET(
       managedSubdomain: true,
       createdAt: true,
       provisionStage: true,
+      byosLlmMode: true,
+      byosOwnProvider: true,
+      byosFallbackProvider: true,
+      byosActiveKeySlot: true,
+      byosKeyStatus: true,
     },
   })
 
@@ -37,7 +42,7 @@ export async function GET(
   const logs = await db.query.instanceLogs.findMany({
     where: eq(instanceLogs.instanceId, instanceId),
     orderBy: desc(instanceLogs.createdAt),
-    limit: 50,
+    limit: 100,
   })
 
   return NextResponse.json({
@@ -47,6 +52,13 @@ export async function GET(
     tlsStatus: instance.tlsStatus,
     managedSubdomain: instance.managedSubdomain,
     provisionStage: instance.provisionStage ?? null,
+    // BYOS bring-your-own-key surface (never returns key ciphertext). Derived
+    // `hasFallback` avoids leaking the raw provider when none is configured.
+    byosLlmMode: instance.byosLlmMode ?? null,
+    byosOwnProvider: instance.byosOwnProvider ?? null,
+    byosActiveKeySlot: instance.byosActiveKeySlot ?? "primary",
+    byosKeyStatus: instance.byosKeyStatus ?? "unknown",
+    hasFallback: !!instance.byosFallbackProvider,
     logs: logs.map((l) => ({
       id: l.id,
       level: l.level,

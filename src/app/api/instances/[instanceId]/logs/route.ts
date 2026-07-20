@@ -4,7 +4,7 @@ import { getEffectiveUserId } from "@/lib/effective-user"
 import { db, instanceLogs, eq, and, desc, lt } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
 
-const DEFAULT_LIMIT = 50
+const DEFAULT_LIMIT = 100
 const MAX_LIMIT = 200
 
 export async function GET(
