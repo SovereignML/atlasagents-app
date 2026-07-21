@@ -1,4 +1,5 @@
 import { db, regions, routingLogs, asc, desc } from "@/db"
+import { requireAdminPage } from "@/lib/admin-guard"
 import { getProvidersOverview } from "@/lib/provider-admin"
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
 import { ProvidersClient } from "./providers-client"
@@ -6,6 +7,7 @@ import { ProvidersClient } from "./providers-client"
 export const dynamic = "force-dynamic"
 
 export default async function AdminProvidersPage() {
+  await requireAdminPage()
   const [overview, regionRows, logs] = await Promise.all([
     getProvidersOverview(),
     db.query.regions.findMany({ orderBy: [asc(regions.sortOrder)] }),

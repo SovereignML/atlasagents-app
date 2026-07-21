@@ -21,6 +21,7 @@ import {
   teams,
 } from "@/db"
 import { logAuditEvent } from "@/lib/audit"
+import { isTeamSuspended } from "@/lib/tenant"
 
 export const ACCESS_LEVELS = ["viewer", "operator", "manager"] as const
 export type AccessLevel = (typeof ACCESS_LEVELS)[number]
@@ -111,7 +112,15 @@ export async function canViewInstance(userId: string, instanceId: string): Promi
 }
 
 export async function canOperateInstance(userId: string, instanceId: string): Promise<boolean> {
-  return levelAtLeast((await getInstanceAccessLevel(userId, instanceId)).level, "operator")
+  const info = await getInstanceAccessLevel(userId, instanceId)
+  if (!levelAtLeast(info.level, "operator")) return false
+  // A suspended team — or a child end-customer whose reseller tenant is
+  // suspended / de-entitled — is frozen: members keep read-only visibility
+  // (status, logs) but lose every operate action (restart, backup, domain,
+  // credentials, tokens, config edits). This is the shared choke point for all
+  // mutating per-instance routes, so suspension can't be bypassed route-by-route.
+  if (info.teamId && (await isTeamSuspended(info.teamId))) return false
+  return true
 }
 
 export async function canManageInstanceAccess(

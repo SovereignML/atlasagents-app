@@ -36,23 +36,27 @@ export type ProviderDef = {
 
 export const PROVIDERS: readonly ProviderDef[] = [
   {
-    slug: "digitalocean",
-    name: "DigitalOcean",
-    credentialEnvKey: "DIGITALOCEAN_API_TOKEN",
-    defaultPriority: 100,
-    enabled: true,
-    budget: { monthlyCreditsUsd: 3000, softLimitUsd: 2400, hardLimitUsd: 3000 },
-  },
-  {
     // Akamai Connected Cloud (formerly Linode). The `linode` slug is the
     // provider adapter id and must stay "linode"; only the display name is Akamai.
+    // PRIMARY provider: the warm pool is baked on Linode Frankfurt, so Linode is
+    // ranked highest and every managed deploy claims a Linode pool VM.
     slug: "linode",
     name: "Akamai",
     credentialEnvKey: "LINODE_API_TOKEN",
-    // Failover — ranked below DigitalOcean (100) so the router prefers DO by default.
-    defaultPriority: 90,
+    defaultPriority: 100,
     enabled: true,
     budget: { monthlyCreditsUsd: 5000, softLimitUsd: 4000, hardLimitUsd: 5000 },
+  },
+  {
+    // Failover — ranked below Linode (100) so the router prefers Linode by
+    // default. Kept enabled + pinned to Frankfurt so a cold fallback (pool dry
+    // or Linode unhealthy) still lands in the same region.
+    slug: "digitalocean",
+    name: "DigitalOcean",
+    credentialEnvKey: "DIGITALOCEAN_API_TOKEN",
+    defaultPriority: 90,
+    enabled: true,
+    budget: { monthlyCreditsUsd: 3000, softLimitUsd: 2400, hardLimitUsd: 3000 },
   },
 ] as const
 
@@ -69,44 +73,49 @@ export type ProviderPlanMapping = {
 // src/configs/server-types.ts).
 export const PROVIDER_PLAN_MAP: readonly ProviderPlanMapping[] = [
   // Shared CPU
-  // NOTE: DigitalOcean codes below are wired to the 4 plan tiers (free/builder/
-  // operator/scale → shared-1g/4g/8g/16g) using Regular SSD "Shared Basic" sizes
-  // available on the current DO account (size/droplet-capped). They intentionally
-  // run smaller than the serverConfig's advertised RAM; revisit after a DO limit
-  // increase. Prices are DO's actual monthly cost.
+  // SINGLE-SERVER BASELINE: every self-serve managed-VPS tier provisions the
+  // SAME physical box — Linode g6-standard-2 (2 vCPU / 4GB) in Frankfurt — so the
+  // warm pool (which warms exactly `linode | g6-standard-2 | eu-central`) serves
+  // every deploy. The customer-facing tier specs in server-types.ts and the
+  // credit allotment in plans.ts differ, but the ONLY runtime difference between
+  // tiers is the OpenRouter key's spend cap (derived from the wallet balance).
+  // Every shared tier therefore collapses to the same Linode code. Do NOT diverge
+  // these Linode codes without also re-pointing the pool (POOL_PLAN_CODE) or
+  // claims will miss and fall back to the cold path. DigitalOcean stays as a
+  // Frankfurt failover, also collapsed to one box (s-2vcpu-4gb).
   {
-    serverConfigSlug: "shared-1g", // plan: free
+    serverConfigSlug: "shared-1g",
     codes: {
-      linode: { code: "g6-nanode-1", monthlyCostUsd: 5 },
-      digitalocean: { code: "s-1vcpu-2gb", monthlyCostUsd: 12 },
+      linode: { code: "g6-standard-2", monthlyCostUsd: 24 },
+      digitalocean: { code: "s-2vcpu-4gb", monthlyCostUsd: 24 },
     },
   },
   {
     serverConfigSlug: "shared-2g",
     codes: {
-      linode: { code: "g6-standard-1", monthlyCostUsd: 12 },
-      digitalocean: { code: "s-1vcpu-2gb", monthlyCostUsd: 12 },
-    },
-  },
-  {
-    serverConfigSlug: "shared-4g", // plan: builder
-    codes: {
       linode: { code: "g6-standard-2", monthlyCostUsd: 24 },
-      digitalocean: { code: "s-2vcpu-2gb", monthlyCostUsd: 18 },
-    },
-  },
-  {
-    serverConfigSlug: "shared-8g", // plan: operator
-    codes: {
-      linode: { code: "g6-standard-4", monthlyCostUsd: 48 },
       digitalocean: { code: "s-2vcpu-4gb", monthlyCostUsd: 24 },
     },
   },
   {
-    serverConfigSlug: "shared-16g", // plan: scale
+    serverConfigSlug: "shared-4g", // baseline box for all self-serve plans
     codes: {
-      linode: { code: "g6-standard-6", monthlyCostUsd: 96 },
-      digitalocean: { code: "s-4vcpu-8gb", monthlyCostUsd: 48 },
+      linode: { code: "g6-standard-2", monthlyCostUsd: 24 },
+      digitalocean: { code: "s-2vcpu-4gb", monthlyCostUsd: 24 },
+    },
+  },
+  {
+    serverConfigSlug: "shared-8g",
+    codes: {
+      linode: { code: "g6-standard-2", monthlyCostUsd: 24 },
+      digitalocean: { code: "s-2vcpu-4gb", monthlyCostUsd: 24 },
+    },
+  },
+  {
+    serverConfigSlug: "shared-16g",
+    codes: {
+      linode: { code: "g6-standard-2", monthlyCostUsd: 24 },
+      digitalocean: { code: "s-2vcpu-4gb", monthlyCostUsd: 24 },
     },
   },
   // Dedicated CPU

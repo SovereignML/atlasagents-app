@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
-import { runOpenRouterUsageSync } from "@/lib/openrouter-usage"
+import { runOpenRouterUsageSyncLocked } from "@/lib/openrouter-usage"
 import { isValidCronBearer } from "@/lib/cron-auth"
 
 /**
@@ -28,6 +28,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const report = await runOpenRouterUsageSync()
+  const report = await runOpenRouterUsageSyncLocked()
   return NextResponse.json(report)
 }

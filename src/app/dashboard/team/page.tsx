@@ -17,14 +17,12 @@ import {
   cloudflareConnections,
   sshKeys,
   backupRecords,
-  teamBranding,
 } from "@/db"
 import { getUserTeam, listUserTeams, canManageTeam, type TeamRole } from "@/lib/team"
-import { teamHasWhiteLabel } from "@/lib/white-label"
+import { getTeamSeatLimit } from "@/lib/seats"
 import { isDriveConfigured } from "@/lib/google-drive"
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
 import { TeamTabs } from "./team-tabs"
-import type { BrandingState } from "../settings/branding/branding-client"
 
 export const dynamic = "force-dynamic"
 
@@ -110,6 +108,11 @@ export default async function TeamPage({
       .filter((p): p is NonNullable<typeof p> => Boolean(p))
       .sort((a, b) => b.sortOrder - a.sortOrder)[0]?.name ?? "Free"
 
+  // Effective seat cap (explicit override or plan-derived). `Infinity` doesn't
+  // survive the server→client boundary cleanly, so pass unlimited as `null`.
+  const effectiveSeatLimit = await getTeamSeatLimit(team)
+  const seatLimit = Number.isFinite(effectiveSeatLimit) ? effectiveSeatLimit : null
+
   // ── Team-shared providers (all keyed by the active team) ──────────────
   const driveConn = await db.query.driveConnections.findFirst({
     where: eq(driveConnections.teamId, activeTeamId),
@@ -127,33 +130,13 @@ export default async function TeamPage({
     limit: 25,
   })
 
-  // ── Branding tab (only for white-label-entitled owners/admins) ────────
-  let branding: BrandingState | null = null
-  if (canManage && (await teamHasWhiteLabel(activeTeamId))) {
-    const row = await db.query.teamBranding.findFirst({
-      where: eq(teamBranding.teamId, activeTeamId),
-    })
-    branding = {
-      brandName: row?.brandName ?? "",
-      supportEmail: row?.supportEmail ?? "",
-      logoUrl: row?.logoUrl ?? "",
-      logoMarkUrl: row?.logoMarkUrl ?? "",
-      faviconUrl: row?.faviconUrl ?? "",
-      primaryLight: row?.primaryLight ?? "",
-      accentLight: row?.accentLight ?? "",
-      primaryDark: row?.primaryDark ?? "",
-      accentDark: row?.accentDark ?? "",
-      brandingEnabled: row?.brandingEnabled ?? true,
-    }
-  }
-
   return (
     <PageContainer>
       <PageHeader title="Team" description={team.name} />
       <TeamTabs
         active={tab || "members"}
         canManage={canManage}
-        team={{ id: team.id, name: team.name, seatLimit: team.seatLimit, planLabel }}
+        team={{ id: team.id, name: team.name, seatLimit, planLabel }}
         myRole={myRole}
         members={members}
         invites={invites.map((i) => ({
@@ -187,7 +170,6 @@ export default async function TeamPage({
           fingerprint: k.fingerprint,
           createdAt: k.createdAt.toISOString(),
         }))}
-        branding={branding}
         danger={danger}
       />
     </PageContainer>

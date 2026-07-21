@@ -19,17 +19,24 @@ function initials(name: string | null, email: string) {
 export function ImpersonationBanner({
   email,
   name,
+  actingAsTeamName,
+  returnTo = "/admin/users",
 }: {
   userId: string
   email: string
   name: string | null
+  /** When set, the banner reads "Acting as customer: <team>" (act-as-team). */
+  actingAsTeamName?: string | null
+  /** Where "Stop" returns to (tenant admins → /tenant-admin, staff → /admin). */
+  returnTo?: string
 }) {
   const [stopping, setStopping] = useState(false)
+  const actingAsTeam = Boolean(actingAsTeamName)
 
   async function handleStop() {
     setStopping(true)
     await fetch("/api/admin/stop-impersonation", { method: "POST" })
-    window.location.href = "/admin/users"
+    window.location.href = returnTo
   }
 
   return (
@@ -54,23 +61,25 @@ export function ImpersonationBanner({
             <VenetianMask className="size-4" />
           </span>
           <span className="text-[0.8125rem] font-semibold tracking-tight">
-            Impersonation mode
+            {actingAsTeam ? "Acting as customer" : "Impersonation mode"}
           </span>
         </div>
 
         {/* Identity */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="hidden text-amber-900/80 sm:inline">Viewing as</span>
+          <span className="hidden text-amber-900/80 sm:inline">
+            {actingAsTeam ? "Managing" : "Viewing as"}
+          </span>
           <Avatar size="sm" className="shrink-0 after:border-amber-600/40">
             <AvatarFallback className="bg-amber-500 text-[0.625rem] font-semibold text-amber-950">
-              {initials(name, email)}
+              {initials(actingAsTeamName ?? name, email)}
             </AvatarFallback>
           </Avatar>
           <span className="flex min-w-0 items-baseline gap-1.5">
             <span className="truncate text-[0.8125rem] font-semibold">
-              {name || email}
+              {actingAsTeamName ?? name ?? email}
             </span>
-            {name && (
+            {!actingAsTeam && name && (
               <span className="hidden truncate text-xs text-amber-900/70 md:inline">
                 {email}
               </span>

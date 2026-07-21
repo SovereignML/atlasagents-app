@@ -50,7 +50,7 @@ export function Features() {
                                 </div>
                                 <div className="relative z-10 mt-6 space-y-2 text-center">
                                     <h2 className="group-hover:text-secondary-950 text-lg font-medium transition dark:text-white">Secure by default</h2>
-                                    <p className="text-foreground">Your own private instance with isolated data. Your agents never share infrastructure with anyone else.</p>
+                                    <p className="text-foreground">Your own private instance with isolated data. Every agent is dedicated to you, never shared with anyone else.</p>
                                 </div>
                             </CardContent>
                         </Card>

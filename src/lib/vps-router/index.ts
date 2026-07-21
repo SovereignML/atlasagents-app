@@ -141,9 +141,6 @@ export async function routeDeployment(input: RoutingInput): Promise<RoutingDecis
       continue
     }
     const region = regionByProvider.get(provider.id)
-    // #region agent log
-    fetch('http://127.0.0.1:7305/ingest/880804f1-30d2-40e6-a578-5c94bee7e97e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'52ccd5'},body:JSON.stringify({sessionId:'52ccd5',runId:'pre-fix-3',hypothesisId:'F2',location:'src/lib/vps-router/index.ts:routeDeployment',message:'provider region check',data:{slug:provider.slug,regionId:input.regionId,serverConfigId:input.serverConfigId,category:String(category),hasRegionRow:!!region,providerRegionCode:region?.providerRegionCode??null,available:region?.available??null},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if (!region) {
       reject("region_unavailable")
       continue

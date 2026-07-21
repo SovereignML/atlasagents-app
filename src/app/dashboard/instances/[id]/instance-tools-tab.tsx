@@ -3,7 +3,15 @@
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Globe, Search, Terminal, Image as ImageIcon, Plug } from "lucide-react"
+import {
+  Globe,
+  Search,
+  Terminal,
+  Image as ImageIcon,
+  Plug,
+  Workflow,
+  ExternalLink,
+} from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -17,7 +25,10 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Terminal,
   Image: ImageIcon,
   Plug,
+  Workflow,
 }
+
+type N8nAccess = { url: string; ownerEmail: string; ownerPassword: string }
 
 const RUNTIME_LABEL: Record<string, string> = {
   openclaw: "OpenClaw",
@@ -28,6 +39,7 @@ type ToolsResponse = {
   enabledTools: string[]
   catalog: AgentTool[]
   runtime: string
+  n8n: N8nAccess | null
 }
 
 export function ToolsTab({
@@ -43,6 +55,7 @@ export function ToolsTab({
   const [catalog, setCatalog] = useState<AgentTool[]>([])
   const [enabled, setEnabled] = useState<Set<string>>(new Set())
   const [initial, setInitial] = useState<string[]>([])
+  const [n8n, setN8n] = useState<N8nAccess | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -60,6 +73,7 @@ export function ToolsTab({
         setCatalog(data.catalog)
         setEnabled(new Set(data.enabledTools))
         setInitial(data.enabledTools)
+        setN8n(data.n8n)
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -181,8 +195,8 @@ export function ToolsTab({
                   )}
                   <Button
                     size="sm"
-                    variant={on ? "outline" : "default"}
-                    className="mt-3"
+                    variant={on ? "default" : "outline"}
+                    className="mt-3 rounded-full"
                     disabled={disabled}
                     onClick={() => toggle(tool)}
                   >
@@ -203,6 +217,53 @@ export function ToolsTab({
 
       {/* Knowledge Base sources — shown once the KB tool is saved/enabled. */}
       {initial.includes("knowledge_base") && <KnowledgeManager instanceId={instanceId} />}
+
+      {/* n8n access — shown once the tool is enabled and the owner is seeded. */}
+      {initial.includes("n8n") && (
+        <Card className="border-primary/30 bg-primary/[0.04]">
+          <CardContent className="space-y-3 p-4">
+            <div className="flex items-center gap-2">
+              <Workflow className="size-4 text-primary" />
+              <p className="text-sm font-medium text-foreground">n8n workflow server</p>
+            </div>
+            {n8n ? (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  Your agent controls this n8n via its browser tool. You can open the
+                  editor and manage workflows with the owner login below.
+                </p>
+                <div className="space-y-1.5 rounded-md border border-border bg-background/60 p-3 font-mono text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">URL</span>
+                    <a
+                      href={n8n.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-primary hover:underline"
+                    >
+                      {n8n.url}
+                      <ExternalLink className="size-3" />
+                    </a>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">Owner email</span>
+                    <span className="text-foreground">{n8n.ownerEmail}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">Owner password</span>
+                    <span className="break-all text-foreground">{n8n.ownerPassword}</span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Setting up the n8n server… this can take a minute on first enable.
+                Refresh to see the editor URL and owner login once it&apos;s ready.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

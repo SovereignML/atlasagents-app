@@ -17,6 +17,7 @@ import { generateSoul } from "@/lib/soul"
 import { routeModel } from "@/lib/model-router"
 import { getUserTeam } from "@/lib/team"
 import { isTeamSuspended } from "@/lib/tenant"
+import { getTeamAgentLimit, countTeamAgents } from "@/lib/seats"
 import { logAuditEvent, type AuditAction } from "@/lib/audit"
 
 type Instance = InferSelectModel<typeof instances>
@@ -41,6 +42,13 @@ export type CreateInstanceArgs = {
   /** Optional deploy-only extras. */
   sshKeyId?: string
   rootPasswordEnc?: string
+  /**
+   * The REAL actor, when different from `userId` — e.g. a tenant admin deploying
+   * "as" a child-team owner. The instance is owned by `userId` (the child owner,
+   * so funding/OpenRouter/ACL resolve correctly), but the audit trail records
+   * `actorUserId` as the doer with `onBehalfOf = userId`. Defaults to `userId`.
+   */
+  actorUserId?: string
   /** Audit metadata (defaults to action "instance.deploy"). */
   auditAction?: AuditAction
   auditMeta?: Record<string, unknown>
@@ -146,6 +154,19 @@ export async function createInstanceFromAgentFields(
     return { ok: false, status: 403, error: "This account is suspended. Contact your administrator." }
   }
 
+  // Per-team live-agent cap (reseller tenants cap their child customers; admins
+  // can cap any team). Uncapped when `agentLimit` is null. This is the single
+  // choke point for both the deploy wizard and the backup "restore as new agent"
+  // path, so the cap holds everywhere an instance is born.
+  const agentLimit = await getTeamAgentLimit(teamId)
+  if (agentLimit != null && (await countTeamAgents(teamId)) >= agentLimit) {
+    return {
+      ok: false,
+      status: 403,
+      error: `Agent limit reached (${agentLimit}). Contact your administrator to raise it.`,
+    }
+  }
+
   // ── Insert (retry once on the slug partial-unique violation) ──────
   let instance: Instance | undefined
   for (let attempt = 0; attempt < 2 && !instance; attempt++) {
@@ -179,8 +200,11 @@ export async function createInstanceFromAgentFields(
   }
   if (!instance) return { ok: false, status: 500, error: "Failed to create instance" }
 
+  const actorUserId = args.actorUserId ?? args.userId
   await logAuditEvent({
-    userId: args.userId,
+    userId: actorUserId,
+    onBehalfOfUserId: actorUserId !== args.userId ? args.userId : undefined,
+    teamId,
     action: args.auditAction ?? "instance.deploy",
     targetType: "instance",
     targetId: instance.id,

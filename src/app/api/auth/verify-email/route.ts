@@ -5,6 +5,7 @@ import {
   hashVerificationToken,
 } from "@/lib/email-verification"
 import { rateLimit } from "@/lib/rate-limit"
+import { clientIp } from "@/lib/client-ip"
 
 export async function POST(request: Request) {
   try {
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
     }
 
     // Throttle token guessing before any DB work: per-email and per-IP.
-    const ip = request.headers.get("x-forwarded-for") || "unknown"
+    const ip = clientIp(request.headers)
     if (
       !(await rateLimit(`verify-email:${email.toLowerCase()}`, 10, 15 * 60 * 1000)) ||
       !(await rateLimit(`verify-email-ip:${ip}`, 30, 15 * 60 * 1000))

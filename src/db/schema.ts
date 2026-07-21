@@ -310,6 +310,13 @@ export const instances = pgTable(
     //               failed_provisioning | deleting | deleted
     status: text().default("pending").notNull(),
     ipAddress: text(),
+    // Public IP this instance held when its VM was released back to the
+    // provider pool. Copied from `ipAddress` at delete/teardown time (which
+    // then nulls `ipAddress`, so live gateway/DNS/status consumers that guard
+    // on `!ipAddress` or `status === 'deleted'` are unaffected). Retained for
+    // audit + dangling-DNS / IP-reuse review. Set on every `→ deleted`
+    // transition (deleteBot + reconciler) and on failed/stuck VM teardown.
+    deletedIpAddress: text(),
     rootPasswordEnc: text(),
     stripeSubscriptionId: text(),
 
@@ -416,6 +423,16 @@ export const instances = pgTable(
     // provisioned before this column existed — backfilled on next reprovision.
     eventIngestTokenEnc: text(),
 
+    // n8n companion service (the "n8n" tool). Both are minted on first enable
+    // and REUSED on every reprovision — never regenerated. n8nEncryptionKeyEnc
+    // is n8n's N8N_ENCRYPTION_KEY: n8n encrypts its saved workflow credentials
+    // with it, so rotating it would orphan them. n8nOwnerPasswordEnc is the
+    // seeded owner login for the n8n UI (surfaced to the user and used by the
+    // agent's browser control). AES-GCM at rest; NULL until the tool is enabled.
+    // See syncToolServices() in src/lib/provisioner.ts and src/lib/runtimes/n8n-service.ts.
+    n8nEncryptionKeyEnc: text(),
+    n8nOwnerPasswordEnc: text(),
+
     // Per-instance OpenRouter runtime key, minted via OpenRouter's
     // Provisioning API at provision time and revoked on delete. Replaces the
     // shared platform key that used to be baked into every VM's .env. The
@@ -442,6 +459,14 @@ export const instances = pgTable(
     // poll will double-charge all historical spend.
     openRouterUsageUsd: doublePrecision().default(0).notNull(),
     openRouterLimitUsd: doublePrecision(),
+    // True when this agent's runtime key was minted against a white-label
+    // TENANT's own OpenRouter account (not the platform's). Set at mint time in
+    // getOrMintInstanceOpenRouterKey. The single source of truth for "this key
+    // lives on a tenant account" — the usage poller and wallet cap-sync SKIP
+    // these (the platform provisioning key can't read them, and the tenant bears
+    // the cost), and the revoke path resolves the tenant key by teamId to
+    // actually delete them. Replaces the fragile child-only JOIN heuristic.
+    tenantKeyed: boolean().default(false).notNull(),
 
     // Bring Your Own Server (BYOS) — populated only when
     // deploymentTarget = "byos". The user runs their own server and pastes
@@ -457,6 +482,32 @@ export const instances = pgTable(
     // minting).
     byosLlmMode: text(),
     byosOwnApiKeyEnc: text(),
+    // Which LLM provider the own_key is for. Catalog id from
+    // src/configs/llm-providers.ts: "openrouter" | "openai" | "nvidia" |
+    // "groq" | "deepseek" | "custom". NULL on legacy own_key rows ⇒ resolved
+    // to "openrouter" (the historical assumption). Non-openrouter providers
+    // require the Hermes runtime (enforced at the API + defensively in the
+    // provisioner) — OpenClaw's package is hardwired to OpenRouter.
+    byosOwnProvider: text(),
+    // OpenAI-compatible base URL — ONLY populated when byosOwnProvider =
+    // "custom". For catalog providers the base URL comes from the catalog.
+    byosOwnBaseUrl: text(),
+    // Optional user-supplied FALLBACK key — the user's OWN second provider/key,
+    // NOT our managed key. A BYO-key agent NEVER falls back to our minted
+    // OpenRouter key; managed access exists only via byosLlmMode="managed_credits".
+    // NULL byosFallbackProvider = no fallback configured. The key is AES-GCM
+    // encrypted at rest; byosFallbackBaseUrl is set only for a "custom" fallback.
+    byosFallbackProvider: text(),
+    byosFallbackApiKeyEnc: text(),
+    byosFallbackBaseUrl: text(),
+    // Which key slot is currently written to the box: "primary" | "fallback".
+    // NULL ⇒ "primary". The "switch to fallback" action flips this and
+    // reprovisions the .env; resolveByosLlmCredentials() reads it so the swap is
+    // idempotent and reversible. See src/app/api/instances/[instanceId]/byos-key/route.ts.
+    byosActiveKeySlot: text(),
+    // Last observed status of the active key: "unknown" | "ok" | "failing".
+    // NULL ⇒ "unknown". Drives the status pill on the instance detail page.
+    byosKeyStatus: text(),
 
     // Uptime Kuma monitoring (operator-owned Kuma, configured via env). When an
     // instance reaches `running` we create a Kuma HTTP monitor pointing at its
@@ -475,6 +526,27 @@ export const instances = pgTable(
     // Distinct from lastActiveAt (which tracks end-user interaction); this
     // tracks the event pipeline's liveness. NULL until the first event lands.
     lastEventAt: timestamp({ mode: "date", withTimezone: false }),
+
+    // Server hardware snapshot — the real box behind this instance, probed over
+    // SSH by the metrics collector (src/lib/server-metrics.ts) on a cron cadence
+    // and on-demand. Distinct from serverConfigs.vcpu/ramGb (nominal plan tier,
+    // and 0 for BYOS): these are the measured values from the live server. All
+    // NULL until the first probe runs. hwHealth is "reachable" | "unreachable";
+    // hwError holds the last probe failure message (specs are NOT cleared on a
+    // failed probe so the last-known values stay visible).
+    hwCpuCores: integer(),
+    hwCpuLoad1: doublePrecision(),
+    hwRamTotalMb: integer(),
+    hwRamUsedMb: integer(),
+    hwDiskTotalGb: integer(),
+    hwDiskUsedGb: integer(),
+    hwOsName: text(),
+    hwOsVersion: text(),
+    hwKernel: text(),
+    hwUptimeSec: integer(),
+    hwHealth: text(),
+    hwCheckedAt: timestamp({ mode: "date", withTimezone: false }),
+    hwError: text(),
 
     provisionStage: text(),
     failedStage: text(),
@@ -700,6 +772,65 @@ export const providerHealthLogs = pgTable(
     checkedAt: now(),
   },
   (t) => [index("ProviderHealthLog_provider_checkedAt_idx").on(t.providerId, t.checkedAt)],
+)
+
+// ──────────────────────────────────────────────────────────────────────
+// Warm VM pool — pre-booted, fully-bootstrapped VMs kept ready so a deploy
+// can CLAIM one and skip the multi-minute cold install. Each row is a single
+// generic VM (no per-instance secrets) identified by `poolKey`
+// (provider|plan|region|runtime|webui). See src/lib/warm-pool.ts.
+// ──────────────────────────────────────────────────────────────────────
+
+export const warmVms = pgTable(
+  "WarmVm",
+  {
+    id: cuid().primaryKey(),
+    // Denormalized match key: `${providerSlug}|${planCode}|${regionCode}|${runtime}|${webui?1:0}`.
+    poolKey: text().notNull(),
+    // Owning provider row (nullable on the legacy/unseeded env-default path).
+    providerId: text().references((): AnyPgColumn => providers.id),
+    providerSlug: text().notNull(),
+    providerPlanCode: text().notNull(),
+    providerRegionCode: text().notNull(),
+    // "openclaw" | "hermes".
+    runtime: text().notNull(),
+    webuiEnabled: boolean().default(false).notNull(),
+    // Populated as the VM is created + booted.
+    vmId: text(),
+    ipAddress: text(),
+    // Root password minted at create, encrypted at rest; copied onto the
+    // instance row at claim.
+    rootPasswordEnc: text(),
+    // Host-key fingerprint captured once the box is reachable; copied onto the
+    // instance at claim so TOFU pinning matches the already-known key.
+    sshHostFingerprint: text(),
+    // Generic public URL pre-assigned at promote-to-ready (Cloudflare subdomain →
+    // this VM's IP), so a claim is an instant hand-off with the URL already
+    // propagated. Copied onto the instance row at claim (the instance reuses this
+    // hostname instead of minting its own). Deleted when the row is reaped.
+    managedSubdomain: text(),
+    cfRecordId: text(),
+    // Lifecycle: creating → bootstrapping → ready → claimed. `failed` is a dead
+    // row the reaper deletes + replaces.
+    status: text().default("creating").notNull(),
+    // Set when a deploy claims this VM (also stamps the instance row).
+    claimedByInstanceId: text().references((): AnyPgColumn => instances.id, {
+      onDelete: "set null",
+    }),
+    lastError: text(),
+    createdAt: now(),
+    readyAt: timestamp({ mode: "date", withTimezone: false }),
+    claimedAt: timestamp({ mode: "date", withTimezone: false }),
+    updatedAt: timestamp({ mode: "date", withTimezone: false })
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index("WarmVm_poolKey_status_idx").on(t.poolKey, t.status),
+    index("WarmVm_status_idx").on(t.status),
+    uniqueIndex("WarmVm_vmId_key").on(t.vmId),
+  ],
 )
 
 // ──────────────────────────────────────────────────────────────────────
@@ -1015,6 +1146,25 @@ export const instanceUptimeSamples = pgTable(
   (t) => [index("InstanceUptimeSample_instanceId_checkedAt_idx").on(t.instanceId, t.checkedAt)],
 )
 
+// ServerMetricSample — a rolling per-server history of CPU load / RAM usage,
+// appended by the metrics collector (one row per instance per successful probe).
+// Powers the CPU/RAM sparkline on the instance detail page; the hw* columns on
+// `instances` remain the source for the current values. Bounded by a retention
+// prune inside collectServerMetrics (see src/lib/server-metrics.ts).
+export const serverMetricSamples = pgTable(
+  "ServerMetricSample",
+  {
+    id: cuid().primaryKey(),
+    instanceId: text()
+      .notNull()
+      .references(() => instances.id, { onDelete: "cascade" }),
+    cpuLoad1: doublePrecision(),
+    ramUsedMb: integer(),
+    checkedAt: now(),
+  },
+  (t) => [index("ServerMetricSample_instanceId_checkedAt_idx").on(t.instanceId, t.checkedAt)],
+)
+
 // AlertRule — user-defined threshold on a monitoring metric. `instanceId` NULL
 // means the rule applies to EVERY agent in the team (fleet-wide), which is how
 // an agency arms one rule across all client agents. Evaluated by the
@@ -1060,6 +1210,11 @@ export const orphanEvents = pgTable(
     vmId: text().notNull(),
     instanceId: text().references(() => instances.id, { onDelete: "set null" }),
     action: text().notNull(), // detected | delete_attempted | deleted | failed
+    // Public IP the VM held when we recorded/released it. Captured from the
+    // provider VM (`vm.ipv4[0]`) in the reconciler orphan sweep, and from the
+    // warm-pool row (`ipAddress`) when a warm VM is reaped — those rows have no
+    // persistent Instance row to carry `deletedIpAddress`. NULL when unknown.
+    ipAddress: text(),
     detectedAt: now(),
     resolvedAt: timestamp({ mode: "date", withTimezone: false }),
     detail: text(),
@@ -1102,7 +1257,11 @@ export const teams = pgTable(
     ownerId: text()
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    seatLimit: integer().default(5).notNull(),
+    // Member cap. NULL = derive the effective cap from the owner's plan tier at
+    // runtime (see getTeamSeatLimit in src/lib/seats.ts). Non-null = an explicit
+    // override that wins over the plan: a platform-admin support cap, or a reseller
+    // tenant's child cap set from `defaultChildSeatLimit`.
+    seatLimit: integer(),
     // Reseller hierarchy. NULL = a top-level team (today's behavior, incl. every
     // existing team after backfill). Non-null = a child end-customer account
     // that signed up under a white-label tenant; points at the PARENT tenant's
@@ -1180,6 +1339,32 @@ export const tenantConfig = pgTable(
       .$onUpdate(() => new Date()),
   },
   (t) => [uniqueIndex("TenantConfig_teamId_key").on(t.teamId)],
+)
+
+// A reseller tenant's plan catalog. Each row is a Stripe Price the tenant
+// created ON THEIR OWN connected account (see stripe-connect.ts). A child
+// end-customer subscribes to one of these via Connect checkout; on activation
+// the linked entitlement (agentLimit/seatLimit) is stamped onto the child team.
+// `teamId` is the TENANT team (owner of the catalog), not a child.
+export const tenantPlans = pgTable(
+  "TenantPlan",
+  {
+    id: cuid().primaryKey(),
+    teamId: text()
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    stripePriceId: text().notNull(),
+    name: text().notNull(),
+    // Entitlement granted to the child team while this plan is active.
+    agentLimit: integer(),
+    seatLimit: integer(),
+    // Display metadata (billing happens on the tenant's Stripe; these are for UI).
+    priceCents: integer(),
+    interval: text().default("month").notNull(), // "month" | "year"
+    active: boolean().default(true).notNull(),
+    createdAt: now(),
+  },
+  (t) => [index("TenantPlan_teamId_idx").on(t.teamId)],
 )
 
 // Roles: owner | admin | developer | viewer

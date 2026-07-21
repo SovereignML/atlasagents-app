@@ -4,6 +4,7 @@ import { db, tenantConfig } from "@/db"
 import { requireTenantAdmin, isTenantGuardError } from "@/lib/tenant-admin-access"
 import { getTenantConfig } from "@/lib/tenant"
 import { encryptSecret, decryptSecret } from "@/lib/crypto-secret"
+import { assertPublicHost, BlockedHostError } from "@/lib/net-guard"
 import { logAuditEvent } from "@/lib/audit"
 
 // GET — current Chatwoot config for the tenant. Secrets are never returned;
@@ -61,6 +62,23 @@ export async function PUT(req: Request) {
         : null
   if (!effectiveToken) {
     return NextResponse.json({ error: "API access token is required" }, { status: 400 })
+  }
+
+  // SSRF guard: the base URL is tenant-admin-supplied and the reachability
+  // probe below is itself a server-side fetch — reject non-public hosts (cloud
+  // metadata, loopback, RFC1918) before we ever connect to it.
+  try {
+    const parsed = new URL(normalizedBase)
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new BlockedHostError(normalizedBase, "unsupported protocol")
+    await assertPublicHost(parsed.hostname)
+  } catch (err) {
+    if (err instanceof BlockedHostError) {
+      return NextResponse.json(
+        { error: "Chatwoot base URL must resolve to a public host" },
+        { status: 400 },
+      )
+    }
+    throw err
   }
 
   // Verify-on-save: list inboxes to confirm base URL + token + account are valid.

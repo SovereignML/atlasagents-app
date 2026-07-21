@@ -4,6 +4,7 @@ Production SaaS platform for deploying and operating AI agents (Next.js App Rout
 
 ## Documentation
 
+- **[Guides](docs/guides/README.md)** — full [environment-variable reference](docs/guides/ENVIRONMENT.md), the [clean-install deploy walkthrough](docs/guides/DEPLOY-CLEAN.md), and the [customer-facing user guide](docs/guides/user/README.md).
 - **[Tech stack and data layer](docs/TECH-STACK.md)** — Drizzle vs Prisma, legacy `prisma/` cleanup, config source of truth.
 - **[Documentation index](docs/README.md)** — links to all guides.
 - **[Feature list and platform overview](docs/FEATURES.md)** — routes, APIs, auth, billing, and ops behavior.

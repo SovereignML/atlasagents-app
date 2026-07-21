@@ -1,4 +1,15 @@
-import { and, or, eq, inArray, notInArray, db, instances, teams, instanceAccess } from "@/db"
+import {
+  and,
+  or,
+  eq,
+  inArray,
+  notInArray,
+  db,
+  instances,
+  teams,
+  memberships,
+  instanceAccess,
+} from "@/db"
 import { alias } from "drizzle-orm/pg-core"
 
 /**
@@ -13,7 +24,7 @@ import { alias } from "drizzle-orm/pg-core"
  * MUTATING route must additionally gate on level (see src/lib/instance-access.ts).
  */
 function visibleToUser(userId: string) {
-  const ownedParents = alias(teams, "owned_parent")
+  const parentTeams = alias(teams, "wl_parent")
   return or(
     eq(instances.userId, userId),
     inArray(
@@ -27,7 +38,9 @@ function visibleToUser(userId: string) {
         .from(instanceAccess)
         .where(eq(instanceAccess.userId, userId)),
     ),
-    // Reseller tenant: child teams whose parent the user owns.
+    // Reseller tenant god-view: child teams whose parent is a white-label team
+    // the user OWNS OR ADMINS. Membership-based (not owner-only) so a non-owner
+    // tenant admin — whom requireTenantAdmin already admits — gets the same view.
     inArray(
       instances.teamId,
       db
@@ -36,7 +49,17 @@ function visibleToUser(userId: string) {
         .where(
           inArray(
             teams.parentTeamId,
-            db.select({ id: ownedParents.id }).from(ownedParents).where(eq(ownedParents.ownerId, userId)),
+            db
+              .select({ id: parentTeams.id })
+              .from(memberships)
+              .innerJoin(parentTeams, eq(parentTeams.id, memberships.teamId))
+              .where(
+                and(
+                  eq(memberships.userId, userId),
+                  inArray(memberships.role, ["owner", "admin"]),
+                  eq(parentTeams.whiteLabelEnabled, true),
+                ),
+              ),
           ),
         ),
     ),
