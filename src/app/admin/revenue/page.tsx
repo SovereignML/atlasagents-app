@@ -28,13 +28,31 @@ import {
 export default async function AdminRevenuePage() {
   await requireAdminPage()
   const [activeSubs, runningInstances] = await Promise.all([
+    // Only the count is rendered below, so select a single column. Loading
+    // the nested `instance` relation here builds a json_build_object() over
+    // Instance's 77 columns, which overflows Postgres' 100-argument cap
+    // ("cannot pass more than 100 arguments to a function").
     db.query.subscriptions.findMany({
       where: eq(subscriptions.status, "active"),
-      with: { plan: true, instance: { with: { serverConfig: true } } },
+      columns: { id: true },
     }),
+    // Narrow to the columns this page actually reads — keeps the nested
+    // serverConfig json_build_object() well under the 100-argument cap.
     db.query.instances.findMany({
       where: eq(instances.status, "running"),
-      with: { serverConfig: true },
+      columns: {
+        id: true,
+        name: true,
+        slug: true,
+        runtime: true,
+        billingInterval: true,
+        deploymentTarget: true,
+      },
+      with: {
+        serverConfig: {
+          columns: { label: true, priceMonthly: true, priceYearly: true },
+        },
+      },
     }),
   ])
 
