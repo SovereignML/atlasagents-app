@@ -78,6 +78,7 @@ export type AuditAction =
   | "admin.deletion_request.approve"
   | "admin.deletion_request.deny"
   | "admin.reset_password"
+  | "admin.set_free_limit"
   | "admin.provider.update"
   | "admin.provider.billing_update"
   | "admin.provider.health_check"

@@ -17,9 +17,10 @@
 // row count is an accurate lifetime total, while the live-status filter gives
 // the current concurrency picture.
 
-import { db, instances, eq, and, isNotNull } from "@/db"
+import { db, instances, users, eq, and, isNotNull } from "@/db"
 
-/** Max number of free-tier (demo) agents a single user may ever deploy. */
+/** Default max free-tier (demo) agents a user may ever deploy, absent a
+ *  per-user override (users.freeAgentLimit). */
 export const FREE_LIFETIME_LIMIT = 3
 
 export type FreeRuntime = "openclaw" | "hermes"
@@ -27,6 +28,10 @@ export type FreeRuntime = "openclaw" | "hermes"
 export type FreeTierUsage = {
   /** Free agents this user has ever deployed (any status, including deleted). */
   lifetimeCount: number
+  /** Effective lifetime allowance = override ?? FREE_LIFETIME_LIMIT. */
+  limit: number
+  /** The per-user override (users.freeAgentLimit), or null for the default. */
+  limitOverride: number | null
   /** True once the lifetime allowance is fully spent. */
   exhausted: boolean
   /** Runtimes that currently have a live (non-torn-down) free agent. */
@@ -41,10 +46,19 @@ function normalizeRuntime(runtime: string | null): FreeRuntime {
 
 /** Snapshot of a user's free-tier usage, used to gate new free deployments. */
 export async function getFreeTierUsage(userId: string): Promise<FreeTierUsage> {
-  const rows = await db.query.instances.findMany({
-    where: and(eq(instances.userId, userId), isNotNull(instances.expiresAt)),
-    columns: { runtime: true, status: true },
-  })
+  const [rows, user] = await Promise.all([
+    db.query.instances.findMany({
+      where: and(eq(instances.userId, userId), isNotNull(instances.expiresAt)),
+      columns: { runtime: true, status: true },
+    }),
+    db.query.users.findFirst({
+      where: eq(users.id, userId),
+      columns: { freeAgentLimit: true },
+    }),
+  ])
+
+  const limitOverride = user?.freeAgentLimit ?? null
+  const limit = limitOverride ?? FREE_LIFETIME_LIMIT
 
   const activeRuntimes = Array.from(
     new Set(
@@ -56,7 +70,9 @@ export async function getFreeTierUsage(userId: string): Promise<FreeTierUsage> {
 
   return {
     lifetimeCount: rows.length,
-    exhausted: rows.length >= FREE_LIFETIME_LIMIT,
+    limit,
+    limitOverride,
+    exhausted: rows.length >= limit,
     activeRuntimes,
   }
 }
@@ -74,7 +90,7 @@ export function checkFreeDeployAllowed(
     return {
       status: 403,
       body: {
-        error: `You've used all ${FREE_LIFETIME_LIMIT} free agents. Upgrade to deploy more.`,
+        error: `You've used all ${usage.limit} free agents. Upgrade to deploy more.`,
         code: "free_lifetime",
       },
     }
