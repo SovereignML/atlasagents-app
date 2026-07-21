@@ -61,6 +61,10 @@ export const users = pgTable(
     // destructive drop mid-flight; remove it together with the bigint Commit 3
     // (drop the float wallet columns) in one migration. See src/lib/wallet.ts.
     credits: integer().default(0).notNull(),
+    // Per-user override for the free-tier lifetime agent allowance
+    // (FREE_LIFETIME_LIMIT). Null = use the platform default. Admin-settable
+    // from the user detail page (/admin/users/[userId]). See src/lib/free-tier.ts.
+    freeAgentLimit: integer(),
     activeTeamId: text(),
     // Two-factor authentication (TOTP, RFC 6238).
     //   `twoFactorSecret`       — base32 secret, encrypted at rest with INSTANCE_ENCRYPTION_KEY.

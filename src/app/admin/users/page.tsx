@@ -349,7 +349,13 @@ export default function AdminUsersPage() {
                               <AvatarFallback>{getInitials(user.name, user.email)}</AvatarFallback>
                             </Avatar>
                             <div>
-                              <div className="font-medium text-foreground">{user.name || "-"}</div>
+                              <Link
+                                href={`/admin/users/${user.id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="font-medium text-foreground hover:underline"
+                              >
+                                {user.name || "-"}
+                              </Link>
                               <div className="text-xs text-muted-foreground">{user.email}</div>
                             </div>
                           </div>
