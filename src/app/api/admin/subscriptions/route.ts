@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
-import { db, eq, and, desc, subscriptions } from "@/db"
+import { db, eq, and, desc, inArray, instances, subscriptions } from "@/db"
 import type { SQL } from "drizzle-orm"
 
 export async function GET(request: Request) {
@@ -22,15 +22,33 @@ export async function GET(request: Request) {
       conditions.push(eq(subscriptions.status, status))
     }
 
-    const allSubs = await db.query.subscriptions.findMany({
+    const subs = await db.query.subscriptions.findMany({
       where: conditions.length > 0 ? and(...conditions) : undefined,
-      with: {
-        user: true,
-        plan: true,
-        instance: { with: { serverConfig: true, region: true } },
-      },
+      with: { user: true, plan: true },
       orderBy: desc(subscriptions.createdAt),
     })
+
+    // Fetch the instances in a separate batched query and stitch them back
+    // on. Nesting the 77-column `instance` relation inside the query above
+    // makes Drizzle build a json_build_object() that overflows Postgres'
+    // 100-argument function cap. A top-level select over instances avoids
+    // the cap while preserving the full instance shape the client expects.
+    const instanceIds = [
+      ...new Set(
+        subs.map((s) => s.instanceId).filter((id): id is string => id !== null),
+      ),
+    ]
+    const instanceRows = instanceIds.length
+      ? await db.query.instances.findMany({
+          where: inArray(instances.id, instanceIds),
+          with: { serverConfig: true, region: true },
+        })
+      : []
+    const instanceById = new Map(instanceRows.map((i) => [i.id, i]))
+    const allSubs = subs.map((s) => ({
+      ...s,
+      instance: s.instanceId ? instanceById.get(s.instanceId) ?? null : null,
+    }))
 
     if (search) {
       const lower = search.toLowerCase()
