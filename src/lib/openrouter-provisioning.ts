@@ -127,11 +127,20 @@ export async function mintRuntimeKey(
  * Revoke a previously-minted runtime key. Idempotent on the caller's side:
  * a 404 (key already gone) is treated as success so reconciler retries
  * don't loop. All other errors throw.
+ *
+ * `provisioningKeyOverride` authenticates the DELETE against a specific
+ * account. Reseller (tenant-keyed) runtime keys live on the TENANT's OpenRouter
+ * account, so they must be revoked with the tenant's provisioning key — the
+ * platform key returns 404 for them and would silently leave the key live and
+ * spendable. Defaults to the platform provisioning key for normal instances.
  */
-export async function revokeRuntimeKey(keyId: string): Promise<void> {
+export async function revokeRuntimeKey(
+  keyId: string,
+  provisioningKeyOverride?: string,
+): Promise<void> {
   const res = await fetch(`${OPENROUTER_API}/keys/${encodeURIComponent(keyId)}`, {
     method: "DELETE",
-    headers: { Authorization: `Bearer ${provisioningKey()}` },
+    headers: { Authorization: `Bearer ${provisioningKeyOverride ?? provisioningKey()}` },
   })
   if (res.ok || res.status === 404) return
   let body: { error?: { message?: string } } = {}

@@ -143,11 +143,15 @@ export function ProvidersClient({
                   <span className="text-xs text-muted-foreground">({p.provisioningSamples} samples)</span>
                 </p>
                 <p>
-                  Remaining budget: <span className="font-mono">{usd(p.billing?.remainingUsd)}</span>
+                  Budget remaining: <span className="font-mono">{usd(p.billing?.remainingUsd)}</span>
                 </p>
                 <p>
-                  Burn rate:{" "}
+                  Compute burn:{" "}
                   <span className="font-mono">{usd(p.billing?.burnRateUsdPerDay)}/day</span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Compute we bill against this provider — running agents + warm pool. Our
+                  internal budget, not your live provider-account balance.
                 </p>
               </div>
 

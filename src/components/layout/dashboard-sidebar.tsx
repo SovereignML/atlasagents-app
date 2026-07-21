@@ -15,7 +15,6 @@ import {
   FileText,
   Settings,
   LifeBuoy,
-  Palette,
   ChevronRight,
   HardDriveDownload,
   Plug,
@@ -111,9 +110,8 @@ type DashboardSidebarProps = {
   logoUrl?: string | null
   /** Collapsed/icon logo image URL (falls back to the brand initial). */
   logoMarkUrl?: string | null
-  /** Show the Branding sub-tab (owner/admin of a white-label-entitled team). */
-  canManageBranding?: boolean
-  /** Show the Reseller (tenant admin) entry — enterprise owner/admin. */
+  /** Show the Reseller (tenant admin) entry — enterprise owner/admin.
+   *  White-label branding now lives inside that panel (/tenant-admin/settings). */
   canManageTenant?: boolean
 }
 
@@ -187,19 +185,10 @@ export function DashboardSidebar({
   brandName = "SovereignML",
   logoUrl = null,
   logoMarkUrl = null,
-  canManageBranding = false,
   canManageTenant = false,
 }: DashboardSidebarProps) {
   const pathname = usePathname()
   const initial = brandName.trim().charAt(0).toUpperCase() || "S"
-
-  // The Branding sub-tab only exists for white-label-entitled owners/admins.
-  const teamSubItems: SubItem[] = canManageBranding
-    ? [
-        ...TEAM_SUBITEMS,
-        { href: "/dashboard/team?tab=branding", label: "Branding", icon: Palette, tab: "branding" },
-      ]
-    : TEAM_SUBITEMS
 
   return (
     <Sidebar collapsible="icon">
@@ -261,7 +250,7 @@ export function DashboardSidebar({
                 {group.items.map((item) => {
                   if (item.children) {
                     return (
-                      <TeamNavItem key={item.href} item={item} subItems={teamSubItems} />
+                      <TeamNavItem key={item.href} item={item} subItems={TEAM_SUBITEMS} />
                     )
                   }
                   const Icon = item.icon

@@ -51,8 +51,10 @@ export async function computeKeyLimitUsd(
 
 /**
  * The user's managed-credit instances that own a minted OpenRouter key.
- * Excludes deleted instances and BYOS "own_key" instances (those use the
- * customer's own key and never draw on our wallet).
+ * Excludes deleted instances, BYOS "own_key" instances (those use the
+ * customer's own key and never draw on our wallet), and reseller tenant-keyed
+ * instances (their cap is governed by the tenant's OpenRouter account, not the
+ * platform wallet — `updateRuntimeKey` with the platform key would 404 on them).
  */
 async function managedKeyInstances(userId: string) {
   const rows = await db.query.instances.findMany({
@@ -66,9 +68,12 @@ async function managedKeyInstances(userId: string) {
       openRouterKeyId: true,
       byosLlmMode: true,
       openRouterUsageUsd: true,
+      tenantKeyed: true,
     },
   })
-  return rows.filter((r) => r.byosLlmMode !== "own_key" && r.openRouterKeyId)
+  return rows.filter(
+    (r) => r.byosLlmMode !== "own_key" && !r.tenantKeyed && r.openRouterKeyId,
+  )
 }
 
 /**

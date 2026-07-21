@@ -20,9 +20,38 @@ import { provisionBot } from "@/lib/provisioner"
 import { describeVmError } from "@/lib/vm-provider"
 import { assertPublicHost, BlockedHostError } from "@/lib/net-guard"
 import { getUserTeam } from "@/lib/team"
+import { isTeamSuspended } from "@/lib/tenant"
+import { getTeamAgentLimit, countTeamAgents } from "@/lib/seats"
+import {
+  getByoProvider,
+  isByoProviderId,
+  requiresHermes,
+  type ByoProviderId,
+} from "@/configs/llm-providers"
 
 const BYOS_SERVER_CONFIG_SLUG = "byos-managed"
 const BYOS_REGION_SLUG = "self-hosted"
+
+/**
+ * Validate a user-supplied "custom" OpenAI-compatible base URL: it must be a
+ * well-formed https URL whose host is public (same SSRF guard we apply to the
+ * SSH host — the platform will make outbound requests to this endpoint). Returns
+ * the trimmed URL on success. Throws `BlockedHostError` for a private/blocked
+ * host; returns null for a malformed / non-https URL.
+ */
+async function validateCustomBaseUrl(raw: string | undefined): Promise<string | null> {
+  const trimmed = raw?.trim()
+  if (!trimmed) return null
+  let url: URL
+  try {
+    url = new URL(trimmed)
+  } catch {
+    return null
+  }
+  if (url.protocol !== "https:") return null
+  await assertPublicHost(url.hostname)
+  return trimmed
+}
 
 /**
  * Bring Your Own Server deploy. Sovereign acts as the management panel for a
@@ -59,6 +88,12 @@ async function handleByosDeploy(req: NextRequest) {
     billingInterval = "month",
     llmMode,
     ownApiKey,
+    ownProvider,
+    ownBaseUrl,
+    ownModel,
+    fallbackProvider,
+    fallbackApiKey,
+    fallbackBaseUrl,
     agentConfig: agentConfigInput,
   } = body as {
     name: string
@@ -68,6 +103,20 @@ async function handleByosDeploy(req: NextRequest) {
     billingInterval?: "month" | "year"
     llmMode: "managed_credits" | "own_key"
     ownApiKey?: string
+    // Which provider the own key is for (catalog id). Defaults to "openrouter".
+    ownProvider?: string
+    // OpenAI-compatible base URL — only for ownProvider === "custom".
+    ownBaseUrl?: string
+    // Model slug (persisted to modelSlug) — REQUIRED for a non-OpenRouter
+    // provider, which has no default catalog. Ignored for OpenRouter (tier
+    // default / post-deploy picker applies).
+    ownModel?: string
+    // Optional user-supplied fallback (their OWN second key). NOTE: there is
+    // deliberately no "fallback = managed OpenRouter" option — a BYO-key agent
+    // never falls back to our minted key. Managed access is llmMode only.
+    fallbackProvider?: string
+    fallbackApiKey?: string
+    fallbackBaseUrl?: string
     agentConfig?: unknown
   }
 
@@ -156,10 +205,107 @@ async function handleByosDeploy(req: NextRequest) {
   // Hermes needs so the Open WebUI sidecar is installed and fronted by Caddy).
   const agentFields = buildAgentFields(cfg)
 
+  // ── BYO provider + optional fallback validation (own_key only) ─────
+  // Normalized values persisted below. NULL provider ⇒ "openrouter" downstream.
+  let ownProviderId: ByoProviderId = "openrouter"
+  let ownBaseUrlClean: string | null = null
+  let ownModelClean: string | null = null
+  let fallbackProviderId: ByoProviderId | null = null
+  let fallbackBaseUrlClean: string | null = null
+  const hasFallbackInput = !!(fallbackProvider || fallbackApiKey || fallbackBaseUrl)
+
+  if (llmMode === "own_key") {
+    ownProviderId = (ownProvider ?? "openrouter") as ByoProviderId
+    if (!isByoProviderId(ownProviderId)) {
+      return NextResponse.json({ error: "Unknown key provider" }, { status: 400 })
+    }
+    try {
+      if (ownProviderId === "custom") {
+        ownBaseUrlClean = await validateCustomBaseUrl(ownBaseUrl)
+        if (!ownBaseUrlClean) {
+          return NextResponse.json(
+            { error: "A valid https base URL is required for a custom provider" },
+            { status: 400 },
+          )
+        }
+      }
+      // Non-OpenRouter direct keys only work on Hermes (OpenClaw is OpenRouter-only)
+      // and need an explicit model (no default catalog for a direct provider).
+      if (requiresHermes(ownProviderId)) {
+        const label = getByoProvider(ownProviderId)?.label ?? ownProviderId
+        if (cfg.runtime !== "hermes") {
+          return NextResponse.json(
+            { error: `${label} keys require the Hermes runtime` },
+            { status: 400 },
+          )
+        }
+        ownModelClean = ownModel?.trim() || null
+        if (!ownModelClean) {
+          return NextResponse.json(
+            { error: `A model is required when bringing a ${label} key` },
+            { status: 400 },
+          )
+        }
+      }
+
+      if (hasFallbackInput) {
+        fallbackProviderId = (fallbackProvider ?? "") as ByoProviderId
+        if (!isByoProviderId(fallbackProviderId)) {
+          return NextResponse.json({ error: "Unknown fallback provider" }, { status: 400 })
+        }
+        if (!fallbackApiKey?.trim()) {
+          return NextResponse.json(
+            { error: "A fallback key is required when adding a fallback provider" },
+            { status: 400 },
+          )
+        }
+        if (fallbackProviderId === "custom") {
+          fallbackBaseUrlClean = await validateCustomBaseUrl(fallbackBaseUrl)
+          if (!fallbackBaseUrlClean) {
+            return NextResponse.json(
+              { error: "A valid https base URL is required for a custom fallback provider" },
+              { status: 400 },
+            )
+          }
+        }
+        if (requiresHermes(fallbackProviderId) && cfg.runtime !== "hermes") {
+          const label = getByoProvider(fallbackProviderId)?.label ?? fallbackProviderId
+          return NextResponse.json(
+            { error: `${label} fallback keys require the Hermes runtime` },
+            { status: 400 },
+          )
+        }
+      }
+    } catch (err) {
+      if (err instanceof BlockedHostError) {
+        return NextResponse.json({ error: err.message }, { status: 400 })
+      }
+      throw err
+    }
+  }
+
   // Agents are team-scoped — resolve the active team.
   const team = await getUserTeam(session.user.id)
   if (!team) {
     return NextResponse.json({ error: "No active team" }, { status: 403 })
+  }
+
+  // Same gates as the managed deploy path (createInstanceFromAgentFields):
+  // a suspended team (or a child of a suspended/de-entitled reseller) cannot
+  // deploy, and the per-team agent cap applies to BYOS agents too — otherwise
+  // BYOS would be a trivial bypass of both controls.
+  if (await isTeamSuspended(team.teamId)) {
+    return NextResponse.json(
+      { error: "This account is suspended. Contact your administrator." },
+      { status: 403 },
+    )
+  }
+  const agentLimit = await getTeamAgentLimit(team.teamId)
+  if (agentLimit != null && (await countTeamAgents(team.teamId)) >= agentLimit) {
+    return NextResponse.json(
+      { error: `Agent limit reached (${agentLimit}). Contact your administrator to raise it.` },
+      { status: 403 },
+    )
   }
 
   // ── Insert instance ───────────────────────────────────────────────
@@ -185,6 +331,24 @@ async function handleByosDeploy(req: NextRequest) {
       byosLlmMode: llmMode,
       byosOwnApiKeyEnc:
         llmMode === "own_key" && ownApiKey ? encryptSecret(ownApiKey.trim()) : null,
+      // Provider the own key is for + custom base URL (own_key only).
+      byosOwnProvider: llmMode === "own_key" ? ownProviderId : null,
+      byosOwnBaseUrl: llmMode === "own_key" ? ownBaseUrlClean : null,
+      // A non-OpenRouter direct provider has no default catalog — pin the
+      // user-supplied model as the per-instance override. Overrides any
+      // modelSlug from agentFields (which BYOS doesn't set).
+      ...(ownModelClean ? { modelSlug: ownModelClean } : {}),
+      // Optional user-supplied fallback (their own second key). Never our key.
+      byosFallbackProvider:
+        llmMode === "own_key" && hasFallbackInput ? fallbackProviderId : null,
+      byosFallbackApiKeyEnc:
+        llmMode === "own_key" && hasFallbackInput && fallbackApiKey
+          ? encryptSecret(fallbackApiKey.trim())
+          : null,
+      byosFallbackBaseUrl:
+        llmMode === "own_key" && hasFallbackInput ? fallbackBaseUrlClean : null,
+      byosActiveKeySlot: "primary",
+      byosKeyStatus: "unknown",
     })
     .returning()
 
@@ -194,13 +358,23 @@ async function handleByosDeploy(req: NextRequest) {
     targetType: "instance",
     targetId: instance.id,
     targetLabel: instance.name,
-    meta: { plan: "byos", byosHost: byosHost.trim(), llmMode, billingInterval },
+    meta: {
+      plan: "byos",
+      byosHost: byosHost.trim(),
+      llmMode,
+      billingInterval,
+      ...(llmMode === "own_key"
+        ? { ownProvider: ownProviderId, hasFallback: hasFallbackInput }
+        : {}),
+    },
   })
 
   await db.insert(instanceLogs).values({
     instanceId: instance.id,
     level: "info",
-    message: `BYOS instance created for ${byosHost.trim()}. LLM mode: ${llmMode}. Awaiting payment.`,
+    message: `BYOS instance created for ${byosHost.trim()}. LLM mode: ${llmMode}${
+      llmMode === "own_key" ? ` (provider: ${ownProviderId})` : ""
+    }. Awaiting payment.`,
   })
 
   const dbPlan = await db.query.plans.findFirst({
@@ -240,7 +414,7 @@ async function handleByosDeploy(req: NextRequest) {
             product_data: {
               name: `${BRANDING.name} Bring Your Own Server`,
               description: `Management panel for your own server · ${
-                llmMode === "own_key" ? "your own API key" : "pay-as-you-go OpenRouter credits"
+                llmMode === "own_key" ? "your own API key" : "pay-as-you-go SovereignML Credits"
               }`,
             },
             unit_amount: unitAmount,

@@ -3,6 +3,7 @@ import { auth } from "@/auth"
 import { db, eq, and, isNull, sql, teamInvites, memberships, teams, users } from "@/db"
 import { z } from "zod"
 import { logAuditEvent } from "@/lib/audit"
+import { getTeamSeatLimit } from "@/lib/seats"
 
 const acceptSchema = z.object({ token: z.string().min(1) })
 
@@ -51,6 +52,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Team no longer exists" }, { status: 404 })
   }
 
+  // Resolve the effective cap outside the tx — its value doesn't need the row
+  // lock; only the count-then-insert below does (see the FOR UPDATE note).
+  const seatLimit = await getTeamSeatLimit(team)
+
   try {
     await db.transaction(async (tx) => {
       // Serialize concurrent acceptances against the team row so the
@@ -61,7 +66,7 @@ export async function POST(req: Request) {
       const current = await tx.query.memberships.findMany({
         where: eq(memberships.teamId, team.id),
       })
-      if (current.length >= team.seatLimit) {
+      if (current.length >= seatLimit) {
         throw new Error("SEAT_LIMIT")
       }
       await tx

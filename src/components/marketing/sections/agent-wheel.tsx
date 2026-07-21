@@ -242,20 +242,9 @@ export function AgentWheel() {
           </div>
         </div>
 
-        {/* ── Horizontal line across centre (desktop) ── */}
-        <div
-          className="absolute left-[calc(50%+4px)] w-[720px] opacity-[0.04] max-lg:hidden"
-          style={{
-            height: 1,
-            top: "50%",
-            background: "linear-gradient(270deg, var(--color-background-plain) 0%, var(--color-text-loud, #e8e6e3) 50%, var(--color-text-loud, #e8e6e3) 80%, var(--color-background-plain) 100%)",
-          }}
-        />
-
         {/* ── Centre hub (logo pill) ── */}
         <div
           className="int-center-hub absolute rounded-full p-4 lg:p-5"
-          style={{ border: "1px solid var(--color-border-faint)" }}
         >
           <div className="relative w-[117px] h-[117px] lg:w-[156px] lg:h-[156px] mx-auto flex items-center justify-center rounded-full shadow-lg"
             style={{ background: "var(--card-bg, rgba(255,255,255,0.06))" }}

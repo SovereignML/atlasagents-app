@@ -2,6 +2,7 @@ import Link from "next/link"
 import { AlertTriangle, CheckCircle2, Coins, Wallet } from "lucide-react"
 
 import { db, desc, inArray, walletTransactions } from "@/db"
+import { requireAdminPage } from "@/lib/admin-guard"
 import {
   Card,
   CardContent,
@@ -39,6 +40,7 @@ const TX_LABEL: Record<string, string> = {
 }
 
 export default async function AdminBillingPage() {
+  await requireAdminPage()
   const [snapshot, recentMutations] = await Promise.all([
     getBillingHealthSnapshot(),
     db.query.walletTransactions.findMany({

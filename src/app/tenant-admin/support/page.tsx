@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation"
 
 import { requireTenantAdmin, isTenantGuardError } from "@/lib/tenant-admin-access"
-import { resolveChatwootForTeam } from "@/lib/chatwoot"
+import { resolveTenantChatwootOrNull } from "@/lib/chatwoot"
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { SupportInboxClient } from "./support-client"
@@ -12,7 +12,9 @@ export default async function TenantSupportPage() {
   const admin = await requireTenantAdmin()
   if (isTenantGuardError(admin)) redirect("/dashboard")
 
-  const cfg = await resolveChatwootForTeam(admin.tenantTeamId)
+  // Tenant's OWN Chatwoot only — the platform fallback must never render the
+  // reseller's inbox against the platform Chatwoot account.
+  const cfg = await resolveTenantChatwootOrNull(admin.tenantTeamId)
 
   return (
     <PageContainer>

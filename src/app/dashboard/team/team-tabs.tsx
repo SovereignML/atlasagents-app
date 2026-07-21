@@ -14,7 +14,6 @@ import {
   type TeamBackup,
   type TeamSshKey,
 } from "./team-provider-tabs"
-import { BrandingClient, type BrandingState } from "../settings/branding/branding-client"
 import { TeamDangerTab, type TeamDangerInfo } from "./team-danger-tab"
 
 type Member = { userId: string; role: TeamRole; name: string | null; email: string }
@@ -24,7 +23,7 @@ type TeamInfo = { teamId: string; name: string; role: TeamRole }
 export type TeamTabsProps = {
   active: string
   canManage: boolean
-  team: { id: string; name: string; seatLimit: number; planLabel: string }
+  team: { id: string; name: string; seatLimit: number | null; planLabel: string }
   myRole: TeamRole
   members: Member[]
   invites: Invite[]
@@ -34,8 +33,6 @@ export type TeamTabsProps = {
   backups: TeamBackup[]
   cloudflare: CloudflareInfo
   sshKeys: TeamSshKey[]
-  /** Branding tab data — null when the team isn't white-label entitled. */
-  branding: BrandingState | null
   /** Danger Zone gating — non-null only for the team owner. */
   danger: TeamDangerInfo | null
 }
@@ -51,7 +48,6 @@ export function TeamTabs(props: TeamTabsProps) {
   const router = useRouter()
   const tabs = [
     ...BASE_TABS,
-    ...(props.branding ? [{ id: "branding", label: "Branding" }] : []),
     ...(props.danger ? [{ id: "danger", label: "Danger Zone" }] : []),
   ]
   const active = tabs.some((t) => t.id === props.active) ? props.active : "members"
@@ -93,12 +89,6 @@ export function TeamTabs(props: TeamTabsProps) {
       <TabsContent value="ssh" className="mt-0">
         <TeamSshTab keys={props.sshKeys} canManage={props.canManage} />
       </TabsContent>
-
-      {props.branding && (
-        <TabsContent value="branding" className="mt-0">
-          <BrandingClient initial={props.branding} />
-        </TabsContent>
-      )}
 
       {props.danger && (
         <TabsContent value="danger" className="mt-0">

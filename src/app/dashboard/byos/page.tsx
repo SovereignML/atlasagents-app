@@ -140,8 +140,24 @@ export default async function ByosPage() {
                       const addr = host
                         ? `${i.byosUser ?? "root"}@${host}${port}`
                         : null
+                      const specs =
+                        i.hwCpuCores != null || i.hwRamTotalMb != null
+                          ? [
+                              i.hwCpuCores != null ? `${i.hwCpuCores} vCPU` : null,
+                              i.hwRamTotalMb != null
+                                ? `${(i.hwRamTotalMb / 1024).toFixed(1)} GB`
+                                : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")
+                          : null
+                      // Prefer the real SSH reachability probe; fall back to the
+                      // provisioning status before the first probe has run.
                       const isConnected =
-                        i.status === "running"
+                        i.hwHealth != null
+                          ? i.hwHealth === "reachable"
+                          : i.status === "running"
+                      const isUnreachable = i.hwHealth === "unreachable"
                       return (
                         <tr
                           key={i.id}
@@ -166,7 +182,18 @@ export default async function ByosPage() {
                             </Link>
                           </td>
                           <td className="px-5 py-4 font-mono text-[12px] text-muted-foreground">
-                            —
+                            {specs ? (
+                              <span className="min-w-0">
+                                <span className="block text-foreground/80">{specs}</span>
+                                {i.hwOsName && (
+                                  <span className="block truncate text-[11px] text-muted-foreground">
+                                    {i.hwOsName}
+                                  </span>
+                                )}
+                              </span>
+                            ) : (
+                              "—"
+                            )}
                           </td>
                           <td className="px-5 py-4 font-mono text-[12px] text-muted-foreground">
                             —
@@ -179,6 +206,11 @@ export default async function ByosPage() {
                                   <span className="relative inline-flex size-2 rounded-full bg-emerald-400" />
                                 </span>
                                 connected
+                              </span>
+                            ) : isUnreachable ? (
+                              <span className="inline-flex items-center gap-1.5 text-[12px] text-red-500">
+                                <span className="inline-flex size-2 rounded-full bg-red-500" />
+                                unreachable
                               </span>
                             ) : (
                               <span className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">

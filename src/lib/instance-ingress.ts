@@ -24,6 +24,7 @@ import {
 } from "@/lib/ssh"
 import { getRuntime } from "@/lib/runtimes"
 import type { SidecarSpec } from "@/lib/runtimes/types"
+import { toolServicesForIds } from "@/configs/agent-tools"
 import { decryptSecret } from "@/lib/crypto-secret"
 import { routeModel } from "@/lib/model-router"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
@@ -73,6 +74,11 @@ export async function reconfigureInstanceIngress(
     useCfOriginTls,
     domainUseInternalTls: Boolean(domain) && proxied,
     upstreamPort: webuiEnabled && runtime.sidecar ? runtime.sidecar.port : undefined,
+    // Preserve companion-service routes (e.g. `/n8n/`) across a domain change.
+    toolServices: toolServicesForIds(instance.enabledTools ?? []).map((s) => ({
+      pathPrefix: s.caddyPathPrefix,
+      port: s.port,
+    })),
   })
   const caddyResult = await sshInstallCaddyfile(target, caddyContent)
   if (caddyResult.code !== 0 && caddyResult.code !== null) {

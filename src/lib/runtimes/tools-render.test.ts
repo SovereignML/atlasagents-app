@@ -64,6 +64,12 @@ describe("OpenClaw renderConfig — tools", () => {
     const img = openclawRuntime.renderConfig({ ...base, enabledToolIds: ["image_gen"] })
     expect(img).toBe(empty)
   })
+
+  it("n8n adds no gateway config — it's a companion service (== empty)", () => {
+    const empty = openclawRuntime.renderConfig({ ...base, enabledToolIds: [] })
+    const n8n = openclawRuntime.renderConfig({ ...base, enabledToolIds: ["n8n"] })
+    expect(n8n).toBe(empty)
+  })
 })
 
 describe("Hermes renderInitScript — toolsets", () => {
@@ -106,5 +112,14 @@ describe("Hermes renderInitScript — toolsets", () => {
       enabledToolIds: ["knowledge_base"],
     })!
     expect(out).toContain(`config set toolsets '["hermes-cli"]'`)
+  })
+
+  it("n8n adds no toolset (companion service, not a gateway tool)", () => {
+    const out = hermesRuntime.renderInitScript!({
+      ...initBase,
+      enabledToolIds: ["n8n"],
+    })!
+    expect(out).toContain(`config set toolsets '["hermes-cli"]'`)
+    expect(out).not.toContain("n8n")
   })
 })
