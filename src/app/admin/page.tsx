@@ -3,7 +3,7 @@ import Link from "next/link"
 import { db, sql, isNull, instances, orphanEvents } from "@/db"
 import { requireAdminPage } from "@/lib/admin-guard"
 import { getProvidersOverview } from "@/lib/provider-admin"
-import { getPoolHealth } from "@/lib/warm-pool"
+import { getPoolHealth, type PoolHealth } from "@/lib/warm-pool"
 import {
   getAccountHealth,
   getFleetHealth,
@@ -35,6 +35,10 @@ import { DashboardTabs } from "./dashboard-tabs"
 // How many rows the dashboard health tables show before "View all →".
 const TABLE_ROWS = 25
 
+// Pool health plus a flag set when the query itself failed (vs. a pool that
+// is simply disabled in this env) — lets the card show "unavailable".
+type PoolResult = PoolHealth & { unavailable?: boolean }
+
 /** Compact "3d ago" / "4h ago" / "just now" / "never" formatter. */
 function ago(date: Date | null | undefined): string {
   if (!date) return "never"
@@ -52,7 +56,13 @@ export default async function AdminDashboard() {
   const [fleet, accounts, pool, providers, orphanRows, reconcileRows] = await Promise.all([
     getFleetHealth(),
     getAccountHealth(),
-    getPoolHealth(),
+    // Degrade gracefully: a warm-pool health failure (e.g. the WarmVm table
+    // not yet synced on a fresh deploy) must not take down the whole
+    // dashboard. Fall back to an "unavailable" pool card instead.
+    getPoolHealth().catch((err): PoolResult => {
+      console.error("[admin-dashboard] warm-pool health unavailable:", err)
+      return { enabled: false, entries: [], unavailable: true }
+    }),
     getProvidersOverview(),
     db
       .select({ count: sql<number>`count(*)::int` })
@@ -64,6 +74,7 @@ export default async function AdminDashboard() {
   const openOrphans = Number(orphanRows[0]?.count ?? 0)
   const lastReconciled = reconcileRows[0]?.max ?? null
 
+  const poolUnavailable = (pool as PoolResult).unavailable === true
   const poolReady = pool.entries.reduce((s, e) => s + e.ready, 0)
   const poolTarget = pool.entries.reduce((s, e) => s + e.target, 0)
   const poolFull = poolReady >= poolTarget
@@ -84,9 +95,29 @@ export default async function AdminDashboard() {
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
             label="Warm pool ready"
-            value={pool.enabled ? `${poolReady} / ${poolTarget}` : "off"}
-            tone={!pool.enabled ? "muted" : poolFull ? "accent" : "warning"}
-            hint={pool.enabled ? "pre-baked VMs ready to claim" : "pool disabled in this env"}
+            value={
+              poolUnavailable
+                ? "unavailable"
+                : pool.enabled
+                  ? `${poolReady} / ${poolTarget}`
+                  : "off"
+            }
+            tone={
+              poolUnavailable
+                ? "danger"
+                : !pool.enabled
+                  ? "muted"
+                  : poolFull
+                    ? "accent"
+                    : "warning"
+            }
+            hint={
+              poolUnavailable
+                ? "pool health check failed — see server logs"
+                : pool.enabled
+                  ? "pre-baked VMs ready to claim"
+                  : "pool disabled in this env"
+            }
             href="/admin/instances?tab=pool"
           />
           <StatCard
