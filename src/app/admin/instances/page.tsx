@@ -38,9 +38,11 @@ function parseTab(s: string | undefined): Tab {
 }
 
 /** Age of a timestamp as a compact "3d" / "4h" / "12m" / "just now" string. */
-function ago(date: Date | null | undefined): string {
+function ago(date: Date | string | null | undefined): string {
   if (!date) return "-"
-  const ms = Date.now() - date.getTime()
+  const d = date instanceof Date ? date : new Date(date)
+  if (Number.isNaN(d.getTime())) return "-"
+  const ms = Date.now() - d.getTime()
   const m = Math.floor(ms / 60_000)
   if (m < 1) return "just now"
   if (m < 60) return `${m}m ago`

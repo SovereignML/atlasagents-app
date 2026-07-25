@@ -39,10 +39,20 @@ const TABLE_ROWS = 25
 // is simply disabled in this env) — lets the card show "unavailable".
 type PoolResult = PoolHealth & { unavailable?: boolean }
 
-/** Compact "3d ago" / "4h ago" / "just now" / "never" formatter. */
-function ago(date: Date | null | undefined): string {
+/**
+ * Compact "3d ago" / "4h ago" / "just now" / "never" formatter.
+ *
+ * Accepts a string as well as a Date: values from raw `sql<Date>` aggregates
+ * (e.g. the `max(reconciledAt)` below) are NOT run through Drizzle's
+ * `mode: "date"` coercion, so the pg driver can hand them back as timestamp
+ * strings. Coerce defensively — a stray string must never crash the whole
+ * admin dashboard with "getTime is not a function".
+ */
+function ago(date: Date | string | null | undefined): string {
   if (!date) return "never"
-  const ms = Date.now() - date.getTime()
+  const d = date instanceof Date ? date : new Date(date)
+  if (Number.isNaN(d.getTime())) return "never"
+  const ms = Date.now() - d.getTime()
   const m = Math.floor(ms / 60_000)
   if (m < 1) return "just now"
   if (m < 60) return `${m}m ago`
@@ -72,7 +82,11 @@ export default async function AdminDashboard() {
   ])
 
   const openOrphans = Number(orphanRows[0]?.count ?? 0)
-  const lastReconciled = reconcileRows[0]?.max ?? null
+  // `max(...)` is a raw sql<Date> aggregate — Drizzle does NOT coerce it the
+  // way it does mapped `mode: "date"` columns, so pg may return a string here.
+  // Normalize to a Date (or null) before it reaches ago().
+  const rawReconciled = reconcileRows[0]?.max
+  const lastReconciled = rawReconciled ? new Date(rawReconciled) : null
 
   const poolUnavailable = (pool as PoolResult).unavailable === true
   const poolReady = pool.entries.reduce((s, e) => s + e.ready, 0)
