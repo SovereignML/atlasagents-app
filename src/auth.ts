@@ -17,6 +17,7 @@ import { consumeBackupCode, decryptTotpSecret } from "@/lib/two-factor"
 import { verifyTurnstileToken } from "@/lib/turnstile"
 import { rateLimit } from "@/lib/rate-limit"
 import { clientIp } from "@/lib/client-ip"
+import { getOrCreatePersonalTeam } from "@/lib/team"
 
 /**
  * `code` is overridden so the client can distinguish the 2FA challenge step
@@ -225,6 +226,31 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         ;(session.user as { role: string }).role = token.role as string
       }
       return session
+    },
+  },
+  events: {
+    /**
+     * Fires once, when the DrizzleAdapter inserts a brand-new User row — i.e.
+     * OAuth signups (Google / Twitter / Apple). Credentials signups do NOT
+     * reach here: `/api/auth/register` inserts the user itself and creates the
+     * team inline, so there is no double-create.
+     *
+     * Mirrors that route's reasoning: give the account a Team at signup instead
+     * of waiting for the lazy getUserTeam() path on first /dashboard load, so a
+     * user who never completes that first load is still visible in the admin
+     * console (whose account views all read FROM `Team`).
+     *
+     * Best-effort — an OAuth sign-in must never fail because team creation did.
+     * getOrCreatePersonalTeam is idempotent, so the lazy path remains a valid
+     * fallback.
+     */
+    async createUser({ user }) {
+      if (!user.id) return
+      try {
+        await getOrCreatePersonalTeam(user.id)
+      } catch (err) {
+        console.error("[auth] personal team creation failed on OAuth signup:", err)
+      }
     },
   },
 })

@@ -28,6 +28,7 @@
     "test:openrouter-usage-sync": "node --env-file=.env --import tsx scripts/test-openrouter-usage-sync.ts",
     "test:billing-hardening": "node --env-file=.env --import tsx scripts/test-billing-hardening.ts",
     "openrouter:backfill-usage": "node --env-file=.env --import tsx scripts/backfill-openrouter-usage.ts",
+    "backfill:personal-teams": "node --env-file=.env --import tsx scripts/backfill-personal-teams.ts",
     "wallets:migrate": "node --env-file=.env --import tsx scripts/migrate-wallets-to-credits.ts",
     "whitelabel:backfill-hostnames": "node --env-file=.env --import tsx scripts/backfill-custom-hostnames.ts",
     "seed:agent-events": "node --env-file=.env --import tsx scripts/seed-agent-events.ts",

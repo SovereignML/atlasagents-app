@@ -6,6 +6,7 @@ import { registerSchema } from "@/lib/validations"
 import { rateLimit } from "@/lib/rate-limit"
 import { resolveTeamByHost } from "@/lib/tenant-branding"
 import { getTenantConfig, createChildTeam } from "@/lib/tenant"
+import { getOrCreatePersonalTeam } from "@/lib/team"
 import { verifyTurnstileToken } from "@/lib/turnstile"
 import { issueAndSendVerification } from "@/lib/email-verification"
 import { posthogServer } from "@/lib/posthog-server"
@@ -118,7 +119,7 @@ export async function POST(req: Request) {
     // Self-serve white-label signup: if this registration happened on a tenant's
     // verified custom domain, attach the new account as a child team under that
     // tenant. On the canonical host (or any non-tenant domain) this is a no-op —
-    // the user gets a personal team lazily on first login (getUserTeam).
+    // the personal-team fallback below then owns team creation.
     try {
       const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host")
       const tenantTeamId = newUser ? await resolveTeamByHost(host) : null
@@ -144,6 +145,25 @@ export async function POST(req: Request) {
       console.error("[register] tenant attach failed:", err)
     }
 
+    // Give every new account a Team immediately, rather than waiting for the
+    // lazy getUserTeam() path that only fires on first /dashboard load. Without
+    // this, an account that registers and never returns (stops at the
+    // verification mail, bounces at login) has no Team row — and the admin
+    // console's account views all start FROM `Team`, so those signups were
+    // invisible to staff. Idempotent, and a no-op for the white-label branch
+    // above: getOrCreatePersonalTeam matches on teams.ownerId, so the child team
+    // just created is found and returned instead of a second team being made.
+    //
+    // Best-effort, like the blocks around it — a team can always be recreated
+    // lazily later, so never fail a registration over it.
+    if (newUser) {
+      try {
+        await getOrCreatePersonalTeam(newUser.id)
+      } catch (err) {
+        console.error("[register] personal team creation failed:", err)
+      }
+    }
+
     // Issue an email-verification token and send the link. Best-effort — never
     // fail the signup over email delivery; the user can resend from the
     // dashboard banner. `emailVerified` stays null until they click the link.
@@ -157,7 +177,12 @@ export async function POST(req: Request) {
       { message: "Account created successfully" },
       { status: 201 }
     )
-  } catch {
+  } catch (err) {
+    // Deliberately NOT apiError() despite the repo convention: this route is
+    // public and unauthenticated, and apiError echoes err.message to the
+    // caller. Log with the same grep-able `[tag]` shape so a broken signup
+    // leaves a trail, but keep the response body generic.
+    console.error("[register]", err)
     return NextResponse.json(
       { error: "Something went wrong" },
       { status: 500 }

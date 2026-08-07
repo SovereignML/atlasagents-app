@@ -45,7 +45,11 @@ export async function GET(request: Request) {
       conditions.push(eq(users.role, "user"));
     } else if (status === "banned") {
       conditions.push(eq(users.isBanned, true));
-    } else if (status === "admin") {
+    } else if (status === "admins" || status === "admin") {
+      // The UI tab sends "admins" (plural). "admin" is accepted too so any
+      // existing bookmark / direct API caller keeps working — previously only
+      // the singular matched, so the tab silently fell through to no filter
+      // and listed every user.
       conditions.push(eq(users.role, "admin"));
     }
 
