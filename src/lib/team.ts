@@ -37,6 +37,18 @@ export function rankRole(role: TeamRole): number {
   return RANK[role]
 }
 
+/**
+ * The user's personal (first-owned) team, created on demand.
+ *
+ * Concurrency-safe. The fast-path check below is advisory only — two callers
+ * can pass it simultaneously and both proceed to insert. That is not
+ * hypothetical: a layout and a page render in PARALLEL in the App Router, and
+ * `dashboard/layout.tsx` (via resolveBranding) and `dashboard/team/page.tsx`
+ * both call getUserTeam, so a first visit by a team-less user fires two
+ * concurrent creates. `Team.ownerId` carries only a plain index — and must
+ * NOT be made unique, since owning several teams is a real feature
+ * (MAX_TEAMS_PER_USER, createTeam). So the mutual exclusion has to be here.
+ */
 export async function getOrCreatePersonalTeam(userId: string) {
   const existing = await db.query.teams.findFirst({
     where: eq(teams.ownerId, userId),
@@ -51,6 +63,17 @@ export async function getOrCreatePersonalTeam(userId: string) {
   const teamName = user?.name ? `${user.name}'s Team` : (user?.email?.split("@")[0] ?? "Personal") + " Team"
 
   return await db.transaction(async (tx) => {
+    // Serialize first-team creation per user. The lock is transaction-scoped,
+    // so it releases on commit or rollback with no cleanup path to forget.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${userId}))`)
+
+    // Re-check under the lock: whoever won the race has committed by the time
+    // we acquire it, and we must return their team rather than insert a second.
+    const raced = await tx.query.teams.findFirst({
+      where: eq(teams.ownerId, userId),
+    })
+    if (raced) return raced
+
     const [team] = await tx
       .insert(teams)
       .values({ id: createId(), name: teamName, ownerId: userId })

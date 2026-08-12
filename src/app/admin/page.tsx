@@ -12,8 +12,12 @@ import {
   type HealthCounts,
 } from "@/lib/admin-accounts"
 import { runtimeLabel } from "@/lib/runtimes/labels"
+import { getAdminOverview } from "@/lib/admin-metrics"
+import { getSecurityPosture } from "@/lib/admin-security"
 import { StatCard } from "@/components/admin/stat-card"
 import { StatusBadge } from "@/components/admin/status-badge"
+import { OverviewTab } from "@/components/admin/overview-tab"
+import { SecurityTab } from "@/components/admin/security-tab"
 import { Card, CardContent } from "@/components/ui/card"
 import {
   Empty,
@@ -63,7 +67,16 @@ function ago(date: Date | string | null | undefined): string {
 
 export default async function AdminDashboard() {
   await requireAdminPage()
-  const [fleet, accounts, pool, providers, orphanRows, reconcileRows] = await Promise.all([
+  const [
+    fleet,
+    accounts,
+    pool,
+    providers,
+    orphanRows,
+    reconcileRows,
+    metrics,
+    security,
+  ] = await Promise.all([
     getFleetHealth(),
     getAccountHealth(),
     // Degrade gracefully: a warm-pool health failure (e.g. the WarmVm table
@@ -79,6 +92,11 @@ export default async function AdminDashboard() {
       .from(orphanEvents)
       .where(isNull(orphanEvents.resolvedAt)),
     db.select({ max: sql<Date | null>`max(${instances.reconciledAt})` }).from(instances),
+    // Both already degrade internally (per-section guard / try-catch), so a
+    // failing aggregate renders an "unavailable" panel rather than 500-ing the
+    // whole console.
+    getAdminOverview(),
+    getSecurityPosture(),
   ])
 
   const openOrphans = Number(orphanRows[0]?.count ?? 0)
@@ -165,8 +183,18 @@ export default async function AdminDashboard() {
 
       {/* ── Tabbed health views ── */}
       <DashboardTabs
+        overview={
+          <OverviewTab overview={metrics.overview} failures={metrics.failures} />
+        }
         fleet={<FleetTab counts={fleet.counts} rows={fleet.rows} />}
         accounts={<AccountsTab counts={accounts.counts} rows={accounts.rows} />}
+        security={
+          <SecurityTab
+            counts={security.counts}
+            users={security.users}
+            failed={security.failed}
+          />
+        }
       />
     </PageContainer>
   )

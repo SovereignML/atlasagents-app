@@ -357,6 +357,16 @@ html[data-console-theme="dark"] {
   --brand-bar: #015efe;
   --brand-bar-peak: #4dabf7;
 
+  /* Two-series CATEGORICAL fills (identity, not magnitude/status) — used by the
+     admin overview's runtime split. Deliberately NOT --chart-1/--chart-4: that
+     pair's dark-mode steps (lime/amber) separate by only ΔE 7.4 under deuteran
+     simulation, i.e. a red-green colorblind reader cannot tell the two series
+     apart. These steps pass the full check set in BOTH modes — lightness band,
+     chroma floor, CVD separation, normal-vision floor and surface contrast. Do
+     not re-tune them by eye; re-run the palette validator. */
+  --chart-cat-1: #2563eb;
+  --chart-cat-2: #c2410c;
+
   --bg-color: #fafafa;
   --card-bg: #ffffff;
   --border-color: #09090b14;
@@ -452,6 +462,11 @@ html[data-console-theme="dark"] {
   /* Brand bar-chart fills — lime on dark (blue on light, see .app-shell). */
   --brand-bar: #a3e635;
   --brand-bar-peak: #bef264;
+
+  /* Dark steps of the categorical pair — see the light block for why these are
+     separate from --chart-*. Validated against the dark console surface. */
+  --chart-cat-1: #3b82f6;
+  --chart-cat-2: #ea580c;
 
   --bg-color: #0a0a0b;
   --card-bg: #161618;

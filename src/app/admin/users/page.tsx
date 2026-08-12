@@ -76,7 +76,11 @@ interface User {
   discordId: string | null
   createdAt: string
   teams: { id: string; name: string; role: string }[]
-  _count: { subscriptions: number; payments: number }
+  // Mirrors the shape returned by /api/admin/users. There is no `payments`
+  // table in the schema — the column that used to read `_count.payments`
+  // rendered blank for every user and now shows `instances`, which the API
+  // was already computing but nothing displayed.
+  _count: { subscriptions: number; instances: number; adminNotes: number }
 }
 
 interface AdminNote {
@@ -309,7 +313,7 @@ export default function AdminUsersPage() {
                   <TableHead>Status</TableHead>
                   <TableHead>Team</TableHead>
                   <TableHead>Subs</TableHead>
-                  <TableHead>Payments</TableHead>
+                  <TableHead>Agents</TableHead>
                   <TableHead>Joined</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -419,7 +423,7 @@ export default function AdminUsersPage() {
                           {user._count.subscriptions}
                         </TableCell>
                         <TableCell className="text-muted-foreground">
-                          {user._count.payments}
+                          {user._count.instances}
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {new Date(user.createdAt).toLocaleDateString()}
