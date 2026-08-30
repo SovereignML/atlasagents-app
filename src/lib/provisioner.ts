@@ -116,6 +116,9 @@ function buildWorkspaceAgentsMd(
 }
 
 const BOT_RUNTIME_IMAGE = () =>
+  // LEGACY WIRE FORMAT — the GHCR namespace and image name are deliberately
+  // NOT renamed in the Atlas Agents rebrand; the published image still lives
+  // at this path. See docs/REBRAND-LEGACY-IDENTIFIERS.md.
   process.env.BOT_RUNTIME_IMAGE || "ghcr.io/sovereignml/sovereign-bot-runtime:latest"
 
 const NEXT_PUBLIC_GATEWAY_BASE_URL = () =>
@@ -2586,7 +2589,7 @@ async function provisionByosBot(instance: Instance): Promise<ProvisionResult> {
       await sshWaitReady(target)
     } catch (e) {
       throw new Error(
-        `Could not SSH into ${host}:${port}. Confirm you added the Sovereign fleet ` +
+        `Could not SSH into ${host}:${port}. Confirm you added the Atlas Agents fleet ` +
           `public key to ${username}'s authorized_keys and that port ${port} is open. ` +
           `(${e instanceof Error ? e.message : String(e)})`,
       )
@@ -3274,6 +3277,8 @@ async function resolveToolServiceSecrets(
   instance: Instance,
   service: ToolService,
 ): Promise<{ encryptionKey: string; ownerEmail: string; ownerPassword: string }> {
+  // LEGACY WIRE FORMAT — n8n owner accounts on already-provisioned boxes were
+  // created with this synthetic domain. See docs/REBRAND-LEGACY-IDENTIFIERS.md.
   const ownerEmail = `${service.serviceName}+${instance.id.slice(0, 8)}@sovereignml.local`
   let encryptionKey = instance.n8nEncryptionKeyEnc
     ? decryptSecret(instance.n8nEncryptionKeyEnc)

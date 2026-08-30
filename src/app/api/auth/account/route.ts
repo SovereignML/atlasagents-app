@@ -6,6 +6,7 @@ import { hashPassword, verifyPassword } from "@/lib/password"
 import { isGoogleOAuthConfigured } from "@/lib/oauth"
 import { normalizeHost, isCanonicalHost } from "@/lib/host"
 import { notify } from "@/lib/notifications/dispatch"
+import { BRANDING } from "@/configs/branding"
 
 export async function GET() {
   try {
@@ -99,7 +100,7 @@ export async function PATCH(request: Request) {
         type: "password_changed",
         title: "Your password was changed",
         message:
-          "The password on your SovereignML account was just updated. If this wasn't you, reset your password immediately.",
+          `The password on your ${BRANDING.name} account was just updated. If this wasn't you, reset your password immediately.`,
         url: "/dashboard/account",
       })
       return NextResponse.json({ message: "Password updated" })

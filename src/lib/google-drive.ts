@@ -26,6 +26,10 @@ const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files?uploadTyp
 const SCOPES = ["openid", "email", "https://www.googleapis.com/auth/drive.file"].join(" ")
 
 /** appProperties marker so we only ever list/touch files this app created. */
+// LEGACY WIRE FORMAT — deliberately NOT renamed in the Atlas Agents
+// rebrand. Written into appProperties on backups in customers' own Google
+// Drive; a renamed tag cannot find the existing files.
+// See docs/REBRAND-LEGACY-IDENTIFIERS.md.
 export const BACKUP_TAG = "sovereign_backup"
 
 const TIMEOUT_MS = 15_000

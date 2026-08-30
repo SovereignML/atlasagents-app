@@ -1,4 +1,4 @@
-# SovereignML
+# Atlas Agents
 
 Production SaaS platform for deploying and operating AI agents (Next.js App Router, Drizzle ORM, PostgreSQL, Stripe, NextAuth).
 

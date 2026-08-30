@@ -8,7 +8,7 @@ const sections = [
   {
     id: "overview",
     title: "Overview",
-    content: `This Refund Policy explains when and how refunds are issued on SovereignML ("the Platform"). We aim to be fair: where you have prepaid for compute or credits you have not used, the unused portion may be refundable within the window described below. It supplements the billing terms set out in our Terms of Service. By subscribing to a paid plan or purchasing credits, you agree to this Refund Policy.`,
+    content: `This Refund Policy explains when and how refunds are issued on ${BRANDING.name} ("the Platform"). We aim to be fair: where you have prepaid for compute or credits you have not used, the unused portion may be refundable within the window described below. It supplements the billing terms set out in our Terms of Service. By subscribing to a paid plan or purchasing credits, you agree to this Refund Policy.`,
   },
   {
     id: "eligibility",
@@ -54,7 +54,7 @@ Time already elapsed in the period, the value of any plan credits already used, 
   {
     id: "billing-errors",
     title: "Billing Errors",
-    content: `If you believe you were charged in error (for example, a duplicate charge, an incorrect amount, or a charge after a confirmed cancellation), contact us at billing@sovereignml.com within 14 days of the charge.
+    content: `If you believe you were charged in error (for example, a duplicate charge, an incorrect amount, or a charge after a confirmed cancellation), contact us at ${BRANDING.billingEmail} within 14 days of the charge.
 
 We will review eligible billing-error claims and, where a charge is confirmed to be in error, issue a correction or refund to the original payment method.`,
   },
@@ -73,29 +73,29 @@ Charges from a renewal that was not cancelled in time are eligible for a refund 
   {
     id: "how-to-request",
     title: "How to Request a Refund",
-    content: `To request a refund, email billing@sovereignml.com from the email address associated with your account. Include the charge date, amount, and a brief description of your request. For unused-credit or unused-compute refunds, tell us which charge you would like reviewed; we will confirm the eligible amount, net of fees, before processing.
+    content: `To request a refund, email ${BRANDING.billingEmail} from the email address associated with your account. Include the charge date, amount, and a brief description of your request. For unused-credit or unused-compute refunds, tell us which charge you would like reviewed; we will confirm the eligible amount, net of fees, before processing.
 
 We aim to respond to refund requests within 5 business days. Approved refunds are issued to the original payment method and may take additional time to appear, depending on your bank or card issuer.`,
   },
   {
     id: "changes",
     title: "Changes to This Policy",
-    content: `SovereignML reserves the right to update this Refund Policy at any time. Material changes will be reflected by updating the "Last updated" date above. Continued use of the Platform after changes are posted constitutes acceptance of the revised policy.`,
+    content: `${BRANDING.name} reserves the right to update this Refund Policy at any time. Material changes will be reflected by updating the "Last updated" date above. Continued use of the Platform after changes are posted constitutes acceptance of the revised policy.`,
   },
   {
     id: "contact",
     title: "Contact",
     content: `For questions about this Refund Policy or a specific charge, contact us:
 
-SovereignML L.L.C.
-Email: billing@sovereignml.com
-Website: sovereignml.com`,
+${BRANDING.legalEntity}
+Email: ${BRANDING.billingEmail}
+Website: ${BRANDING.domain}`,
   },
 ]
 
 export const metadata = {
-  title: "Refund Policy | SovereignML",
-  description: "How refunds and billing-error corrections are handled on the SovereignML AI operations platform.",
+  title: "Refund Policy",
+  description: `How refunds and billing-error corrections are handled on the ${BRANDING.name} AI operations platform.`,
 }
 
 export default function RefundPage() {

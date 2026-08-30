@@ -27,6 +27,10 @@ function getKey(): Buffer {
     if (process.env.NODE_ENV === "production") {
       throw new Error("INSTANCE_ENCRYPTION_KEY is required in production")
     }
+        // LEGACY WIRE FORMAT — deliberately NOT renamed in the Atlas Agents
+    // rebrand. This string is key-derivation material; changing it makes every
+// locally dev-encrypted instance secret undecryptable.
+    // See docs/REBRAND-LEGACY-IDENTIFIERS.md.
     return createHash("sha256").update("sovereignml-dev-key").digest()
   }
   const buf = Buffer.from(raw, "base64")

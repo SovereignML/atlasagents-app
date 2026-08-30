@@ -1,4 +1,4 @@
-# Caddy reverse proxy for the SovereignML dashboard, fronting the Next.js
+# Caddy reverse proxy for the Atlas Agents dashboard, fronting the Next.js
 # standalone server on 127.0.0.1:3000.
 #
 # This terminates TLS for the canonical dashboard host only.

@@ -2,7 +2,7 @@ import { Resend } from "resend"
 import { BRANDING } from "@/configs/branding"
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
-const fromEmail = process.env.RESEND_FROM_EMAIL || "noreply@sovereignml.com"
+const fromEmail = process.env.RESEND_FROM_EMAIL || BRANDING.noreplyEmail
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
 
 // ── Shared dark-mode email shell ──────────────────────────────────────
@@ -18,7 +18,7 @@ const SANS_STACK = `-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
-const DEFAULT_FOOTER = `You're receiving this because you have a SovereignML account. Manage notifications in your <a href="${appUrl}/dashboard/account" style="color:#a1a1aa;text-decoration:underline;">account settings</a>.`
+const DEFAULT_FOOTER = `You're receiving this because you have a ${BRANDING.name} account. Manage notifications in your <a href="${appUrl}/dashboard/account" style="color:#a1a1aa;text-decoration:underline;">account settings</a>.`
 
 function renderEmailLayout(args: {
   bodyHtml: string
@@ -48,7 +48,7 @@ function renderEmailLayout(args: {
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:${maxWidth}px;width:100%;">
           <tr>
             <td align="center" style="padding:0 0 24px;">
-              <span style="font-family:${MONO_STACK};font-size:18px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#a3e635;">SOVEREIGNML</span>
+              <span style="font-family:${MONO_STACK};font-size:18px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#a3e635;">${BRANDING.name}</span>
             </td>
           </tr>
           <tr>
@@ -90,7 +90,7 @@ export async function sendTeamInviteEmail(args: {
     await resend.emails.send({
       from: fromEmail,
       to: args.email,
-      subject: `${args.inviterName} invited you to ${args.teamName} on SovereignML`,
+      subject: `${args.inviterName} invited you to ${args.teamName} on ${BRANDING.name}`,
       html: renderEmailLayout({
         bodyHtml: `<p style="margin:0;"><strong>${esc(args.inviterName)}</strong> invited you to join <strong>${esc(args.teamName)}</strong> as <strong>${esc(args.role)}</strong>.</p>`,
         ctaUrl: acceptUrl,
@@ -117,7 +117,7 @@ export async function sendPasswordResetEmail(email: string, token: string) {
     await resend.emails.send({
       from: fromEmail,
       to: email,
-      subject: "Reset your SovereignML password",
+      subject: `Reset your ${BRANDING.name} password`,
       html: renderEmailLayout({
         bodyHtml: `<p style="margin:0;">You requested a password reset. Click the button below to set a new password.</p>`,
         ctaUrl: resetUrl,
@@ -144,9 +144,9 @@ export async function sendVerificationEmail(email: string, token: string) {
     await resend.emails.send({
       from: fromEmail,
       to: email,
-      subject: "Verify your SovereignML email",
+      subject: `Verify your ${BRANDING.name} email`,
       html: renderEmailLayout({
-        bodyHtml: `<p style="margin:0;">Welcome to SovereignML. Confirm your email address to finish setting up your account.</p>`,
+        bodyHtml: `<p style="margin:0;">Welcome to ${BRANDING.name}. Confirm your email address to finish setting up your account.</p>`,
         ctaUrl: verifyUrl,
         ctaLabel: "Verify Email",
         footerHtml: "This link expires in 24 hours. If you didn't create an account, ignore this email.",
@@ -162,7 +162,7 @@ export async function sendVerificationEmail(email: string, token: string) {
 /**
  * Generic transactional notification email. Used by the multi-channel
  * notification dispatcher (src/lib/notifications) for the "email" channel.
- * Shares the SovereignML dark shell with the other templates here.
+ * Shares the Atlas Agents dark shell with the other templates here.
  */
 export async function sendNotificationEmail(args: {
   to: string

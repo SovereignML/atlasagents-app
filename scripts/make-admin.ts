@@ -84,6 +84,8 @@ async function resolvePassword(opts: { required: boolean }): Promise<string | nu
 }
 
 async function main() {
+  // LEGACY WIRE FORMAT — the production admin row already exists with this
+  // address. See docs/REBRAND-LEGACY-IDENTIFIERS.md.
   const email = (process.argv[2] || process.env.ADMIN_EMAIL || "admin@sovereignml.com")
     .trim()
     .toLowerCase()

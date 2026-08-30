@@ -1,4 +1,4 @@
-# SovereignML — Internal Product & Engineering Audit
+# Atlas Agents — Internal Product & Engineering Audit
 
 > **2026 update (read first):** This is a **historical** audit; treat its "now/NOT yet/roadmap" framing as a point-in-time snapshot, not current state.
 >

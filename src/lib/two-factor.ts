@@ -30,6 +30,10 @@ export function createTwoFactorSetup(params: {
   const otpauthUri = buildOtpauthUri({
     secret,
     accountName: params.accountName,
+        // LEGACY WIRE FORMAT — deliberately NOT renamed in the Atlas Agents
+    // rebrand. Baked into every already-enrolled TOTP secret; authenticator apps
+// keep showing the old issuer and there is no migration path.
+    // See docs/REBRAND-LEGACY-IDENTIFIERS.md.
     issuer: params.issuer ?? "SovereignML",
   })
   return { secret, otpauthUri }

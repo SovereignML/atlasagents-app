@@ -1,5 +1,8 @@
 import { cookies } from "next/headers"
 
+// LEGACY WIRE FORMAT — deliberately NOT renamed in the Atlas Agents
+// rebrand. Renaming logs out every in-flight admin impersonation session.
+// See docs/REBRAND-LEGACY-IDENTIFIERS.md.
 const COOKIE_NAME = "sovereign_impersonate"
 
 /**

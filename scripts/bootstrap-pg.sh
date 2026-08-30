@@ -17,6 +17,11 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$REPO_ROOT/.env"
+# LEGACY WIRE FORMAT — the role and database are deliberately NOT renamed in
+# the Atlas Agents rebrand: they exist on every deployed box and there is no
+# migrations journal to rename them through (db:migrate is banned). Override
+# with DB_NAME/DB_USER for a fresh deployment.
+# See docs/REBRAND-LEGACY-IDENTIFIERS.md.
 DB_NAME="${DB_NAME:-sovereignml}"
 DB_USER="${DB_USER:-sovereignml}"
 DB_HOST="${DB_HOST:-127.0.0.1}"

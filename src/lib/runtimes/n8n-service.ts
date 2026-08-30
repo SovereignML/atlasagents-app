@@ -122,7 +122,7 @@ ${bashSingleQuote(N8N_BIN)} --version >/dev/null
 
   renderSystemdUnit(): string {
     return `[Unit]
-Description=n8n workflow automation (SovereignML tool)
+Description=n8n workflow automation (Atlas Agents tool)
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=300

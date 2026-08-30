@@ -1,6 +1,6 @@
 # Billing — Credits & OpenRouter Margin
 
-> How SovereignML charges for AI usage. Customers fund a **credit wallet**; agents spend real money on OpenRouter; a background poller reconciles the two with a **guaranteed gross margin** and hard spend caps enforced on OpenRouter's side.
+> How Atlas Agents charges for AI usage. Customers fund a **credit wallet**; agents spend real money on OpenRouter; a background poller reconciles the two with a **guaranteed gross margin** and hard spend caps enforced on OpenRouter's side.
 
 Related: [BYOS.md](BYOS.md) (the `managed_credits` vs `own_key` choice), [RUNTIMES.md](RUNTIMES.md) (what consumes the model budget), [PROVIDERS.md](PROVIDERS.md) (compute budgeting, a separate internal concern).
 

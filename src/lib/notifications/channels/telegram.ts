@@ -1,4 +1,4 @@
-// Telegram channel: send via the dedicated SovereignML notifications bot.
+// Telegram channel: send via the dedicated Atlas Agents notifications bot.
 // This bot is distinct from users' own deployed bots (routed at /tg/[botToken]).
 
 const API_BASE = "https://api.telegram.org"

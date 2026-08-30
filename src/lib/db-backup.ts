@@ -55,6 +55,10 @@ function backupKey(now: Date): { key: string; fileName: string } {
   const stamp =
     `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}` +
     `-${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}`
+    // LEGACY WIRE FORMAT — deliberately NOT renamed in the Atlas Agents
+  // rebrand. Existing dumps in the backup bucket are named with this prefix and
+// are listed/restored by it.
+  // See docs/REBRAND-LEGACY-IDENTIFIERS.md.
   const fileName = `sovereignml-${stamp}.dump`
   return { key: `${BACKUP_PREFIX}${fileName}`, fileName }
 }

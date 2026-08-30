@@ -1,4 +1,4 @@
-# SovereignML — PostHog product analytics
+# Atlas Agents — PostHog product analytics
 
 This document covers the **PostHog** integration: what it captures, the files involved, environment variables, production setup, and how to verify it works.
 

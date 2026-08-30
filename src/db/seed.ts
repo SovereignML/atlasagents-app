@@ -26,6 +26,10 @@ import {
 
 async function main() {
   // 1. Admin user
+  // LEGACY WIRE FORMAT — the production admin account row already exists with
+  // this address; changing the default here would not migrate it, it would
+  // create a second admin. Override with ADMIN_EMAIL for new deployments.
+  // See docs/REBRAND-LEGACY-IDENTIFIERS.md.
   const adminEmail = process.env.ADMIN_EMAIL || "admin@sovereignml.com"
   const adminPassword = process.env.ADMIN_PASSWORD || "admin123456"
 

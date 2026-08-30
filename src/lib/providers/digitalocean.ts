@@ -20,6 +20,10 @@ import type {
 import { getRemainingCreditBySlug } from "@/lib/provider-billing"
 
 const DO_API = "https://api.digitalocean.com/v2"
+// LEGACY WIRE FORMAT — deliberately NOT renamed in the Atlas Agents
+// rebrand. The SSH key is already registered under this name on the
+// DigitalOcean account.
+// See docs/REBRAND-LEGACY-IDENTIFIERS.md.
 const FLEET_KEY_NAME = "sovereign-fleet"
 const DEFAULT_IMAGE = "ubuntu-24-04-x64"
 

@@ -15,7 +15,12 @@ export function normalizeHost(host: string | null | undefined): string | null {
   return h || null
 }
 
-/** Hosts that are NOT custom domains (the platform's own domain + local dev). */
+/**
+ * Hosts that are NOT custom domains (the platform's own domain + local dev).
+ *
+ * Includes BRANDING.legacyDomains: the pre-rename hosts still resolve here and
+ * must not be claimable as tenant white-label domains.
+ */
 export function isCanonicalHost(host: string): boolean {
   return canonicalHosts().has(host)
 }
@@ -33,6 +38,9 @@ function canonicalHosts(): Set<string> {
   const domain = BRANDING.domain.toLowerCase()
   hosts.add(domain)
   hosts.add(`www.${domain}`)
+  for (const host of [...BRANDING.legacyHosts.site, ...BRANDING.legacyHosts.app]) {
+    hosts.add(host.toLowerCase())
+  }
   return hosts
 }
 

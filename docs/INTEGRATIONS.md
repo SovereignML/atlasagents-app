@@ -1,6 +1,6 @@
 # Integrations — Google Drive Backups & BYO Cloudflare
 
-> Two integrations where the user connects **their own** third-party account, and SovereignML acts on it with a narrowly-scoped credential: back agents up to **your own Google Drive**, and put agents on subdomains of **your own Cloudflare zones**.
+> Two integrations where the user connects **their own** third-party account, and Atlas Agents acts on it with a narrowly-scoped credential: back agents up to **your own Google Drive**, and put agents on subdomains of **your own Cloudflare zones**.
 
 Both follow the same security shape: a minimal scope, the secret stored encrypted (`encryptSecret`, AES-256-GCM), one connection per user, and best-effort revoke on disconnect. Related: [BYOS.md](BYOS.md), [RUNTIMES.md](RUNTIMES.md).
 
@@ -12,7 +12,7 @@ Snapshot an agent's **settings and behavior** to a JSON file in the user's own D
 
 ### What it does (for users)
 
-1. **Connect Drive** (`/dashboard` instance → backups tab). This runs a **dedicated** Google consent flow, separate from the Google login provider — it requests only the `drive.file` scope, so SovereignML can touch **only files it creates**, never the rest of your Drive.
+1. **Connect Drive** (`/dashboard` instance → backups tab). This runs a **dedicated** Google consent flow, separate from the Google login provider — it requests only the `drive.file` scope, so Atlas Agents can touch **only files it creates**, never the rest of your Drive.
 2. **Create a backup.** A timestamped JSON file (`sovereign-backup-<agent>-<timestamp>.json`) is written to your Drive and indexed locally for fast listing.
 3. **Restore** a backup in one of two modes:
    - **In place** — overwrite an existing agent's settings.
@@ -55,8 +55,8 @@ Let users (agencies, whitelabel customers) put agents on subdomains of **their o
 
 ### What it does (for users)
 
-1. **Connect Cloudflare** — paste a **scoped API token**. Required scopes: **Zone:Read** and **Zone:DNS:Edit**, and ideally **Zone Settings:Edit** (so SovereignML can set the zone's SSL mode for you). Connect verifies the token is active and smoke-tests Zone:Read by listing your zones.
-2. **Assign a domain** to a running agent — pick one of your zones and an optional subdomain label. SovereignML creates a **proxied (orange-cloud) A record** pointing at the agent's IP, raises the zone SSL mode to **Full** if it's weaker, and reconfigures the agent's web server.
+1. **Connect Cloudflare** — paste a **scoped API token**. Required scopes: **Zone:Read** and **Zone:DNS:Edit**, and ideally **Zone Settings:Edit** (so Atlas Agents can set the zone's SSL mode for you). Connect verifies the token is active and smoke-tests Zone:Read by listing your zones.
+2. **Assign a domain** to a running agent — pick one of your zones and an optional subdomain label. Atlas Agents creates a **proxied (orange-cloud) A record** pointing at the agent's IP, raises the zone SSL mode to **Full** if it's weaker, and reconfigures the agent's web server.
 3. **Remove** the domain to revert the agent back to its managed subdomain / IP.
 
 ### How it works (for developers)

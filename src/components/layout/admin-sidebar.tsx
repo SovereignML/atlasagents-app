@@ -31,6 +31,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import { BRANDING } from "@/configs/branding"
 
 type NavItem = {
   href: string
@@ -86,7 +87,7 @@ export function AdminSidebar() {
           href="/admin"
           className="flex items-center text-lg font-semibold tracking-tight group-data-[collapsible=icon]:justify-center"
         >
-          <span className="group-data-[collapsible=icon]:hidden">SovereignML</span>
+          <span className="group-data-[collapsible=icon]:hidden">{BRANDING.name}</span>
           <span className="hidden group-data-[collapsible=icon]:inline">S</span>
         </Link>
         <Badge variant="secondary" className="w-fit group-data-[collapsible=icon]:hidden">

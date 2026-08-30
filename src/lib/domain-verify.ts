@@ -14,6 +14,10 @@ import dns from "node:dns"
 import crypto from "node:crypto"
 import { db, domainVerifications, and, eq } from "@/db"
 
+// LEGACY WIRE FORMAT — deliberately NOT renamed in the Atlas Agents
+// rebrand. Customers have already published TXT records at this name;
+// renaming invalidates every pending and completed verification.
+// See docs/REBRAND-LEGACY-IDENTIFIERS.md.
 export const VERIFY_RECORD_PREFIX = "_sovereignml-verify"
 
 export function generateNonce(): string {

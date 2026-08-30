@@ -16,15 +16,16 @@ import {
   ChevronDown,
   ArrowRight,
 } from "lucide-react"
+import { BRANDING } from "@/configs/branding"
 
 const faqItems = [
   {
-    question: "What is SovereignML?",
+    question: `What is ${BRANDING.name}?`,
     answer:
-      "SovereignML is an AI operations platform that lets you deploy, manage, and scale intelligent agents that automate real business tasks: from customer support to DevOps to content generation. You pick the agent type, configure it, and it runs.",
+      `${BRANDING.name} is an AI operations platform that lets you deploy, manage, and scale intelligent agents that automate real business tasks: from customer support to DevOps to content generation. You pick the agent type, configure it, and it runs.`,
   },
   {
-    question: "Do I need AI/ML expertise to use SovereignML?",
+    question: `Do I need AI/ML expertise to use ${BRANDING.name}?`,
     answer:
       "No. Our platform handles all the complexity. You choose what you want to automate, configure the basics, and we handle the deployment, optimization, and monitoring. For advanced custom builds, our team can design and deploy bespoke multi-agent systems.",
   },
@@ -93,7 +94,7 @@ const sections = [
         <p>Get your first AI agent running in under 5 minutes:</p>
         <ol className="space-y-3 list-none">
           {[
-            "Create an account at sovereignml.com/register",
+            `Create an account at ${BRANDING.domain}/register`,
             "From your dashboard, click Deploy Agent",
             "Name your project. A URL slug is auto-generated",
             "Select a billing interval (monthly or yearly)",
@@ -121,7 +122,7 @@ const sections = [
     id: "agents",
     content: (
       <div className="space-y-4 text-[var(--text-secondary)] text-sm leading-relaxed">
-        <p>SovereignML supports 8 agent categories, each purpose-built for a specific business function:</p>
+        <p>{BRANDING.name} supports 8 agent categories, each purpose-built for a specific business function:</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {[
             { name: "Automation Agent", desc: "Automate workflows, data entry, scheduled reports, and business ops.", plan: "Builder+" },
@@ -214,7 +215,7 @@ const sections = [
         <div className="space-y-3">
           <div>
             <p className="font-bold text-[var(--text-primary)] mb-1">Plans</p>
-            <p>Plans are credit-based with included monthly credits and live agent limits per tier (see sovereignml.com/pricing). Enterprise adds custom credit allocation, volume pricing, and SLAs.</p>
+            <p>Plans are credit-based with included monthly credits and live agent limits per tier (see {BRANDING.domain}/pricing). Enterprise adds custom credit allocation, volume pricing, and SLAs.</p>
           </div>
           <div>
             <p className="font-bold text-[var(--text-primary)] mb-1">Yearly Billing</p>
@@ -346,7 +347,7 @@ export default function DocsPage() {
           Documentation
         </h1>
         <p className="text-[var(--text-secondary)] text-lg max-w-2xl">
-          Everything you need to deploy and manage AI agents on SovereignML.
+          Everything you need to deploy and manage AI agents on {BRANDING.name}.
         </p>
       </Reveal>
 

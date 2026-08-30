@@ -1,6 +1,6 @@
 # Agent Runtimes — OpenClaw & Hermes
 
-> The **runtime** is the agent engine installed on the box. SovereignML ships two: **OpenClaw** (the default) and **Hermes** (Nous Research Hermes, Python, with a bundled Open WebUI chat interface). The runtime is chosen in the deploy wizard and stored per instance.
+> The **runtime** is the agent engine installed on the box. Atlas Agents ships two: **OpenClaw** (the default) and **Hermes** (Nous Research Hermes, Python, with a bundled Open WebUI chat interface). The runtime is chosen in the deploy wizard and stored per instance.
 
 For connecting bots/scripts to a Hermes instance's API, see the companion doc **[HERMES-API-INTEGRATION.md](HERMES-API-INTEGRATION.md)**. Related: [BILLING.md](BILLING.md) (what the model calls cost), [BYOS.md](BYOS.md).
 

@@ -1,4 +1,4 @@
-# SovereignML deployment guide (for dummies)
+# Atlas Agents deployment guide (for dummies)
 
 End-to-end: from fresh VPS → public HTTPS URL → one-click OpenClaw deploys working.
 
@@ -11,7 +11,7 @@ End-to-end: from fresh VPS → public HTTPS URL → one-click OpenClaw deploys w
 ## 0. What you need before you start
 
 - A VPS (Ubuntu 22.04+ recommended, 2 vCPU / 4 GB RAM minimum).
-- A domain you control (e.g. `sovereignml.example.com`) with DNS access.
+- A domain you control (e.g. `app.example.com`) with DNS access.
 - A **Linode** API token — [create one here](https://cloud.linode.com/profile/tokens) with scopes `linodes:read_write` + `stackscripts:read_write`. This is what the platform uses to spin up user VMs.
 - An **OpenRouter** API key — [get one here](https://openrouter.ai/keys). Powers OpenClaw's LLM calls.
 - *(Optional in dev / **required in production**)* Stripe keys for real billing. Leave blank for dev mode (auto-activates instances, skips payment). **Dev mode is disabled when `NODE_ENV=production`** — a production build with blank Stripe keys fails config validation at boot, and every paid endpoint returns 503. See the [Stripe go-live checklist](#stripe-go-live-checklist) before launching.
@@ -88,13 +88,13 @@ POSTGRES_PASSWORD=<paste generated postgres password>
 POSTGRES_DB=sovereignml
 
 # --- Auth ---
-NEXTAUTH_URL=https://sovereignml.example.com
+NEXTAUTH_URL=https://app.example.com
 NEXTAUTH_SECRET=<paste generated NextAuth secret>
 AUTH_TRUST_HOST=true
 
 # --- App URLs ---
-NEXT_PUBLIC_APP_URL=https://sovereignml.example.com
-NEXT_PUBLIC_GATEWAY_BASE_URL=https://sovereignml.example.com
+NEXT_PUBLIC_APP_URL=https://app.example.com
+NEXT_PUBLIC_GATEWAY_BASE_URL=https://app.example.com
 
 # --- Encryption ---
 INSTANCE_ENCRYPTION_KEY=<paste generated encryption key>
@@ -133,9 +133,9 @@ At your DNS provider, create:
 
 | Type | Name                   | Value         |
 | ---- | ---------------------- | ------------- |
-| A    | sovereignml.example.com | YOUR_VPS_IP   |
+| A    | app.example.com  | YOUR_VPS_IP   |
 
-Wait 1–2 minutes for propagation (`dig +short sovereignml.example.com` should return your IP).
+Wait 1–2 minutes for propagation (`dig +short app.example.com` should return your IP).
 
 ---
 
@@ -146,7 +146,7 @@ Caddy handles Let's Encrypt automatically.
 ```bash
 apt-get install -y caddy
 cat > /etc/caddy/Caddyfile <<'EOF'
-sovereignml.example.com {
+app.example.com {
   reverse_proxy 127.0.0.1:3002
 }
 EOF
@@ -206,7 +206,7 @@ docker compose up -d
 
 ## 10. Smoke test — deploy an OpenClaw agent
 
-1. Visit `https://sovereignml.example.com`, log in.
+1. Visit `https://app.example.com`, log in.
 2. **Dashboard → Deploy Agent**.
 3. Wizard: pick region (Singapore by default), pick a server size, enter a **domain you control** for this agent (e.g. `bot1.example.com`), review, deploy.
 4. On the instance detail page you'll see:
@@ -288,7 +288,7 @@ ANOMALY_USD_PER_INTERVAL=50                   # per-poll spend spike that trigge
 # Google Drive backups (reuses the Google OAuth app; needs its own redirect URI)
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
-GOOGLE_DRIVE_REDIRECT_URI=https://sovereignml.example.com/api/integrations/drive/callback
+GOOGLE_DRIVE_REDIRECT_URI=https://app.example.com/api/integrations/drive/callback
 
 # Platform Cloudflare (managed subdomains). Users connect their OWN token in-app — never here.
 CLOUDFLARE_API_TOKEN=...     # Zone:DNS:Edit + Zone:SSL:Edit on the base domain's zone

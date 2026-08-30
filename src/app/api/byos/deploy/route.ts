@@ -54,7 +54,7 @@ async function validateCustomBaseUrl(raw: string | undefined): Promise<string | 
 }
 
 /**
- * Bring Your Own Server deploy. Sovereign acts as the management panel for a
+ * Bring Your Own Server deploy. Atlas Agents acts as the management panel for a
  * server the customer already owns: they paste our SSH_FLEET_PUBLIC_KEY into
  * their root authorized_keys and we connect with the fleet key (no VM created).
  * Billing is a flat recurring management fee (Stripe subscription); LLM usage
@@ -414,7 +414,7 @@ async function handleByosDeploy(req: NextRequest) {
             product_data: {
               name: `${BRANDING.name} Bring Your Own Server`,
               description: `Management panel for your own server · ${
-                llmMode === "own_key" ? "your own API key" : "pay-as-you-go SovereignML Credits"
+                llmMode === "own_key" ? "your own API key" : `pay-as-you-go ${BRANDING.name} Credits`
               }`,
             },
             unit_amount: unitAmount,

@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import { Inter, Geist_Mono } from "next/font/google"
+import { BRANDING } from "@/configs/branding"
 import { AppProviders } from "@/components/app-providers"
 import { Toaster } from "@/components/ui/sonner"
 import "./globals.css"
@@ -17,9 +18,26 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 })
 
+const DESCRIPTION =
+  "The AI operations platform. Deploy intelligent agents that automate real tasks: support, DevOps, sales, content, and more. Your own isolated instances, no single-vendor lock-in, zero complexity."
+
 export const metadata: Metadata = {
-  title: "SovereignML",
-  description: "The AI operations platform. Deploy intelligent agents that automate real tasks: support, DevOps, sales, content, and more. Your own isolated instances, no single-vendor lock-in, zero complexity.",
+  // Resolves relative OG/Twitter image paths against the deployed origin.
+  metadataBase: new URL(BRANDING.appUrl),
+  title: { default: BRANDING.name, template: `%s | ${BRANDING.name}` },
+  description: DESCRIPTION,
+  openGraph: {
+    type: "website",
+    siteName: BRANDING.name,
+    title: BRANDING.name,
+    description: DESCRIPTION,
+    url: BRANDING.appUrl,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: BRANDING.name,
+    description: DESCRIPTION,
+  },
 }
 
 export default function RootLayout({

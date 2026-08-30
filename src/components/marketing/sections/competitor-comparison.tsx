@@ -12,7 +12,7 @@ import { BRANDING } from "@/configs/branding";
  * Competitor comparison as a ✓/— matrix (per reference design).
  * Closed AI-employee SaaS (Sintra, WorksBuddy, Lindy) rent you hosted bots —
  * convenient, but you never own the runtime or data. Self-hosting hands you
- * ownership but no managed runtime, updates, or support. SovereignML is the
+ * ownership but no managed runtime, updates, or support. Atlas Agents is the
  * ONLY column that is all-✓: the ownership of self-hosting with the convenience
  * of managed SaaS.
  *
@@ -20,10 +20,10 @@ import { BRANDING } from "@/configs/branding";
  * June 2026), as cited in the on-page footnote.
  */
 
-const SOVEREIGN = "sovereign" as const;
+const ATLAS = "atlas" as const;
 
 const products = [
-  { key: SOVEREIGN, name: BRANDING.name, tag: "AI operations layer" },
+  { key: ATLAS, name: BRANDING.name, tag: "AI operations layer" },
   { key: "sintra", name: "Sintra", tag: "Rented AI employees" },
   { key: "worksbuddy", name: "WorksBuddy", tag: "Closed assistant suite" },
   { key: "lindy", name: "Lindy", tag: "Hosted agent builder" },
@@ -46,48 +46,48 @@ const rows: Row[] = [
   {
     feature: "Runs on your instance",
     icon: Server,
-    values: { sovereign: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
+    values: { atlas: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
   },
   {
     feature: "You own & isolate all data",
     icon: Shield,
-    values: { sovereign: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
+    values: { atlas: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
   },
   {
     feature: "No vendor lock-in",
     icon: LockOpen,
-    values: { sovereign: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
+    values: { atlas: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
   },
   {
     feature: "Open agent runtime",
     icon: Boxes,
-    values: { sovereign: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
+    values: { atlas: true, sintra: false, worksbuddy: false, lindy: false, selfhost: true },
   },
   {
     feature: "Bring your own AI keys",
     icon: KeyRound,
     badge: "new",
-    values: { sovereign: true, sintra: false, worksbuddy: false, lindy: "partial", selfhost: true },
+    values: { atlas: true, sintra: false, worksbuddy: false, lindy: "partial", selfhost: true },
   },
   {
     feature: "Native multi-agent orchestration",
     icon: Workflow,
-    values: { sovereign: true, sintra: false, worksbuddy: false, lindy: "partial", selfhost: false },
+    values: { atlas: true, sintra: false, worksbuddy: false, lindy: "partial", selfhost: false },
   },
   {
     feature: "Managed deploy in minutes",
     icon: Rocket,
-    values: { sovereign: true, sintra: true, worksbuddy: true, lindy: true, selfhost: false },
+    values: { atlas: true, sintra: true, worksbuddy: true, lindy: true, selfhost: false },
   },
   {
     feature: "No per-action credit metering",
     icon: Wallet,
-    values: { sovereign: true, sintra: false, worksbuddy: false, lindy: false, selfhost: false },
+    values: { atlas: true, sintra: false, worksbuddy: false, lindy: false, selfhost: false },
   },
 ];
 
 const cost: Record<ProductKey, string> = {
-  sovereign: "From $9/mo",
+  atlas: "From $9/mo",
   sintra: "~$97/mo",
   worksbuddy: "~$99/mo",
   lindy: "~$20/mo",
@@ -114,7 +114,7 @@ export function CompetitorComparison() {
   return (
     <section
       id="comparison"
-      aria-label="How SovereignML compares to other AI agent platforms"
+      aria-label={`How ${BRANDING.name} compares to other AI agent platforms`}
       className="relative py-32 overflow-hidden"
     >
       <div className="max-w-[1150px] mx-auto px-8">
@@ -160,7 +160,7 @@ export function CompetitorComparison() {
               <tr>
                 <th className="sticky left-0 z-10 bg-background align-bottom p-0" />
                 {products.map((p) => {
-                  const owned = p.key === SOVEREIGN;
+                  const owned = p.key === ATLAS;
                   return (
                     <th
                       key={p.key}
@@ -231,7 +231,7 @@ export function CompetitorComparison() {
                   <span className="text-sm font-semibold text-text-loud">Cost</span>
                 </th>
                 {products.map((p, i) => {
-                  const owned = p.key === SOVEREIGN;
+                  const owned = p.key === ATLAS;
                   return (
                     <td
                       key={p.key}

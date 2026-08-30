@@ -8,14 +8,14 @@ const sections = [
   {
     id: "acceptance",
     title: "Acceptance of Terms",
-    content: `By accessing or using SovereignML ("the Platform"), you agree to be bound by these Terms of Service ("Terms"). If you do not agree to these Terms, you may not use the Platform.
+    content: `By accessing or using ${BRANDING.name} ("the Platform"), you agree to be bound by these Terms of Service ("Terms"). If you do not agree to these Terms, you may not use the Platform.
 
-These Terms apply to all users, including free-tier users, paid subscribers, and administrators. SovereignML reserves the right to update these Terms at any time. Continued use after changes are posted constitutes acceptance.`,
+These Terms apply to all users, including free-tier users, paid subscribers, and administrators. ${BRANDING.name} reserves the right to update these Terms at any time. Continued use after changes are posted constitutes acceptance.`,
   },
   {
     id: "description",
     title: "Service Description",
-    content: `SovereignML is an AI operations platform that allows users to deploy, manage, and scale intelligent AI agents. The Platform includes:
+    content: `${BRANDING.name} is an AI operations platform that allows users to deploy, manage, and scale intelligent AI agents. The Platform includes:
 
 • A web dashboard for deploying and monitoring agents
 • A deployment wizard with compute and billing configuration
@@ -23,7 +23,7 @@ These Terms apply to all users, including free-tier users, paid subscribers, and
 • Account management including SSH keys, social profiles, and security settings
 • An Admin Panel accessible to users with the admin role
 
-Features described in documentation or marketing materials may be subject to plan availability. SovereignML reserves the right to modify, suspend, or discontinue features at any time.`,
+Features described in documentation or marketing materials may be subject to plan availability. ${BRANDING.name} reserves the right to modify, suspend, or discontinue features at any time.`,
   },
   {
     id: "accounts",
@@ -35,7 +35,7 @@ Features described in documentation or marketing materials may be subject to pla
       },
       {
         title: "Account Security",
-        content: "You are responsible for maintaining the confidentiality of your account credentials. You must not share your password or allow unauthorized access to your account. Notify us immediately at security@sovereignml.com if you suspect unauthorized access.",
+        content: `You are responsible for maintaining the confidentiality of your account credentials. You must not share your password or allow unauthorized access to your account. Notify us immediately at ${BRANDING.securityEmail} if you suspect unauthorized access.`,
       },
       {
         title: "Accurate Information",
@@ -53,7 +53,7 @@ Features described in documentation or marketing materials may be subject to pla
     subsections: [
       {
         title: "Subscription Plans",
-        content: "SovereignML offers subscription tiers including Free, Lite, Builder, Operator, Scale, Enterprise (custom pricing), and Bring Your Own Server. Plans are credit-based for AI usage, workflows, automations, and related services. Features and limits vary by tier. Current plan details are available at sovereignml.com/pricing.",
+        content: `${BRANDING.name} offers subscription tiers including Free, Lite, Builder, Operator, Scale, Enterprise (custom pricing), and Bring Your Own Server. Plans are credit-based for AI usage, workflows, automations, and related services. Features and limits vary by tier. Current plan details are available at ${BRANDING.domain}/pricing.`,
       },
       {
         title: "Payment",
@@ -69,18 +69,18 @@ Features described in documentation or marketing materials may be subject to pla
       },
       {
         title: "Refunds",
-        content: "Within 14 days of a charge, you may request a refund of the unused portion of a prepaid billing period, unused prepaid compute, and unused purchased credits (top-ups), on a pro-rata basis and net of payment-processing fees. Consumed usage, plan-included and promotional credits, and one-time fees are non-refundable. Full terms, including how each amount is calculated, are set out in our Refund Policy. If you believe you were charged in error, contact billing@sovereignml.com within 14 days of the charge.",
+        content: `Within 14 days of a charge, you may request a refund of the unused portion of a prepaid billing period, unused prepaid compute, and unused purchased credits (top-ups), on a pro-rata basis and net of payment-processing fees. Consumed usage, plan-included and promotional credits, and one-time fees are non-refundable. Full terms, including how each amount is calculated, are set out in our Refund Policy. If you believe you were charged in error, contact ${BRANDING.billingEmail} within 14 days of the charge.`,
       },
       {
         title: "Price Changes",
-        content: "SovereignML reserves the right to change subscription prices. We will provide at least 30 days' notice by email before any price change takes effect for existing subscribers.",
+        content: `${BRANDING.name} reserves the right to change subscription prices. We will provide at least 30 days' notice by email before any price change takes effect for existing subscribers.`,
       },
     ],
   },
   {
     id: "acceptable-use",
     title: "Acceptable Use",
-    content: `You agree not to use SovereignML to:
+    content: `You agree not to use ${BRANDING.name} to:
 
 • Violate any applicable law or regulation
 • Infringe the intellectual property rights of others
@@ -102,11 +102,11 @@ Violation of these terms may result in immediate account suspension or terminati
     subsections: [
       {
         title: "Ownership",
-        content: "You retain ownership of any content, data, or configurations you create using SovereignML. By using the Platform, you grant SovereignML a limited, non-exclusive license to store and process your content solely to provide the service.",
+        content: `You retain ownership of any content, data, or configurations you create using ${BRANDING.name}. By using the Platform, you grant ${BRANDING.name} a limited, non-exclusive license to store and process your content solely to provide the service.`,
       },
       {
         title: "Agent Behavior",
-        content: "You are responsible for the behavior and outputs of agents you deploy. SovereignML provides the infrastructure. You are responsible for the tasks, prompts, and integrations you configure your agents to perform.",
+        content: `You are responsible for the behavior and outputs of agents you deploy. ${BRANDING.name} provides the infrastructure. You are responsible for the tasks, prompts, and integrations you configure your agents to perform.`,
       },
       {
         title: "Cloud Infrastructure",
@@ -114,14 +114,14 @@ Violation of these terms may result in immediate account suspension or terminati
       },
       {
         title: "Data Use & Product Improvement",
-        content: "We may use aggregated, anonymized data derived from platform usage to operate, secure, and improve the Platform, including improving agent performance and our models over time. We do not sell your data. You can opt out of analytics-based product improvement by contacting us at privacy@sovereignml.com.",
+        content: `We may use aggregated, anonymized data derived from platform usage to operate, secure, and improve the Platform, including improving agent performance and our models over time. We do not sell your data. You can opt out of analytics-based product improvement by contacting us at ${BRANDING.privacyEmail}.`,
       },
     ],
   },
   {
     id: "termination",
     title: "Termination & Suspension",
-    content: `SovereignML may suspend or terminate your account at any time, with or without notice, if:
+    content: `${BRANDING.name} may suspend or terminate your account at any time, with or without notice, if:
 
 • You violate these Terms of Service
 • You engage in fraudulent, abusive, or illegal activity
@@ -129,30 +129,30 @@ Violation of these terms may result in immediate account suspension or terminati
 
 You may delete your account at any time from your account settings or by contacting us. Upon termination, your data is permanently deleted (see our Privacy Policy for retention timelines).
 
-SovereignML is not liable for any loss resulting from account termination.`,
+${BRANDING.name} is not liable for any loss resulting from account termination.`,
   },
   {
     id: "disclaimers",
     title: "Disclaimers",
-    content: `THE PLATFORM IS PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED. SOVEREIGNML DOES NOT WARRANT THAT THE SERVICE WILL BE UNINTERRUPTED, ERROR-FREE, OR MEET YOUR SPECIFIC REQUIREMENTS.
+    content: `THE PLATFORM IS PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED. ${BRANDING.name.toUpperCase()} DOES NOT WARRANT THAT THE SERVICE WILL BE UNINTERRUPTED, ERROR-FREE, OR MEET YOUR SPECIFIC REQUIREMENTS.
 
-TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, SOVEREIGNML DISCLAIMS ALL WARRANTIES INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, ${BRANDING.name.toUpperCase()} DISCLAIMS ALL WARRANTIES INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
 
 AI agents may produce inaccurate, incomplete, or unexpected outputs. You are solely responsible for validating agent outputs before relying on them for business decisions.`,
   },
   {
     id: "liability",
     title: "Limitation of Liability",
-    content: `TO THE MAXIMUM EXTENT PERMITTED BY LAW, SOVEREIGNML AND ITS AFFILIATES SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING LOST PROFITS, DATA LOSS, OR BUSINESS INTERRUPTION.
+    content: `TO THE MAXIMUM EXTENT PERMITTED BY LAW, ${BRANDING.name.toUpperCase()} AND ITS AFFILIATES SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING LOST PROFITS, DATA LOSS, OR BUSINESS INTERRUPTION.
 
-SOVEREIGNML'S TOTAL LIABILITY TO YOU FOR ANY CLAIMS ARISING FROM USE OF THE PLATFORM SHALL NOT EXCEED THE AMOUNT YOU PAID TO SOVEREIGNML IN THE 12 MONTHS PRECEDING THE CLAIM.
+${BRANDING.name.toUpperCase()}'S TOTAL LIABILITY TO YOU FOR ANY CLAIMS ARISING FROM USE OF THE PLATFORM SHALL NOT EXCEED THE AMOUNT YOU PAID TO ${BRANDING.name.toUpperCase()} IN THE 12 MONTHS PRECEDING THE CLAIM.
 
 Some jurisdictions do not allow limitation of liability for consequential or incidental damages; in such jurisdictions, liability is limited to the maximum extent permitted by law.`,
   },
   {
     id: "ip",
     title: "Intellectual Property",
-    content: `SovereignML, its logo, design system, software, and documentation are the intellectual property of SovereignML and are protected by copyright, trademark, and other laws.
+    content: `${BRANDING.name}, its logo, design system, software, and documentation are the intellectual property of ${BRANDING.name} and are protected by copyright, trademark, and other laws.
 
 You may not copy, modify, distribute, reverse-engineer, or create derivative works of the Platform without express written permission.
 
@@ -161,7 +161,7 @@ Open-source components used in the Platform remain subject to their respective l
   {
     id: "governing-law",
     title: "Governing Law",
-    content: `These Terms are governed by the laws of the State of North Carolina, USA, where SovereignML L.L.C. is organized, without regard to conflict of law provisions.
+    content: `These Terms are governed by the laws of the State of North Carolina, USA, where ${BRANDING.legalEntity} is organized, without regard to conflict of law provisions.
 
 Any disputes arising from these Terms or the Platform shall first be submitted to good-faith negotiation. If unresolved, disputes shall be settled by binding arbitration, except that either party may seek injunctive relief in court for IP violations.`,
   },
@@ -170,15 +170,15 @@ Any disputes arising from these Terms or the Platform shall first be submitted t
     title: "Contact",
     content: `For questions about these Terms, contact us:
 
-SovereignML L.L.C.
-Email: legal@sovereignml.com
-Website: sovereignml.com`,
+${BRANDING.legalEntity}
+Email: ${BRANDING.legalEmail}
+Website: ${BRANDING.domain}`,
   },
 ]
 
 export const metadata = {
-  title: "Terms of Service | SovereignML",
-  description: "Terms and conditions governing your use of the SovereignML AI operations platform.",
+  title: "Terms of Service",
+  description: `Terms and conditions governing your use of the ${BRANDING.name} AI operations platform.`,
 }
 
 export default function TermsPage() {

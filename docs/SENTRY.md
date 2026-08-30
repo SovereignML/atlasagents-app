@@ -1,4 +1,4 @@
-# SovereignML — Sentry error monitoring
+# Atlas Agents — Sentry error monitoring
 
 This document covers the **Sentry** integration: what it captures, the files involved, environment variables, production setup, and how to verify it works.
 

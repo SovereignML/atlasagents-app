@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { easing } from "@/lib/motion";
 import { RevealGroup, RevealItem } from "@/components/marketing/motion/reveal";
+import { BRANDING } from "@/configs/branding"
 
 /*
  * Team section. All member details are placeholders pending real data.
@@ -71,7 +72,7 @@ export function Team() {
         >
           <p className="text-xs text-accent-blue-rest uppercase tracking-[0.2em] mb-4 font-medium">Team</p>
           <h2 className="text-[clamp(2rem,4vw,48px)] font-bold text-text-loud tracking-[-1.5px] mb-5">
-            The people behind SovereignML.
+            The people behind {BRANDING.name}.
           </h2>
           <p className="text-text-secondary text-lg max-w-[460px] mx-auto">
             A small team building the easiest way to run autonomous AI agents.

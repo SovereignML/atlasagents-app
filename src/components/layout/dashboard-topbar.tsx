@@ -44,6 +44,7 @@ import { DashboardBreadcrumbs } from "@/components/layout/dashboard-breadcrumbs"
 import { NotificationBell } from "@/components/notifications/notification-bell"
 import { signOutAction } from "@/app/actions/auth"
 import { cn } from "@/lib/utils"
+import { BRANDING } from "@/configs/branding"
 
 function getInitials(name?: string | null, email?: string | null) {
   return (name || email || "U")
@@ -81,7 +82,7 @@ function teamInitial(name: string) {
 type TeamOption = { teamId: string; name: string; role: string }
 
 export function DashboardTopbar({
-  brandName = "SovereignML",
+  brandName = BRANDING.name,
   teams = [],
   activeTeamId,
   impersonating = null,

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db, notificationPreferences, eq } from "@/db"
 import { sendTelegramRaw } from "@/lib/notifications/channels/telegram"
+import { BRANDING } from "@/configs/branding"
 
 /**
  * POST /api/notifications/telegram/webhook
  *
- * Receives updates from the dedicated SovereignML notifications bot (distinct
+ * Receives updates from the dedicated Atlas Agents notifications bot (distinct
  * from users' deployed bots at /tg/[botToken]). Handles the `/start <token>`
  * connect handshake: matches the link token minted by ../link, stores the
  * sender's chat id, and confirms back. Always returns 200 so Telegram doesn't
@@ -54,12 +55,12 @@ export async function POST(req: NextRequest) {
           .where(eq(notificationPreferences.id, prefs.id))
         await sendTelegramRaw(
           chatId,
-          "✅ Connected! You'll now receive SovereignML notifications here. Manage channels in your account settings.",
+          `✅ Connected! You'll now receive ${BRANDING.name} notifications here. Manage channels in your account settings.`,
         )
       } else {
         await sendTelegramRaw(
           chatId,
-          "This connect link is invalid or has already been used. Generate a new one from your SovereignML account settings.",
+          `This connect link is invalid or has already been used. Generate a new one from your ${BRANDING.name} account settings.`,
         )
       }
     }

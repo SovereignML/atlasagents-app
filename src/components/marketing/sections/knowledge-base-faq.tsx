@@ -4,10 +4,11 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { easing, spring } from "@/lib/motion";
 import { ChevronDown } from "lucide-react";
+import { BRANDING } from "@/configs/branding"
 
 const faqs = [
   {
-    q: "What is SovereignML?",
+    q: `What is ${BRANDING.name}?`,
     a: "An AI operations platform. You deploy intelligent agents that handle real work: support, sales, devops, content, research. Your agents run in your own isolated, managed instance, with your configuration and data under your control.",
   },
   {

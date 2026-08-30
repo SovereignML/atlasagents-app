@@ -224,7 +224,7 @@ export const PLANS: readonly PlanConfig[] = [
     serverConfigSlug: "shared-4g",
   },
   {
-    // Bring Your Own Server — Sovereign acts purely as the management panel
+    // Bring Your Own Server — Atlas Agents acts purely as the management panel
     // for a server the customer already owns. Flat recurring management fee;
     // no compute billing (we don't own the box). LLM usage is either metered
     // against the credit wallet (pay-as-you-go) or paid directly via the

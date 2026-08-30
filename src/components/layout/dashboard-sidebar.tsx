@@ -38,6 +38,7 @@ import {
   SidebarMenuSubItem,
   useSidebar,
 } from "@/components/ui/sidebar"
+import { BRANDING } from "@/configs/branding"
 
 type Icon = typeof LayoutDashboard
 
@@ -182,7 +183,7 @@ function TeamNavItem({
 }
 
 export function DashboardSidebar({
-  brandName = "SovereignML",
+  brandName = BRANDING.name,
   logoUrl = null,
   logoMarkUrl = null,
   canManageTenant = false,
@@ -210,7 +211,7 @@ export function DashboardSidebar({
             />
           ) : (
             <>
-              {/* Default SovereignML logo: dark mark on the light console, white
+              {/* Default Atlas Agents logo: dark mark on the light console, white
                   mark on the dark console. Doubles as the collapsed-rail mark, so
                   no separate initial fallback. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}

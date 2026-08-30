@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { MotionConfig } from "framer-motion"
 import { Reveal, RevealGroup, RevealItem } from "@/components/marketing/motion/reveal"
+import { BRANDING } from "@/configs/branding"
 
 const SERVICES = [
   { name: "API", status: "operational", uptime: 99.99 },
@@ -24,7 +25,7 @@ export default function StatusPage() {
         <div className="max-w-5xl mx-auto px-6 py-16 space-y-10">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <Link href="/" className="text-xl font-bold">
-              SovereignML
+              {BRANDING.name}
             </Link>
             <div className="text-xs font-mono text-[var(--text-secondary)]">
               Last updated: {new Date().toISOString().slice(0, 19).replace("T", " ")} UTC

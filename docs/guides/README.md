@@ -1,4 +1,4 @@
-# SovereignML Guides
+# Atlas Agents Guides
 
 > The complete, in-one-place documentation set: how to configure the platform, how to deploy it from scratch, and how to use it as a customer.
 

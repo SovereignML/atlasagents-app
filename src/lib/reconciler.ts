@@ -38,6 +38,10 @@ import { reconcilePendingCustomHostnames } from "@/lib/tenant-branding"
 
 const ORPHAN_GRACE_MS = 15 * 60 * 1000 // 15 minutes — gives in-flight creates room to commit
 const PROVISIONING_TTL_MS = 20 * 60 * 1000 // 20 minutes
+// LEGACY WIRE FORMAT — deliberately NOT renamed in the Atlas Agents
+// rebrand. Every live DigitalOcean/Linode VM already carries this tag and the
+// orphan sweep below matches on it; renaming orphans the whole fleet.
+// See docs/REBRAND-LEGACY-IDENTIFIERS.md.
 const TAG = "sovereignml"
 
 type ReconcileReport = {
@@ -56,6 +60,10 @@ type ReconcileReport = {
   errors: string[]
 }
 
+// LEGACY WIRE FORMAT — deliberately NOT renamed in the Atlas Agents
+// rebrand. Identifies our OpenRouter keys. Renaming strands every live key,
+// breaking usage billing and spend caps.
+// See docs/REBRAND-LEGACY-IDENTIFIERS.md.
 const OR_LABEL_PREFIX = "sovereign-"
 
 export async function runReconciler(): Promise<ReconcileReport> {

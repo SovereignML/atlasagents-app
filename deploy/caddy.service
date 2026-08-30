@@ -1,4 +1,4 @@
-; systemd unit for Caddy fronting the SovereignML dashboard.
+; systemd unit for Caddy fronting the Atlas Agents dashboard.
 ;
 ; Most installs use the official Caddy apt/yum package, which already ships a
 ; caddy.service reading /etc/caddy/Caddyfile — in that case just drop
