@@ -22,11 +22,21 @@ export const BRANDING = {
   jurisdiction: "North Carolina, USA",
   // Hosts served before the Atlas Agents rename. They stay canonical — so they
   // can't be claimed as white-label custom domains (src/lib/host.ts) — and are
-  // permanently redirected (next.config.ts). Split by destination: `site`
-  // hosts belong to the marketing site, `app` hosts to the dashboard, so a
-  // stale marketing bookmark doesn't dump the visitor in the dashboard.
-  // Remove only once the redirects are retired and the old zone no longer
-  // points here.
+  // redirected in next.config.ts. Split by destination: `site` hosts belong to
+  // the marketing site, `app` hosts to the dashboard, so a stale marketing
+  // bookmark doesn't dump the visitor in the dashboard.
+  //
+  // The two halves redirect differently ON PURPOSE:
+  //   - `app` → 301. The dashboard is never returning to app.sovereignml.com.
+  //   - `site` → 307. sovereignml.com is NOT being retired; it becomes the
+  //     SovereignML L.L.C. parent-company site. A 301 would be cached by
+  //     browsers indefinitely and would keep sending visitors away from that
+  //     site once it exists.
+  //
+  // Do NOT delete entries from this list to "retire" a redirect — removing a
+  // host here also drops it from canonicalHosts() in src/lib/host.ts, which is
+  // what stops a reseller claiming it as their own custom domain. Retire the
+  // redirect in next.config.ts and leave the host listed here.
   legacyHosts: {
     site: ["sovereignml.com", "www.sovereignml.com"],
     app: ["app.sovereignml.com"],
