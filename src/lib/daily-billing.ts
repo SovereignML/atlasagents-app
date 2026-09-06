@@ -17,7 +17,7 @@ import { createAdminNotification } from "@/lib/admin-notify"
 import { notify } from "@/lib/notifications/dispatch"
 import { usdToCredits, formatCredits } from "@/lib/credit-pricing"
 import { proratedRefundCredits, DAY_MS } from "@/lib/compute-proration"
-import { claimEventOn } from "@/lib/idempotency"
+import { claimEventOn, releaseEvent } from "@/lib/idempotency"
 import { maybeWarnLowBalance } from "@/lib/low-balance"
 
 const DAYS_PER_MONTH = 30
@@ -99,9 +99,11 @@ export async function runDailyBilling(): Promise<DailyBillingReport> {
       // Claim + charge atomically. Three outcomes:
       //   - "already_billed": the per-instance claim already exists → no-op.
       //   - { ok: true }:     charged this run.
-      //   - { ok: false }:    insufficient balance — the claim still commits
-      //                       (we handled this instance today by pausing it),
-      //                       so we don't re-bill on the next run.
+      //   - { ok: false }:    insufficient balance — the claim still commits,
+      //                       because the plan is to handle this instance today
+      //                       by pausing it. If that pause then FAILS we
+      //                       release the claim by hand (below), so the next
+      //                       run retries instead of leaving it running free.
       // A thrown DB error rolls back BOTH the claim and the charge, so the
       // instance is retried on the next run (at-least-once + idempotent).
       const result = await db.transaction(async (tx) => {
@@ -153,12 +155,43 @@ export async function runDailyBilling(): Promise<DailyBillingReport> {
       }
 
       // Insufficient balance -- pause the instance.
+      //
+      // The claim above has already COMMITTED (an `ok: false` deduction is a
+      // normal return, not a throw), and nothing here is inside a transaction.
+      // So if the pause fails we must release the claim by hand, or this
+      // instance is marked "handled today" while still running: no charge
+      // taken, agent up, and the next run's claim short-circuits as
+      // `already_billed`. That is a free day of compute per failure, silently.
+      //
+      // Release-on-failure is the same claim-with-release contract the rest of
+      // the system uses (see `src/lib/idempotency.ts`) — it is safe here
+      // precisely because `ok: false` means no money moved, so a retry cannot
+      // double-charge. The successful-deduct path above keeps its claim and
+      // must continue to.
       try {
         const { pauseBot } = await import("@/lib/provisioner")
         await pauseBot(instance)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         report.errors.push(`pauseBot failed for ${instance.id}: ${msg}`)
+
+        try {
+          await releaseEvent("daily_billing", eventId)
+        } catch (releaseErr) {
+          // Nothing left to do but say so loudly: the claim stands, so this
+          // instance will not be retried today.
+          const rmsg =
+            releaseErr instanceof Error ? releaseErr.message : String(releaseErr)
+          report.errors.push(
+            `releaseEvent failed for ${instance.id} (instance runs unbilled until ${billingDay} rolls over): ${rmsg}`,
+          )
+        }
+
+        // Skip the log, the notifications and `report.stopped` — the instance
+        // was NOT stopped. Asserting otherwise puts "Instance stopped." in the
+        // user's event log for an agent that is still running, and burns the
+        // low-balance notification that the successful retry should send.
+        continue
       }
 
       const { logInstanceEvent } = await import("@/lib/instance-state")
