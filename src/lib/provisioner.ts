@@ -765,6 +765,58 @@ echo "=== seed: done ==="
 }
 
 /**
+ * Upsert ONE key in an on-box env file, in place, and report whether it actually
+ * changed. Used to push a changed value into a sidecar's `.env` on reprovision
+ * WITHOUT re-rendering the whole file: that file has since been mutated on the box
+ * (the admin seed flips `ENABLE_SIGNUP` to false) and it carries a session-signing
+ * secret generated per provision and never persisted platform-side. Rewriting it
+ * from the template would re-open public registration and log out every existing
+ * chat user. Mirrors the `sed`-or-append shape the seed script already uses.
+ *
+ * Prints `ENV_KEY_UNCHANGED` when the value already matches (so the caller can skip
+ * a needless service restart) and `ENV_KEY_CHANGED` after a verified write. Every
+ * mutating command is `|| exit 1` and the result is re-read before success is
+ * claimed — the script does not run under `set -e`, so a bare `sed` failure would
+ * otherwise be masked by the trailing echo and reported as success.
+ */
+const ENV_KEY_CHANGED = "ENV_KEY_CHANGED"
+const ENV_KEY_UNCHANGED = "ENV_KEY_UNCHANGED"
+
+function buildEnvKeyUpsertScript(opts: {
+  envPath: string
+  key: string
+  value: string
+}): string {
+  // `/` is the sed delimiter and `&` means "the whole match" on the replacement
+  // side; a backslash escapes either. Model slugs contain `/`, so this is load-bearing.
+  const sedSafe = opts.value.replace(/[\\&/]/g, "\\$&")
+  const line = `${opts.key}=${opts.value}`
+  return `#!/bin/bash
+set -uo pipefail
+ENV_PATH=${bashSingleQuoteForScript(opts.envPath)}
+if [ ! -f "\${ENV_PATH}" ]; then
+  echo "env file \${ENV_PATH} not found" >&2
+  exit 1
+fi
+# -F: the value is a literal, not a pattern (slugs contain "." and "/").
+if grep -qxF ${bashSingleQuoteForScript(line)} "\${ENV_PATH}"; then
+  echo "${ENV_KEY_UNCHANGED}"
+  exit 0
+fi
+if grep -q '^${opts.key}=' "\${ENV_PATH}"; then
+  sed -i 's/^${opts.key}=.*/${opts.key}=${sedSafe}/' "\${ENV_PATH}" || exit 1
+else
+  echo ${bashSingleQuoteForScript(line)} >> "\${ENV_PATH}" || exit 1
+fi
+if ! grep -qxF ${bashSingleQuoteForScript(line)} "\${ENV_PATH}"; then
+  echo "failed to set ${opts.key} in \${ENV_PATH}" >&2
+  exit 1
+fi
+echo "${ENV_KEY_CHANGED}"
+`
+}
+
+/**
  * Verify the gateway's OpenAI-compatible API actually answers — not just `/health`. Sources
  * the bearer token from the on-box `.env` (so it never lands in our logs) and asserts
  * `GET /v1/models` returns 200 with a non-empty model list. A non-zero exit means provider
@@ -2067,6 +2119,9 @@ async function configureRuntimeOverSsh(
       secretKey: webuiSecretKey,
       publicUrl,
       enableSignup: true,
+      // Same slug the runtime pins as its own default — the chat UI needs it to
+      // pre-select a model for the freshly seeded admin account.
+      model: llmConfig.model,
     })
     sidecarEnvB64 = Buffer.from(renderEnvFile(sidecarEnv), "utf8").toString("base64")
     sidecarEnvPath = runtime.sidecar.envPath
@@ -3734,10 +3789,51 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
       message: `${runtime.displayName} service restarted with new config and identity files.`,
     })
 
-    // Reconcile companion services (n8n) with the enabled-tools set: provision +
-    // start + seed newly-enabled ones, stop+disable removed ones. Best-effort so
-    // a service hiccup never fails the surrounding config/env reprovision.
-    await syncToolServices(instance, instance.enabledTools ?? [])
+    // Keep the chat UI's pre-selected model in step with the gateway's. The init
+    // script above re-pinned Hermes' `model.default`; without this the sidecar still
+    // offers the model from first provision, so a user who switched models silently
+    // keeps chatting to the old one. Only DEFAULT_MODELS is touched — see
+    // buildEnvKeyUpsertScript for why the file is not re-rendered wholesale.
+    //
+    // reprovisionBotEnv is driven by eight routes (tools, skills, instructions,
+    // model, agent-type, token, byos-key, backup-restore), and only some change the
+    // model — so the sidecar is restarted ONLY when the value actually moved. A
+    // restart drops in-flight chat streams; doing it on every skills toggle would be
+    // a visible regression.
+    //
+    // Best-effort throughout: a stale default is a worse experience, not a broken
+    // agent, so nothing here fails the surrounding reprovision.
+    if (webuiEnabled && runtime.sidecar && llmConfig.model.trim()) {
+      const sidecar = runtime.sidecar
+      const modelStep = await sshRunScriptLogged(
+        target,
+        buildEnvKeyUpsertScript({
+          envPath: sidecar.envPath,
+          key: "DEFAULT_MODELS",
+          value: llmConfig.model,
+        }),
+        "writing_config",
+        "reprovision:sidecar default model",
+        { timeoutMs: 30_000 },
+      )
+      await logSshStep(instance.id, modelStep)
+
+      if (modelStep.exitCode !== 0 && modelStep.exitCode !== null) {
+        await db.insert(instanceLogs).values({
+          instanceId: instance.id,
+          level: "warn",
+          message: `Could not update the chat UI's default model (exit ${modelStep.exitCode}); it may still offer the previous model until the next deploy.`,
+        })
+      } else if (modelStep.stdout.includes(ENV_KEY_CHANGED)) {
+        await sshSystemctlRestart(target, sidecar.serviceName)
+        await db.insert(instanceLogs).values({
+          instanceId: instance.id,
+          level: "info",
+          message: `Chat UI restarted with default model ${llmConfig.model}.`,
+        })
+      }
+    }
+
   } else if (instance.containerName && instance.containerPort) {
     await sshDockerRun(
       target,
