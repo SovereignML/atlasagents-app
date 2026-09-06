@@ -416,6 +416,22 @@ ${bashSingleQuote(OPEN_WEBUI_BIN)} --help >/dev/null
     const env: Record<string, string> = {
       WEBUI_AUTH: "true",
       WEBUI_SECRET_KEY: args.secretKey,
+      // Open WebUI marks DEFAULT_MODELS (and most admin-level settings) as
+      // ConfigVar: the env value is read on the FIRST launch, persisted into the
+      // SQLite DB, and every later env change is ignored in favour of the stored
+      // value. That silently defeated the fix below on the primary delivery path
+      // — a warm-pool VM boots the sidecar at bake time with a placeholder env
+      // and no model, persists that empty default, and then ignores the real
+      // model written at claim. Reprovision was defeated the same way.
+      //
+      // This flag is itself a normal env var, so it always applies, and it makes
+      // env the single source of truth on every boot. Correct for a
+      // platform-managed box: we generate this file, nobody hand-tunes it. The
+      // documented trade-off is that admin-level changes made inside Open WebUI's
+      // own settings UI no longer survive a restart. Per-user data — accounts,
+      // chats, each user's own model choice — lives in ordinary tables and is
+      // unaffected.
+      ENABLE_PERSISTENT_CONFIG: "false",
       ENABLE_SIGNUP: args.enableSignup ? "true" : "false",
       ENABLE_LOGIN_FORM: "true",
       OPENAI_API_BASE_URL: `http://127.0.0.1:${args.gatewayPort}/v1`,
