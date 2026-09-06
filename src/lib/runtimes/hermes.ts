@@ -404,6 +404,13 @@ ${bashSingleQuote(OPEN_WEBUI_BIN)} --help >/dev/null
    * boxes. Points at Hermes' loopback API with the gateway token as the key.
    * DATA_DIR holds the SQLite DB + uploads; persisting it is what makes
    * accounts/chats survive restarts.
+   *
+   * `DEFAULT_MODELS` is load-bearing, not a nicety. We seed the admin account
+   * over the signup endpoint and immediately lock signup, so that account has no
+   * prior model preference; with no instance-wide default a new chat opens with
+   * nothing selected and the FIRST message is sent with no model attached. Pin it
+   * to the same slug `renderInitScript` writes as Hermes' `model.default` so the
+   * two can never drift.
    */
   renderEnv(args: SidecarEnvArgs): Record<string, string> {
     const env: Record<string, string> = {
@@ -420,6 +427,11 @@ ${bashSingleQuote(OPEN_WEBUI_BIN)} --help >/dev/null
       HOST: "127.0.0.1",
       PORT: String(OPEN_WEBUI_PORT),
     }
+    // Matched against the `id` Hermes returns from /v1/models (an OpenRouter
+    // slug, passed through unchanged). Omitted rather than written empty when a
+    // caller has no model yet (warm-pool bake), so Open WebUI keeps its own
+    // default-resolution behavior instead of parsing a blank entry.
+    if (args.model.trim()) env.DEFAULT_MODELS = args.model.trim()
     if (args.publicUrl) env.WEBUI_URL = args.publicUrl
     return env
   },

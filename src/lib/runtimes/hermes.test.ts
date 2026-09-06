@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { hermesRuntime } from "./hermes"
+import { hermesRuntime, HERMES_GATEWAY_PORT } from "./hermes"
 
 /**
  * Regression guards for the Caddyfile renderer. All three cases below were live
@@ -109,5 +109,47 @@ describe("hermesRuntime.renderCaddyfile()", () => {
     const out = hermesRuntime.renderCaddyfile({})
     expect(out).toContain(":80 {")
     expect(out).not.toContain("tls")
+  })
+})
+
+/**
+ * Regression guard for a live bug: the Open WebUI sidecar shipped without
+ * `DEFAULT_MODELS`, so the freshly seeded admin account opened a chat with no
+ * model selected and the FIRST message went out with no model attached — which
+ * read to users as "Hermes ignores my OpenRouter model", even though the gateway
+ * itself was correctly pinned.
+ */
+describe("hermesRuntime.sidecar.renderEnv()", () => {
+  const baseArgs = {
+    instance: { id: "inst_1", domain: null } as never,
+    gatewayToken: "gw-token",
+    gatewayPort: HERMES_GATEWAY_PORT,
+    secretKey: "sekrit",
+    publicUrl: null,
+    enableSignup: true,
+    model: "deepseek/deepseek-v4-pro",
+  }
+
+  it("pre-selects the pinned model for new chats", () => {
+    const env = hermesRuntime.sidecar!.renderEnv(baseArgs)
+    expect(env.DEFAULT_MODELS).toBe("deepseek/deepseek-v4-pro")
+  })
+
+  it("points the chat UI at the gateway with the bearer token as its key", () => {
+    const env = hermesRuntime.sidecar!.renderEnv(baseArgs)
+    expect(env.OPENAI_API_BASE_URL).toBe(`http://127.0.0.1:${HERMES_GATEWAY_PORT}/v1`)
+    expect(env.OPENAI_API_KEY).toBe("gw-token")
+  })
+
+  it("omits DEFAULT_MODELS rather than writing it empty when no model is known", () => {
+    // The warm-pool bake renders a placeholder env before any instance exists. An
+    // empty value would leave Open WebUI parsing a blank model id.
+    const env = hermesRuntime.sidecar!.renderEnv({ ...baseArgs, model: "" })
+    expect(env.DEFAULT_MODELS).toBeUndefined()
+  })
+
+  it("trims whitespace so the id matches what /v1/models reports", () => {
+    const env = hermesRuntime.sidecar!.renderEnv({ ...baseArgs, model: "  minimax/minimax-m2.5  " })
+    expect(env.DEFAULT_MODELS).toBe("minimax/minimax-m2.5")
   })
 })

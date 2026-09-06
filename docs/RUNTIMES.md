@@ -43,9 +43,21 @@ The `runtime` column on `instances` is `"openclaw" | "hermes"`. A runtime regist
 Model routing is split because the two engines have different constraints:
 
 - **`routeModel(tier)`** ([`src/lib/model-router.ts`](../src/lib/model-router.ts)) feeds OpenClaw (and shared paths): a primary OpenRouter model (`minimax/minimax-m2.5`) with a `:free` fallback (`moonshotai/kimi-k2.6:free`), plus a best-effort NVIDIA cross-provider fallback (`mistralai/mistral-medium-3.5-128b`) on every tier (`NVIDIA_API_KEY`).
-- **`hermesModel(tier)`** is kept **separate** because **Hermes rejects any model with <64k context at startup** — the small `:free` slugs are unusable. Slugs must be live OpenRouter `<author>/<slug>` with ≥64k context; `HERMES_MODEL` env overrides per deploy. The current per-tier defaults are a conservative ≥64k placeholder (`anthropic/claude-3.5-sonnet`) flagged for replacement with chosen slugs. A malformed/missing slug fails the provision *before* `systemctl start` (`isValidOpenRouterSlug`) rather than crash-looping the gateway.
+- **`hermesModel(tier)`** is kept **separate** because **Hermes rejects any model with <64k context at startup** — the small `:free` slugs are unusable. Slugs must be live OpenRouter `<author>/<slug>` with ≥64k context; `HERMES_MODEL` env overrides per deploy. The per-tier defaults are a cost-efficient ladder of real slugs — `low` `minimax/minimax-m2.5` (204k ctx), `mid` `deepseek/deepseek-v4-pro` (1048k ctx), `high` `moonshotai/kimi-k2.6` (262k ctx) — each also present in `ALLOWED_OPENROUTER_MODELS`, since the account-level allowlist rejects anything else at request time. A malformed/missing slug fails the provision *before* `systemctl start` (`isValidOpenRouterSlug`) rather than crash-looping the gateway.
 
 Budget tiers are `low | mid | high`.
+
+### The chat UI's default model
+
+Open WebUI needs its own pre-selected model — pinning Hermes' `model.default` is not enough.
+The provisioner seeds the sidecar's admin account over the signup endpoint and then locks
+signup, so that account has no prior model preference; with no instance-wide default, a new
+chat opens with nothing selected and the **first message is sent with no model attached**.
+`renderEnv()` therefore sets `DEFAULT_MODELS` to the same slug `renderInitScript` writes as
+`model.default`, and `reprovisionBotEnv()` updates that one key in place (never re-rendering
+the file, which by then holds a locked `ENABLE_SIGNUP` and a session secret we do not persist)
+and restarts the sidecar. `DEFAULT_MODELS` matches against the `id` Hermes returns from
+`GET /v1/models`.
 
 ### Credentials & switching
 
