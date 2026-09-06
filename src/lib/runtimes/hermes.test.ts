@@ -135,6 +135,15 @@ describe("hermesRuntime.sidecar.renderEnv()", () => {
     expect(env.DEFAULT_MODELS).toBe("deepseek/deepseek-v4-pro")
   })
 
+  it("forces env to win over Open WebUI's persisted config", () => {
+    // Without this, DEFAULT_MODELS is read once on first launch, stored in the
+    // sidecar's DB, and every later env change is ignored — which is exactly how
+    // a warm-pool VM (sidecar booted at bake with no model) ends up permanently
+    // without a default.
+    const env = hermesRuntime.sidecar!.renderEnv(baseArgs)
+    expect(env.ENABLE_PERSISTENT_CONFIG).toBe("false")
+  })
+
   it("points the chat UI at the gateway with the bearer token as its key", () => {
     const env = hermesRuntime.sidecar!.renderEnv(baseArgs)
     expect(env.OPENAI_API_BASE_URL).toBe(`http://127.0.0.1:${HERMES_GATEWAY_PORT}/v1`)
