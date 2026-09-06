@@ -51,22 +51,37 @@ function legacyHostRedirects() {
   if (canonicalHost === "localhost" || canonicalHost.startsWith("127.")) return []
 
   const routes = [
-    ...BRANDING.legacyHosts.app.map((host) => ({ host, origin: appOrigin })),
+    // PERMANENT (301). The dashboard is never coming back to app.sovereignml.com,
+    // so caching this one is a feature.
+    ...BRANDING.legacyHosts.app.map((host) => ({
+      host,
+      origin: appOrigin,
+      permanent: true,
+    })),
+    // TEMPORARY (307), not 301. sovereignml.com is not being retired — it becomes
+    // the SovereignML L.L.C. parent-company site. A 301 is cached by browsers more
+    // or less forever, so anyone who hit the apex while this redirect was live
+    // would keep being bounced to atlasagents.dev after the parent site exists,
+    // and we would have burned the parent company's own domain. When that site
+    // launches, drop this redirect — but NOT the BRANDING.legacyHosts entry:
+    // src/lib/host.ts reuses that list to keep the domain unclaimable as a
+    // white-label custom host.
     ...BRANDING.legacyHosts.site.map((host) => ({
       host,
       origin: BRANDING.siteUrl,
+      permanent: false,
     })),
   ]
 
   return routes
     .filter(({ host }) => host.toLowerCase() !== canonicalHost)
-    .map(({ host, origin }) => ({
+    .map(({ host, origin, permanent }) => ({
       // `:path` captures the whole remaining path (`.*` spans slashes), so the
       // destination interpolates it as a single segment, not `:path*`.
       source: `/:path((?!${LEGACY_REDIRECT_EXCLUDED.join("|")}).*)`,
       has: [{ type: "host" as const, value: host }],
       destination: `${origin}/:path`,
-      permanent: true,
+      permanent,
     }))
 }
 
