@@ -1,6 +1,6 @@
 # Reseller / white-label
 
-> Run SovereignML under your own brand, on your own domain, and bill your own customers directly.
+> Run Atlas Agents under your own brand, on your own domain, and bill your own customers directly.
 
 Related: [Billing & credits](billing-credits.md), [Teams & collaboration](teams.md).
 
@@ -10,14 +10,14 @@ Related: [Billing & credits](billing-credits.md), [Teams & collaboration](teams.
 
 ## What white-label gives you
 
-Your customers sign up on **your** domain, see **your** branding, pay **your** Stripe account, and their agents run on **your** LLM account. SovereignML is invisible to them — you're the vendor. You manage all of it from the **Reseller** panel.
+Your customers sign up on **your** domain, see **your** branding, pay **your** Stripe account, and their agents run on **your** LLM account. Atlas Agents is invisible to them — you're the vendor. You manage all of it from the **Reseller** panel.
 
 ## One-time setup checklist
 
 The reseller **Dashboard** shows a setup-readiness checklist. Complete these in **Branding & Settings**:
 
 1. **Branding & custom domain** — upload your logo, set colors, and connect your custom dashboard domain. Customers on that domain see your brand throughout.
-2. **Stripe Connect** — connect your Stripe account so customers pay **you** directly (SovereignML takes no cut of your customer revenue).
+2. **Stripe Connect** — connect your Stripe account so customers pay **you** directly (Atlas Agents takes no cut of your customer revenue).
 3. **Your OpenRouter key** — connect your own LLM account so your customers' agents run on your OpenRouter credits (you carry their LLM cost and price it as you like).
 4. **Your Chatwoot** — connect your own Chatwoot so customer support tickets and live chat land in **your** inbox.
 5. **Plans** — define your own plans with your own USD prices. Each creates a price on your Stripe account, and its limits apply to the customer who subscribes.

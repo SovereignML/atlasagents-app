@@ -6,6 +6,11 @@ import {
   type CloudflareError,
 } from "./cloudflare"
 
+// LEGACY WIRE FORMAT — deliberately NOT renamed in the Atlas Agents
+// rebrand. The managed agent zone is a separate domain from the product
+// domain and is not part of this rebrand — live wildcard DNS plus a
+// Cloudflare origin cert on every provisioned box.
+// See docs/REBRAND-LEGACY-IDENTIFIERS.md.
 const BASE = process.env.CLOUDFLARE_BASE_DOMAIN ?? "sovereignclaw.xyz"
 
 const ADJECTIVES = [

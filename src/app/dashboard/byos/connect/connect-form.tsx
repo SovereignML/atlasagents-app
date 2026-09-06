@@ -24,6 +24,7 @@ import {
   type ByoProviderId,
 } from "@/configs/llm-providers"
 import { cn } from "@/lib/utils"
+import { BRANDING } from "@/configs/branding"
 
 type LlmMode = "managed_credits" | "own_key"
 type BillingInterval = "month" | "year"
@@ -380,7 +381,7 @@ export function ByosConnectForm({
                     )}
                   >
                     <div className="flex items-center gap-2 font-medium text-foreground">
-                      <Wallet className="size-4" /> Use SovereignML Credits
+                      <Wallet className="size-4" /> Use {BRANDING.name} Credits
                     </div>
                     <p className="mt-1.5 text-sm text-muted-foreground">
                       Includes 100 starter credits, then pay-as-you-go from your wallet. We
@@ -754,7 +755,7 @@ export function ByosConnectForm({
                         </>
                       ) : (
                         <>
-                          <Wallet className="size-3.5" /> SovereignML Credits
+                          <Wallet className="size-3.5" /> {BRANDING.name} Credits
                         </>
                       )}
                     </p>

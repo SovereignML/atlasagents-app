@@ -37,7 +37,7 @@ const positioningBlocks = [
   },
   {
     title: "We are an AI operations layer",
-    desc: "SovereignML sits above infrastructure. We handle deployment, configuration, monitoring, and optimization so you can focus on what your AI agents produce.",
+    desc: `${BRANDING.name} sits above infrastructure. We handle deployment, configuration, monitoring, and optimization so you can focus on what your AI agents produce.`,
   },
 ]
 
@@ -65,7 +65,7 @@ export default function ComparisonPage() {
           animate="visible"
           custom={0}
         >
-          Why SovereignML vs{" "}
+          Why {BRANDING.name} vs{" "}
           <span className="text-primary">Traditional AI Deployment</span>
         </motion.h1>
         <motion.p
@@ -89,7 +89,7 @@ export default function ComparisonPage() {
                   Feature
                 </th>
                 <th className="text-center text-primary font-bold py-4 px-5 text-xs bg-primary/[0.06]">
-                  SovereignML
+                  {BRANDING.name}
                 </th>
                 <th className="text-center text-[var(--text-secondary)] font-bold py-4 px-5 text-xs">
                   VPS Providers
@@ -157,7 +157,7 @@ export default function ComparisonPage() {
               Ready to See the Difference?
             </h3>
             <p className="text-[var(--text-secondary)] max-w-lg mx-auto mb-6">
-              Book a demo and see how SovereignML deploys production AI agents
+              Book a demo and see how {BRANDING.name} deploys production AI agents
               in minutes, not weeks.
             </p>
             <a

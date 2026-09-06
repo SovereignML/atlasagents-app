@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { generateSoul } from "@/lib/soul"
 import type { AgentConfig } from "@/lib/agent-config"
+import { BRANDING } from "@/configs/branding"
 
 const cfg: AgentConfig = {
   use_case: "support",
@@ -43,8 +44,10 @@ describe("generateSoul — role-first identity", () => {
     const out = generateSoul(cfg, [])
     expect(out).toContain("# You are a Support Specialist")
     expect(out).toContain("dedicated Support Specialist for small business owners")
-    // The old generic framing must be gone.
-    expect(out).not.toContain("deployed by the SovereignML platform")
+    // The old generic framing must be gone, and must not return under the new
+    // brand either — the agent never presents as the platform.
+    expect(out).not.toContain(`deployed by the ${BRANDING.legacyName} platform`)
+    expect(out).not.toContain(`deployed by the ${BRANDING.name} platform`)
     expect(out).not.toContain("Your category is")
   })
 

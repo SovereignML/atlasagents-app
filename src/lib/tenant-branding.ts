@@ -33,11 +33,11 @@ export type ResolvedBranding = {
   accentLight: string | null
   primaryDark: string | null
   accentDark: string | null
-  /** false → render the default SovereignML look (no overrides applied). */
+  /** false → render the default Atlas Agents look (no overrides applied). */
   isWhiteLabel: boolean
 }
 
-/** The default, non-white-label branding (the SovereignML look). */
+/** The default, non-white-label branding (the Atlas Agents look). */
 export function getDefaultBranding(): ResolvedBranding {
   return {
     teamId: null,

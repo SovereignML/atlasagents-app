@@ -2,6 +2,7 @@
 // In dev mode, /api/checkout detects the placeholder and uses the dev mock flow.
 
 import Stripe from "stripe"
+import { BRANDING } from "@/configs/branding"
 
 const STRIPE_PLACEHOLDER = "sk_test_placeholder"
 
@@ -12,7 +13,7 @@ function getStripe(): Stripe {
   const key = process.env.STRIPE_SECRET_KEY ?? STRIPE_PLACEHOLDER
   _stripe = new Stripe(key, {
     apiVersion: "2024-06-20" as Stripe.LatestApiVersion,
-    appInfo: { name: "SovereignML", version: "0.1.0" },
+    appInfo: { name: BRANDING.name, version: "0.1.0" },
   })
   return _stripe
 }

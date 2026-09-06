@@ -1,4 +1,4 @@
-# SovereignML — Feature List
+# Atlas Agents — Feature List
 
 > AI Operations Platform. Deploy, manage, and scale intelligent AI agents.
 
@@ -9,7 +9,7 @@
 
 ## Platform Overview
 
-SovereignML is a production-ready SaaS platform that lets businesses deploy AI agents that automate real work. Think Shopify for AI agents — you pick the type, configure it, and it runs.
+Atlas Agents is a production-ready SaaS platform that lets businesses deploy AI agents that automate real work. Think Shopify for AI agents — you pick the type, configure it, and it runs.
 
 ---
 
@@ -34,7 +34,7 @@ SovereignML is a production-ready SaaS platform that lets businesses deploy AI a
 - Enterprise CTA with demo booking link
 
 ### Comparison Page (`/comparison`)
-- **Comparison table** — SovereignML vs VPS Providers vs DIY Setup (9 features)
+- **Comparison table** — Atlas Agents vs VPS Providers vs DIY Setup (9 features)
 - **3 positioning blocks** — "We are not hosting / not just infra / we are an AI operations layer"
 - Demo booking CTA
 
@@ -67,7 +67,7 @@ SovereignML is a production-ready SaaS platform that lets businesses deploy AI a
 - SHA-256 hashed tokens stored in DB (never in plaintext)
 - 1-hour token expiry
 - Rate limited: 3 requests per email per hour
-- Branded SovereignML email template (Resend)
+- Branded Atlas Agents email template (Resend)
 
 ### Session Management
 - JWT-based sessions via NextAuth v5
@@ -114,7 +114,7 @@ A 5-step guided deployment wizard (`project → interface → plan → advanced 
 - Status badges: active, past_due, canceled, incomplete
 
 ### Bring Your Own Server (`/dashboard/byos`)
-- Connect a server you already own; SovereignML runs the agent on it for a flat fee. See [BYOS](BYOS.md).
+- Connect a server you already own; Atlas Agents runs the agent on it for a flat fee. See [BYOS](BYOS.md).
 
 ### Per-agent tools (instance detail page)
 - **Backups** — snapshot/restore agent settings to your own Google Drive.

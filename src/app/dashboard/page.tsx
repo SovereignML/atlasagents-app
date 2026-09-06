@@ -141,7 +141,7 @@ export default async function DashboardPage() {
               Welcome back, {firstName}
             </h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              Deploy, monitor, and scale your AI agents from one sovereign control plane.
+              Deploy, monitor, and scale your AI agents from a single control plane.
             </p>
             <div className="mt-5 flex flex-wrap items-center gap-3">
               <Button

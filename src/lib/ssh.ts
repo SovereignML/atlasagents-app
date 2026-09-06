@@ -659,6 +659,11 @@ export async function sshInstallUserAuthorizedKeys(
     "mkdir -p ~/.ssh && chmod 700 ~/.ssh",
     "touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys",
     // Drop any previously-managed block first so removed keys are revoked.
+    // LEGACY WIRE FORMAT — the `sovereignml-user-key` markers are deliberately
+    // NOT renamed in the Atlas Agents rebrand: they are already written into
+    // ~/.ssh/authorized_keys on every provisioned box, and a renamed marker
+    // would stop matching, orphaning the old block and breaking key removal.
+    // See docs/REBRAND-LEGACY-IDENTIFIERS.md.
     "sed -i '/# sovereignml-user-key BEGIN/,/# sovereignml-user-key END/d' ~/.ssh/authorized_keys",
   ]
   if (keys.length > 0) {

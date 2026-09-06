@@ -6,8 +6,8 @@ const LAST_UPDATED = "June 29, 2026"
 const LEGAL_ENTITY = `${BRANDING.legalEntity}, ${BRANDING.jurisdiction}`
 
 export const metadata = {
-  title: "Service Level Agreement | SovereignML",
-  description: "SovereignML's uptime commitments, response times, and support standards.",
+  title: "Service Level Agreement",
+  description: `${BRANDING.name}'s uptime commitments, response times, and support standards.`,
 }
 
 export default function SLAPage() {
@@ -49,7 +49,7 @@ export default function SLAPage() {
           ))}
         </div>
         <p className="text-[var(--text-secondary)] text-sm leading-relaxed">
-          Uptime is measured monthly as the percentage of minutes the SovereignML platform API and dashboard are available and responding to requests. Scheduled maintenance windows (announced 48 hours in advance) are excluded from uptime calculations.
+          Uptime is measured monthly as the percentage of minutes the {BRANDING.name} platform API and dashboard are available and responding to requests. Scheduled maintenance windows (announced 48 hours in advance) are excluded from uptime calculations.
         </p>
       </Reveal>
 
@@ -133,7 +133,7 @@ export default function SLAPage() {
           Service Credits
         </h2>
         <p className="text-[var(--text-secondary)] text-sm leading-relaxed mb-4">
-          If SovereignML fails to meet the uptime commitment in a given calendar month, eligible users may request a service credit:
+          If {BRANDING.name} fails to meet the uptime commitment in a given calendar month, eligible users may request a service credit:
         </p>
         <div className="overflow-x-auto mb-4">
           <table className="w-full text-sm border-collapse">
@@ -164,7 +164,7 @@ export default function SLAPage() {
           </table>
         </div>
         <p className="text-[var(--text-secondary)] text-sm leading-relaxed">
-          Credits are applied to future invoices and are not redeemable for cash. To request a credit, contact billing@sovereignml.com within 30 days of the incident with the date range and description of the outage.
+          Credits are applied to future invoices and are not redeemable for cash. To request a credit, contact {BRANDING.billingEmail} within 30 days of the incident with the date range and description of the outage.
         </p>
       </Reveal>
 
@@ -182,7 +182,7 @@ export default function SLAPage() {
             "Scheduled maintenance windows (announced 48+ hours in advance)",
             "Force majeure events: natural disasters, war, government action, internet backbone outages",
             "Actions or inactions by the customer that cause service degradation",
-            "Third-party service outages (Stripe, Google OAuth, Resend) outside SovereignML’s control",
+            `Third-party service outages (Stripe, Google OAuth, Resend) outside ${BRANDING.name}’s control`,
             "Beta or experimental features explicitly marked as such",
             "Free tier accounts (the SLA applies only to paid subscriptions)",
           ].map((item) => (

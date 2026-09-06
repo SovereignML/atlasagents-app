@@ -219,13 +219,17 @@ ${runAs("doctor --fix")}
     // Placeholder env — rewritten with real secrets at claim. Enough for Open
     // WebUI to boot and initialize its DB (it does not require a live upstream).
     const placeholderEnv = sc.renderEnv({
-      // Minimal instance stub; renderEnv only reads gatewayToken/port/secret/publicUrl.
+      // Minimal instance stub; renderEnv reads gatewayToken/port/secret/publicUrl/model.
       instance: { id: "pool", domain: null } as never,
       gatewayToken: "pool-placeholder-token",
       gatewayPort: runtime.gatewayPort,
       secretKey: "pool-placeholder-secret",
       publicUrl: null,
       enableSignup: true,
+      // A pooled VM has no instance yet, so no model to pin. Empty means the
+      // sidecar env omits DEFAULT_MODELS at bake; claim rewrites this whole file
+      // with the real per-instance value before the admin account is seeded.
+      model: "",
     })
     const envB64 = Buffer.from(
       Object.entries(placeholderEnv)

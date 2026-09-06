@@ -6,7 +6,7 @@ changes (a stale hard rule is worse than none).
 
 ## What this is
 
-SovereignML: a production SaaS for deploying and operating AI agents on
+Atlas Agents: a production SaaS for deploying and operating AI agents on
 managed VPSes (with billing, teams, and white-label reseller support). See
 [`docs/FEATURES.md`](docs/FEATURES.md).
 

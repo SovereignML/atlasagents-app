@@ -2,7 +2,7 @@
  * Console theme is scoped to the authenticated "operations console" surfaces
  * (dashboard, admin, tenant-admin, auth) and is independent of the global
  * `next-themes` theme that drives the marketing site. The console defaults to
- * dark (the SovereignML console design) but can be toggled to the light console
+ * dark (the Atlas Agents console design) but can be toggled to the light console
  * palette; the choice is persisted in a cookie so the server renders the correct
  * `.dark` wrapper with no flash.
  *

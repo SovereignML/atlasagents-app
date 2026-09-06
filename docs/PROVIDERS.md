@@ -1,6 +1,6 @@
 # VPS Provider Router
 
-> Where a managed-VPS agent actually gets provisioned. SovereignML routes each deploy across **multiple cloud providers** (DigitalOcean, Linode) by score, with hard filters, failover, internal per-provider budgets, and health-aware ranking. This replaces the old single, env-driven Linode path.
+> Where a managed-VPS agent actually gets provisioned. Atlas Agents routes each deploy across **multiple cloud providers** (DigitalOcean, Linode) by score, with hard filters, failover, internal per-provider budgets, and health-aware ranking. This replaces the old single, env-driven Linode path.
 
 For end users this is invisible — you pick a **region** and a **server size** (see [FEATURES.md](FEATURES.md)) and the platform picks the best provider. Everything below is operator/developer facing.
 

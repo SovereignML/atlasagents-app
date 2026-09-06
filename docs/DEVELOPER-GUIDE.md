@@ -1,12 +1,12 @@
-# SovereignML — Developer Guide
+# Atlas Agents — Developer Guide
 
 A plain-language walkthrough of everything in this codebase: what it does, how the pieces fit together, and where to look when something breaks.
 
 ---
 
-## What Is SovereignML?
+## What Is Atlas Agents?
 
-SovereignML is a **platform for deploying and managing AI agents**. Think of it as "Heroku for AI bots." A user signs up, picks a plan, configures an agent (what it does, how it talks, which AI model it uses), and clicks deploy. The platform spins up real infrastructure — a VPS or a shared Docker container — installs the agent software, wires up DNS, and starts the bot. The user gets a dashboard to monitor, restart, pause, or delete their agents.
+Atlas Agents is a **platform for deploying and managing AI agents**. Think of it as "Heroku for AI bots." A user signs up, picks a plan, configures an agent (what it does, how it talks, which AI model it uses), and clicks deploy. The platform spins up real infrastructure — a VPS or a shared Docker container — installs the agent software, wires up DNS, and starts the bot. The user gets a dashboard to monitor, restart, pause, or delete their agents.
 
 The product has five pricing tiers (Free → Builder → Operator → Scale → Enterprise), a credit-based usage system, Stripe billing, team collaboration, and an admin panel.
 

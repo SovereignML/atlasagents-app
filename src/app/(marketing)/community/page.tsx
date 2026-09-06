@@ -60,7 +60,7 @@ export default function CommunityPage() {
             X / Twitter
           </h2>
           <p className="text-[var(--text-secondary)] text-sm leading-relaxed mb-6">
-            Follow us for AI operations insights, product announcements, and tips from the SovereignML team.
+            Follow us for AI operations insights, product announcements, and tips from the {BRANDING.name} team.
           </p>
           <Button
             variant="outline"

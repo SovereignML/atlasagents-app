@@ -1,4 +1,4 @@
-# SovereignML — technology stack and data layer
+# Atlas Agents — technology stack and data layer
 
 This document is the **source of truth** for which tools the application uses, how they connect, and how to interpret **Prisma**-related naming in dependencies or older docs (the app uses **Drizzle**, not Prisma CLI migrations).
 
@@ -71,7 +71,7 @@ The legacy **`prisma/migrations/`** tree (empty timestamped folders left from an
 
 ### 3.2 `node_modules/drizzle-orm/prisma/*` (confusing name)
 
-Inside **`drizzle-orm`** there are subpaths named `prisma` (for example **`drizzle-orm/prisma/pg`**). That is **not** “your app’s Prisma migrations.” It is an **optional integration**: Drizzle can use a **`PrismaClient`** as the underlying driver/session for people who run both. SovereignML’s code uses **`drizzle-orm/node-postgres`** (`src/db/index.ts`), **not** that integration.
+Inside **`drizzle-orm`** there are subpaths named `prisma` (for example **`drizzle-orm/prisma/pg`**). That is **not** “your app’s Prisma migrations.” It is an **optional integration**: Drizzle can use a **`PrismaClient`** as the underlying driver/session for people who run both. Atlas Agents’s code uses **`drizzle-orm/node-postgres`** (`src/db/index.ts`), **not** that integration.
 
 So if a search hits `prisma` only under `node_modules/drizzle-orm/`, it is **vendor code**, not project Prisma.
 

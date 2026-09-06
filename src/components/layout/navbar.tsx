@@ -80,7 +80,7 @@ export default function Navbar({ isAuthenticated = false }: { isAuthenticated?: 
               {accountLabel}
             </Link>
             <a
-              href="https://tidycal.com/sovereignml/demo"
+              href={BRANDING.demoUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="btn-gradient !py-2 !px-5 !text-sm"
@@ -159,7 +159,7 @@ export default function Navbar({ isAuthenticated = false }: { isAuthenticated?: 
                 variants={{ hidden: { opacity: 0 }, show: { opacity: 1 } }}
               />
               <motion.a
-                href="https://tidycal.com/sovereignml/demo"
+                href={BRANDING.demoUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="btn-clean-secondary"

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useReducedMotion } from "framer-motion";
 import Link from "next/link";
+import { BRANDING } from "@/configs/branding"
 
 /*
  * Exact Antimetal integration-wheel port.
@@ -270,11 +271,11 @@ export function AgentWheel() {
               src="/assets/integrations/logo-background-dark.avif"
             />
 
-            {/* SovereignML brand mark — navy on light, white on dark */}
+            {/* Atlas Agents brand mark — navy on light, white on dark */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/assets/icons/Blue-Navy-SovereignML.png"
-              alt="SovereignML"
+              alt={BRANDING.name}
               draggable={false}
               className="relative z-10 block w-[61px] h-auto select-none object-contain lg:w-[79px] dark:hidden"
             />

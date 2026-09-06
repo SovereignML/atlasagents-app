@@ -1,9 +1,10 @@
 import type { Metadata } from "next"
 import TeamShowcase from "@/components/ui/team-showcase"
+import { BRANDING } from "@/configs/branding"
 
 export const metadata: Metadata = {
   title: "Team",
-  description: "Meet the team behind SovereignML.",
+  description: `Meet the team behind ${BRANDING.name}.`,
 }
 
 export default function TeamPage() {
@@ -15,7 +16,7 @@ export default function TeamPage() {
           Meet the Team
         </h1>
         <p className="text-[var(--text-secondary)] text-lg max-w-2xl">
-          The people building SovereignML.
+          The people building {BRANDING.name}.
         </p>
       </div>
 

@@ -1,6 +1,6 @@
-# Agent Control & Human-in-the-Loop (SovereignML App channel)
+# Agent Control & Human-in-the-Loop (Atlas Agents App channel)
 
-> **Status:** Design (not yet built). Target: let the **SovereignML mobile app** be the
+> **Status:** Design (not yet built). Target: let the **Atlas Agents mobile app** be the
 > place a user approves/denies agent actions and answers agent questions — the same
 > workflow OpenClaw & Hermes already do over Telegram, but **without requiring Telegram**.
 
@@ -15,7 +15,7 @@ mobile bearer-token API (still in a WIP patch — see [Dependencies](#dependenci
 
 An agent running on a user's box sometimes needs a human: *"OK to buy this $40 domain?"*,
 *"which of these two options?"*, *"paste the client's address."* Today the runtimes can ask
-via a **Telegram bot**. We want the **SovereignML app** to be that surface — a native
+via a **Telegram bot**. We want the **Atlas Agents app** to be that surface — a native
 approval/control channel — so a customer only needs our app, **not** a Telegram account.
 
 Non-negotiables:
@@ -65,9 +65,9 @@ we exploit.
 | Methods used | `getMe`, `sendMessage`, `editMessageText`, `answerCallbackQuery`, `setMyCommands`, `getUpdates`, `deleteWebhook`/`setWebhook`, `sendChatAction`, `setMessageReaction` | same core set |
 | Config location | agent JSON config (rendered by `renderConfig()`) | `~/.hermes/config.yaml` / `~/.hermes/gateway.json` |
 
-**Takeaway:** point `apiRoot` / `base_url` at **SovereignML** and implement the Bot API
+**Takeaway:** point `apiRoot` / `base_url` at **Atlas Agents** and implement the Bot API
 methods above, and the agent will "talk to Telegram" — except Telegram is us, and the human is
-the SovereignML app.
+the Atlas Agents app.
 
 > Sources: OpenClaw docs (`docs.openclaw.ai/channels/telegram`, `/gateway/config-channels`;
 > issue `openclaw/openclaw#28535` added `apiRoot`); Hermes docs
@@ -75,19 +75,19 @@ the SovereignML app.
 
 ---
 
-## 4. The design: SovereignML *is* the Bot API server
+## 4. The design: Atlas Agents *is* the Bot API server
 
 ```
 Agent (OpenClaw grammY / Hermes ptb)
-  │  apiRoot / base_url  ->  https://app.sovereignml.com/botapi
-  │  botToken            ->  a SovereignML-issued SYNTHETIC token (maps to user+instance)
+  │  apiRoot / base_url  ->  https://app.atlasagents.dev/botapi
+  │  botToken            ->  a Atlas Agents-issued SYNTHETIC token (maps to user+instance)
   │
   │  (a) long-polls getUpdates ───────────────►┐
   │  (b) sendMessage("Buy $40 domain?" + buttons)
   ▼                                            │
-SovereignML backend  =  Telegram-compatible Bot API server (/botapi)
+Atlas Agents backend  =  Telegram-compatible Bot API server (/botapi)
   ├─ records an AgentActionRequest (status=pending)
-  ├─ notify()/FCM push ───────────────────────► SovereignML App  (approval inbox)
+  ├─ notify()/FCM push ───────────────────────► Atlas Agents App  (approval inbox)
   │                                                     │  user taps Approve
   └─ enqueues a callback_query update  ◄────────────────┘  (POST /api/agents/../respond)
        returned on the agent's next getUpdates(a) → grammY/ptb routes callback_data → agent resumes
@@ -96,7 +96,7 @@ SovereignML backend  =  Telegram-compatible Bot API server (/botapi)
 The agent is **oblivious**: it thinks it's using Telegram. We never touch runtime code — only
 config (`apiRoot`/`base_url` + a synthetic token) pushed via `reprovisionBotEnv()`.
 
-### Why "SovereignML as a fake Telegram" and not a brand-new channel
+### Why "Atlas Agents as a fake Telegram" and not a brand-new channel
 
 A native, non-Telegram channel would mean forking **both** grammY-based OpenClaw and
 ptb-based Hermes. Impersonating the Bot API they *already* speak is a well-worn pattern
@@ -114,7 +114,7 @@ Route: `POST|GET /botapi/bot<token>/<method>` (mirror Telegram's URL shape). `<t
 **synthetic per-agent token**; resolve it → `(userId, instanceId)` (constant-time compare, like
 the events ingest token). Minimum method surface (from §3):
 
-| Method | Behavior in SovereignML |
+| Method | Behavior in Atlas Agents |
 |---|---|
 | `getMe` | Return a synthetic bot `User` (id derived from the token) so the library validates on startup. |
 | `getUpdates` | **Long-poll.** Block up to `timeout`s; return queued updates for this agent (the human's answers as `message` / `callback_query`). This is how answers reach the agent. |
@@ -183,9 +183,9 @@ rehydrate an agent across restarts — which neither runtime is built to do. Add
 
 Extend `reprovisionBotEnv()` / the runtime `renderConfig()` to write, per agent:
 
-- **OpenClaw:** `channels.telegram.apiRoot = "https://app.sovereignml.com/botapi"`,
+- **OpenClaw:** `channels.telegram.apiRoot = "https://app.atlasagents.dev/botapi"`,
   `channels.telegram.botToken = <synthetic>`, `dmPolicy` = open/pairing as desired.
-- **Hermes:** `platforms.telegram.extra.base_url = "https://app.sovereignml.com/botapi/bot"`
+- **Hermes:** `platforms.telegram.extra.base_url = "https://app.atlasagents.dev/botapi/bot"`
   (+ `base_file_url` when media is added), `TELEGRAM_BOT_TOKEN = <synthetic>`.
 
 No new container image needed — this is config only (verify exact JSON/YAML shape against the

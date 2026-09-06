@@ -10,7 +10,7 @@
 // DB connection is ever opened because only pure functions are called.
 
 process.env.DATABASE_URL ??= "postgres://test"
-process.env.NEXT_PUBLIC_APP_URL = "https://app.sovereignml.com"
+process.env.NEXT_PUBLIC_APP_URL = "https://app.atlasagents.dev"
 delete process.env.WHITELABEL_CNAME_TARGET
 
 let failures = 0
@@ -72,13 +72,20 @@ async function main() {
     assert(normalizeHost(null) === null, "null for null")
   }
 
-  console.log("isCanonicalHost (NEXT_PUBLIC_APP_URL=app.sovereignml.com)")
+  console.log("isCanonicalHost (NEXT_PUBLIC_APP_URL=app.atlasagents.dev)")
   {
-    assert(isCanonicalHost("app.sovereignml.com"), "app url host is canonical")
-    assert(isCanonicalHost("sovereignml.com"), "branding apex is canonical")
-    assert(isCanonicalHost("www.sovereignml.com"), "www apex is canonical")
+    assert(isCanonicalHost("app.atlasagents.dev"), "app url host is canonical")
+    assert(isCanonicalHost("atlasagents.dev"), "branding apex is canonical")
+    assert(isCanonicalHost("www.atlasagents.dev"), "www apex is canonical")
     assert(isCanonicalHost("localhost"), "localhost is canonical")
     assert(!isCanonicalHost("app.agency.com"), "a custom domain is NOT canonical")
+
+    // Regression guard for the Atlas Agents rename: the pre-rename hosts stay
+    // canonical while they still resolve here, so they can't be claimed as
+    // tenant white-label domains. Driven by BRANDING.legacyDomains.
+    assert(isCanonicalHost("sovereignml.com"), "legacy apex is still canonical")
+    assert(isCanonicalHost("www.sovereignml.com"), "legacy www is still canonical")
+    assert(isCanonicalHost("app.sovereignml.com"), "legacy app host is still canonical")
   }
 
   console.log("normalizeCustomDomain")
@@ -93,18 +100,23 @@ async function main() {
     assert(normalizeCustomDomain("not a domain") === null, "rejects spaces")
     assert(normalizeCustomDomain("localhost") === null, "rejects single label")
     assert(
-      normalizeCustomDomain("app.sovereignml.com") === null,
+      normalizeCustomDomain("app.atlasagents.dev") === null,
       "rejects the platform's own canonical host",
+    )
+    assert(
+      normalizeCustomDomain("app.sovereignml.com") === null,
+      "rejects a legacy canonical host",
     )
     assert(normalizeCustomDomain("") === null, "rejects empty")
   }
 
   console.log("getCnameTarget")
   {
+    // Prod keeps this pointed at the legacy target until tenant CNAMEs migrate.
     process.env.WHITELABEL_CNAME_TARGET = "cname.sovereignml.com"
     assert(getCnameTarget() === "cname.sovereignml.com", "explicit env wins")
     delete process.env.WHITELABEL_CNAME_TARGET
-    assert(getCnameTarget() === "app.sovereignml.com", "falls back to app url host")
+    assert(getCnameTarget() === "app.atlasagents.dev", "falls back to app url host")
   }
 
   console.log("buildBrandingCss")

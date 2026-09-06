@@ -22,6 +22,7 @@ import {
   type NotificationChannel,
   type NotificationMatrix,
 } from "@/lib/notifications/types"
+import { BRANDING } from "@/configs/branding"
 
 export function NotificationPreferencesCard() {
   const [matrix, setMatrix] = useState<NotificationMatrix>(() => resolveMatrix(null))
@@ -196,7 +197,7 @@ export function NotificationPreferencesCard() {
               <div className="text-sm font-medium">Telegram</div>
               <div className="text-xs text-muted-foreground">
                 {telegramLinked
-                  ? "Connected to the SovereignML notifications bot."
+                  ? `Connected to the ${BRANDING.name} notifications bot.`
                   : telegramAvailable
                     ? "Connect to receive alerts in Telegram."
                     : "Telegram notifications are not configured on this server."}

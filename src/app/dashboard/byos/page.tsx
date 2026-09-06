@@ -49,7 +49,7 @@ export default async function ByosPage() {
     <PageContainer>
       <PageHeader
         title="Bring Your Own Server"
-        description="Run managed agents on infrastructure you own. Sovereign by default — your data never leaves your box."
+        description="Run managed agents on infrastructure you own. Isolated by default — your data never leaves your box."
       />
 
       <div className="grid grid-cols-1 gap-[18px] lg:grid-cols-[minmax(0,1fr)_320px] items-start">

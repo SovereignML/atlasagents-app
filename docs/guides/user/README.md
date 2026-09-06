@@ -1,8 +1,8 @@
-# SovereignML — User Guide
+# Atlas Agents — User Guide
 
-> Everything you need to build, deploy, and run AI agents on SovereignML. Start at the top; each guide stands on its own.
+> Everything you need to build, deploy, and run AI agents on Atlas Agents. Start at the top; each guide stands on its own.
 
-SovereignML lets you deploy autonomous AI agents onto real cloud servers (or your own), configure them from a dashboard, and pay only for what you use — no ML expertise or server management required.
+Atlas Agents lets you deploy autonomous AI agents onto real cloud servers (or your own), configure them from a dashboard, and pay only for what you use — no ML expertise or server management required.
 
 ## Start here
 
@@ -24,7 +24,7 @@ SovereignML lets you deploy autonomous AI agents onto real cloud servers (or you
 | Guide | What it covers |
 |-------|----------------|
 | [Bring Your Own Server](byos.md) | Connect a server you already own and manage an agent on it. |
-| [Reseller / white-label](reseller-whitelabel.md) | Run SovereignML under your own brand and bill your own customers. |
+| [Reseller / white-label](reseller-whitelabel.md) | Run Atlas Agents under your own brand and bill your own customers. |
 
 ---
 

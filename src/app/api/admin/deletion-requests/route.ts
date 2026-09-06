@@ -4,6 +4,7 @@ import { db, deletionRequests, adminNotifications, eq, and, desc, sql } from "@/
 import { deletionDecisionSchema } from "@/lib/validations"
 import { logAuditEvent } from "@/lib/audit"
 import { sendNotificationEmail } from "@/lib/email"
+import { BRANDING } from "@/configs/branding"
 
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
 
@@ -113,10 +114,10 @@ export async function PATCH(req: NextRequest) {
           : "Your account deletion request was declined",
       message:
         action === "approve"
-          ? `Your request to delete your SovereignML account has been approved. Our team will process the deletion shortly.${
+          ? `Your request to delete your ${BRANDING.name} account has been approved. Our team will process the deletion shortly.${
               note ? `\n\nNote from our team: ${note}` : ""
             }`
-          : `Your request to delete your SovereignML account was not approved.${
+          : `Your request to delete your ${BRANDING.name} account was not approved.${
               note ? `\n\nReason: ${note}` : ""
             }`,
       url: `${appUrl}/dashboard/account`,

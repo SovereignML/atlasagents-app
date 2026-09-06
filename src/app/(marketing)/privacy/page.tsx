@@ -8,7 +8,7 @@ const sections = [
   {
     id: "overview",
     title: "Overview",
-    content: `SovereignML ("we", "us", or "our") operates the SovereignML AI operations platform at sovereignml.com. This Privacy Policy explains what data we collect, why we collect it, how we use it, and your rights regarding your personal information.
+    content: `${BRANDING.name} ("we", "us", or "our") operates the ${BRANDING.name} AI operations platform at ${BRANDING.domain}. This Privacy Policy explains what data we collect, why we collect it, how we use it, and your rights regarding your personal information.
 
 By creating an account or using our services, you agree to the collection and use of information as described in this policy. If you do not agree, please discontinue use of the platform.`,
   },
@@ -56,7 +56,7 @@ By creating an account or using our services, you agree to the collection and us
       "To send transactional emails (password resets, deployment confirmations) via Resend",
       "To enforce platform security, detect abuse, and apply rate limits",
       "To provide customer support when you contact us",
-      "To improve the platform — including agent performance and our models over time — based only on aggregated, anonymized usage patterns. You can opt out of analytics-based product improvement by contacting privacy@sovereignml.com.",
+      `To improve the platform — including agent performance and our models over time — based only on aggregated, anonymized usage patterns. You can opt out of analytics-based product improvement by contacting ${BRANDING.privacyEmail}.`,
     ],
   },
   {
@@ -81,7 +81,7 @@ By creating an account or using our services, you agree to the collection and us
       },
       {
         title: "Legal Requirements",
-        content: "We may disclose your data if required by law, court order, or to protect the rights and safety of SovereignML, our users, or the public.",
+        content: `We may disclose your data if required by law, court order, or to protect the rights and safety of ${BRANDING.name}, our users, or the public.`,
       },
     ],
   },
@@ -97,7 +97,7 @@ By creating an account or using our services, you agree to the collection and us
 • Session cookies are JWT-signed with a secret key, httpOnly, and secure
 • HTTPS is enforced on all production endpoints
 
-No system is completely secure. We encourage you to use a strong, unique password and enable two-factor authentication on any email account associated with SovereignML.`,
+No system is completely secure. We encourage you to use a strong, unique password and enable two-factor authentication on any email account associated with ${BRANDING.name}.`,
   },
   {
     id: "data-retention",
@@ -128,27 +128,27 @@ To exercise any of these rights, contact us at the address below. We will respon
   {
     id: "children",
     title: "Children's Privacy",
-    content: "SovereignML is not directed at children under 16. We do not knowingly collect personal information from anyone under 16. If we become aware that we have collected personal information from a child, we will delete it promptly.",
+    content: `${BRANDING.name} is not directed at children under 16. We do not knowingly collect personal information from anyone under 16. If we become aware that we have collected personal information from a child, we will delete it promptly.`,
   },
   {
     id: "changes",
     title: "Changes to This Policy",
-    content: "We may update this Privacy Policy from time to time. When we do, we will update the \"Last Updated\" date at the top of this page. For material changes, we will notify you by email or via a notice on the platform before the change takes effect. Continued use of SovereignML after changes take effect constitutes acceptance of the updated policy.",
+    content: `We may update this Privacy Policy from time to time. When we do, we will update the \"Last Updated\" date at the top of this page. For material changes, we will notify you by email or via a notice on the platform before the change takes effect. Continued use of ${BRANDING.name} after changes take effect constitutes acceptance of the updated policy.`,
   },
   {
     id: "contact",
     title: "Contact",
     content: `For privacy-related questions, data requests, or to report a concern, contact us at:
 
-SovereignML L.L.C.
-Email: privacy@sovereignml.com
-Website: sovereignml.com`,
+${BRANDING.legalEntity}
+Email: ${BRANDING.privacyEmail}
+Website: ${BRANDING.domain}`,
   },
 ]
 
 export const metadata = {
-  title: "Privacy Policy | SovereignML",
-  description: "How SovereignML collects, uses, and protects your personal information.",
+  title: "Privacy Policy",
+  description: `How ${BRANDING.name} collects, uses, and protects your personal information.`,
 }
 
 export default function PrivacyPage() {

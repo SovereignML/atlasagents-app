@@ -34,6 +34,7 @@ import { StatCard } from "@/components/dashboard/stat-card"
 import { TwoFactorCard } from "@/components/auth/two-factor-card"
 import { NotificationPreferencesCard } from "@/components/notifications/notification-preferences-card"
 import { linkGoogle } from "@/app/actions/auth"
+import { BRANDING } from "@/configs/branding"
 
 interface AccountData {
   id: string
@@ -503,7 +504,7 @@ export default function AccountPage() {
                 <>
                   <Alert>
                     <AlertDescription>
-                      Your deletion request is pending review by the SovereignML team. We&apos;ll email
+                      Your deletion request is pending review by the {BRANDING.name} team. We&apos;ll email
                       you once a decision is made.
                     </AlertDescription>
                   </Alert>
@@ -556,7 +557,7 @@ export default function AccountPage() {
                   <AlertDialogHeader>
                     <AlertDialogTitle>Request account deletion?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      This sends a deletion request to the SovereignML team for review. Once approved,
+                      This sends a deletion request to the {BRANDING.name} team for review. Once approved,
                       all agents, subscriptions, and data are permanently removed. This cannot be
                       undone.
                     </AlertDialogDescription>

@@ -2,13 +2,14 @@
 
 import Image from "next/image";
 import { motion, useReducedMotion } from "framer-motion";
+import { BRANDING } from "@/configs/branding"
 
 /*
  * Integration constellation.
  *
  * Two rows of dimmed, monochrome tool/model glyphs scrolling in opposite
  * directions, fading out at the left/right edges, with a dark glass "core"
- * orb pinned dead-centre — SovereignML sitting at the heart of your stack.
+ * orb pinned dead-centre — Atlas Agents sitting at the heart of your stack.
  *
  * The orb backdrop is the real /assets/integrations/logo-background asset
  * (dark in dark mode, light in light mode). The orange mascot on top is an
@@ -226,7 +227,7 @@ export function IntegrationConstellation() {
                 height={194}
                 className="relative block h-[84px] w-auto object-contain md:h-[96px] dark:hidden"
               />
-              <span className="sr-only">SovereignML</span>
+              <span className="sr-only">{BRANDING.name}</span>
             </motion.div>
           </div>
         </motion.div>

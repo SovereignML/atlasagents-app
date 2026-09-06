@@ -75,6 +75,7 @@ import { AccessTab } from "./instance-access-tab"
 import { ToolsTab } from "./instance-tools-tab"
 import { SkillsTab } from "./instance-skills-tab"
 import { FilesTab } from "./instance-files-browser"
+import { BRANDING } from "@/configs/branding"
 
 type InstanceLite = {
   id: string
@@ -1575,10 +1576,10 @@ function OverviewTab({
               value={
                 instance.byosLlmMode === "own_key"
                   ? "Your own API key"
-                  : "SovereignML Credits"
+                  : `${BRANDING.name} Credits`
               }
             />
-            <Stat label="Managed by" value="SovereignML Platform" />
+            <Stat label="Managed by" value={`${BRANDING.name} Platform`} />
             <Stat label="Created" value={new Date(instance.createdAt).toLocaleDateString()} />
           </div>
         </SectionCard>
@@ -1591,8 +1592,8 @@ function OverviewTab({
       {instance.deploymentTarget !== "byos" && (
         <SectionCard title="Overview">
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-            <Stat label="Model access" value="SovereignML Credits" />
-            <Stat label="Managed by" value="SovereignML Platform" />
+            <Stat label="Model access" value={`${BRANDING.name} Credits`} />
+            <Stat label="Managed by" value={`${BRANDING.name} Platform`} />
             <Stat label="Created" value={new Date(instance.createdAt).toLocaleDateString()} />
           </div>
         </SectionCard>

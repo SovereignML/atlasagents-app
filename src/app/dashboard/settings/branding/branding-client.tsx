@@ -17,6 +17,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
+import { BRANDING } from "@/configs/branding"
 
 export type BrandingState = {
   brandName: string
@@ -347,7 +348,7 @@ export function BrandingClient({ initial }: { initial: BrandingState }) {
     <PageContainer>
       <PageHeader
         title="Branding"
-        description="White-label your team's dashboard. End-users on your custom domain see your brand instead of SovereignML."
+        description={`White-label your team's dashboard. End-users on your custom domain see your brand instead of ${BRANDING.name}.`}
         actions={
           <Button onClick={save} disabled={pending}>
             {pending ? "Saving…" : "Save changes"}
@@ -368,7 +369,7 @@ export function BrandingClient({ initial }: { initial: BrandingState }) {
               <FieldLabel>Brand name</FieldLabel>
               <Input
                 value={s.brandName}
-                placeholder="SovereignML"
+                placeholder={BRANDING.name}
                 maxLength={60}
                 onChange={(e) => set("brandName", e.target.value)}
               />
@@ -451,7 +452,7 @@ export function BrandingClient({ initial }: { initial: BrandingState }) {
                 />
               ) : (
                 <span className="text-lg font-semibold tracking-tight">
-                  {s.brandName || "SovereignML"}
+                  {s.brandName || BRANDING.name}
                 </span>
               )}
               <span
@@ -472,7 +473,7 @@ export function BrandingClient({ initial }: { initial: BrandingState }) {
           <CardTitle>Status</CardTitle>
           <CardDescription>
             Turn white-label off to temporarily revert your team to the default
-            SovereignML look without deleting this configuration.
+            {BRANDING.name} look without deleting this configuration.
           </CardDescription>
         </CardHeader>
         <CardContent>

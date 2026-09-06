@@ -302,7 +302,7 @@
 /* ─── App Shell Token Scope (Light — derived console) ─────────── */
 /* Applied only inside dashboard/admin/auth layouts via `.app-shell`. */
 /* Marketing/landing pages keep the default :root tokens above.       */
-/* The console is a SovereignML "operations" surface: neutral zinc    */
+/* The console is an Atlas Agents "operations" surface: neutral zinc  */
 /* surfaces, hairline borders. LIGHT mode uses the MARKETING brand     */
 /* BLUE (#015efe) as the primary accent (lime fails contrast on white  */
 /* and the brand reads blue on light surfaces); DARK mode keeps the    */
@@ -404,7 +404,7 @@ html[data-console-theme="dark"] {
   filter: none;
 }
 
-/* ─── App Shell Token Scope (Dark — SovereignML Console) ──────── */
+/* ─── App Shell Token Scope (Dark — Atlas Agents Console) ─────── */
 /* The reference console palette: near-black canvas, #161618 cards,  */
 /* #1d1d20 inset fields, hairline white-alpha borders, and signal     */
 /* lime (#a3e635) as the primary CTA + active accent. The warm amber  */

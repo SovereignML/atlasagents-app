@@ -161,6 +161,13 @@ export type SidecarEnvArgs = {
   publicUrl?: string | null
   /** Open signup window — true on first boot, flipped to false after the admin is seeded. */
   enableSignup: boolean
+  /**
+   * The model slug the gateway is pinned to (same value the runtime writes as its
+   * own default). A chat UI sidecar needs this to pre-select a model for a fresh
+   * account — without it the first message has no model attached. Should match an
+   * `id` the gateway returns from `GET /v1/models`.
+   */
+  model: string
 }
 
 /**

@@ -1,8 +1,8 @@
 # Bring Your Own Server (BYOS)
 
-> SovereignML as a pure management panel for a server **you already own**. We don't provision or bill for the box — we install, run, monitor, and configure the agent on it for a flat fee.
+> Atlas Agents as a pure management panel for a server **you already own**. We don't provision or bill for the box — we install, run, monitor, and configure the agent on it for a flat fee.
 
-BYOS is the answer to "I already have a VPS / dedicated box / homelab machine — can you just run the agent on it?" Yes. You keep ownership and control of the hardware; SovereignML connects over SSH and treats it like any other managed instance (logs, restart, config, backups), minus the compute billing.
+BYOS is the answer to "I already have a VPS / dedicated box / homelab machine — can you just run the agent on it?" Yes. You keep ownership and control of the hardware; Atlas Agents connects over SSH and treats it like any other managed instance (logs, restart, config, backups), minus the compute billing.
 
 Related: [BILLING.md](BILLING.md) (the credit-metered LLM mode), [RUNTIMES.md](RUNTIMES.md) (what actually gets installed), [INTEGRATIONS.md](INTEGRATIONS.md) (Drive backups / Cloudflare domains work on BYOS instances too).
 
@@ -15,7 +15,7 @@ From **Dashboard → Bring Your Own Server** (`/dashboard/byos`):
 1. **Connect a server** (`/dashboard/byos/connect`). The page shows the platform's **fleet public key** (`SSH_FLEET_PUBLIC_KEY`). You paste that one line into the `authorized_keys` of the SSH user on your server — that's how we get in. No agent or daemon to install yourself.
 2. **Enter the connection details** — host/IP, SSH port (default `22`), and SSH user (default `root`).
 3. **Choose how the agent's LLM calls are paid for** (see [LLM modes](#llm-modes) below).
-4. **Pay the flat management fee** and SovereignML SSHes in and provisions the agent on your box.
+4. **Pay the flat management fee** and Atlas Agents SSHes in and provisions the agent on your box.
 
 Once connected, the server appears as a normal instance: open it at `/dashboard/instances/[id]` for status, logs, restart, credentials, backups, and a custom domain.
 
@@ -28,7 +28,7 @@ BYOS is its own plan (`byos` in [`src/configs/plans.ts`](../src/configs/plans.ts
 | Monthly | **$2.50/mo** per server |
 | Yearly | **$30/yr** per server |
 
-This is a flat **management-panel fee only**, charged per connected server. Because SovereignML doesn't own the hardware, there is **no compute/VM billing** — unlike the managed-VPS plans, where the server size is part of the price. LLM usage is billed separately and only in `managed_credits` mode (below).
+This is a flat **management-panel fee only**, charged per connected server. Because Atlas Agents doesn't own the hardware, there is **no compute/VM billing** — unlike the managed-VPS plans, where the server size is part of the price. LLM usage is billed separately and only in `managed_credits` mode (below).
 
 Servers connected in `managed_credits` mode receive a **one-time grant of 100 AI credits** on signup (`BYOS_SIGNUP_CREDITS` in [`src/configs/plans.ts`](../src/configs/plans.ts)); after that, top up your wallet as needed. `own_key` servers get no grant because they pay their provider directly.
 
@@ -38,8 +38,8 @@ When you connect a server you pick one of two ways to pay for the agent's model 
 
 | Mode | What it means | Who pays the LLM bill |
 |------|---------------|-----------------------|
-| **`managed_credits`** (pay-as-you-go) | The agent uses SovereignML's OpenRouter access. Usage is metered against your **credit wallet**. | Your SovereignML credits — see [BILLING.md](BILLING.md). |
-| **`own_key`** | You paste your **own** LLM provider API key. It's encrypted at rest and injected into the agent. | You, directly to your provider. SovereignML never meters it. |
+| **`managed_credits`** (pay-as-you-go) | The agent uses Atlas Agents's OpenRouter access. Usage is metered against your **credit wallet**. | Your Atlas Agents credits — see [BILLING.md](BILLING.md). |
+| **`own_key`** | You paste your **own** LLM provider API key. It's encrypted at rest and injected into the agent. | You, directly to your provider. Atlas Agents never meters it. |
 
 You only pay the $2.50/mo panel fee in `own_key` mode; in `managed_credits` you start with 100 included credits and then draw down your wallet as the agent runs.
 

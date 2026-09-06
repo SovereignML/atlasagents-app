@@ -1,5 +1,6 @@
 import Link from "next/link"
 
+import { BRANDING } from "@/configs/branding"
 import { getConsoleTheme } from "@/lib/console-theme.server"
 import { ConsoleThemePortalSync } from "@/components/layout/console-theme-portal-sync"
 
@@ -15,7 +16,7 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
       <div className="relative z-10 w-full max-w-lg space-y-8">
         <div className="text-center">
           <Link href="/" className="inline-block text-2xl font-bold text-foreground">
-            SovereignML
+            {BRANDING.name}
           </Link>
         </div>
         {children}

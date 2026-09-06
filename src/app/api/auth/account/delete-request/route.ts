@@ -79,7 +79,7 @@ export async function POST(request: Request) {
 
   await logAuditEvent({ userId, action: "account.deletion_request", meta: { requestId: created.id } })
 
-  // Alert the SovereignML team out-of-band.
+  // Alert the Atlas Agents team out-of-band.
   await sendNotificationEmail({
     to: BRANDING.supportEmail,
     title: "Account deletion request",

@@ -1,6 +1,6 @@
 # Environment variables — complete reference
 
-> Every environment variable SovereignML reads, grouped exactly as they appear in [`.env.example`](../../.env.example), with what each does, whether it's required, and how to obtain it. This is the **human explainer**; [`.env.example`](../../.env.example) is the **canonical machine list** you copy from.
+> Every environment variable Atlas Agents reads, grouped exactly as they appear in [`.env.example`](../../.env.example), with what each does, whether it's required, and how to obtain it. This is the **human explainer**; [`.env.example`](../../.env.example) is the **canonical machine list** you copy from.
 
 Related: [DEPLOY-CLEAN.md](DEPLOY-CLEAN.md) (the zero-to-live walkthrough that uses these), [BILLING.md](../BILLING.md), [PROVIDERS.md](../PROVIDERS.md), [RUNTIMES.md](../RUNTIMES.md).
 
@@ -38,7 +38,7 @@ Rules of the road:
 
 | Variable | Required? | What it does | How to obtain / generate |
 |----------|-----------|--------------|--------------------------|
-| `NEXT_PUBLIC_APP_URL` | **Prod** | Public base URL of the app — used for OAuth callbacks, emails, Stripe redirects. **Must be a non-localhost `https://` URL in production** or the boot gate fails. | Your domain, e.g. `https://app.sovereignml.com`. |
+| `NEXT_PUBLIC_APP_URL` | **Prod** | Public base URL of the app — used for OAuth callbacks, emails, Stripe redirects. **Must be a non-localhost `https://` URL in production** or the boot gate fails. | Your domain, e.g. `https://app.atlasagents.dev`. |
 | `PORT` | Optional | Port the Next.js server listens on. The reverse proxy and `cron-tick.sh` assume this. | Default `3000`. |
 | `HOSTNAME` | Optional | Interface the server binds to. pm2/systemd set `0.0.0.0`. | Default `127.0.0.1` (dev). |
 
@@ -98,7 +98,7 @@ Same client powers Google sign-in **and** per-user Google Drive backups (scope `
 | Variable | Required? | What it does | How to obtain / generate |
 |----------|-----------|--------------|--------------------------|
 | `RESEND_API_KEY` | Feature | API key for transactional email (password reset, verification, invites). Without it those flows no-op. | [resend.com](https://resend.com) → API Keys. |
-| `RESEND_FROM_EMAIL` | Feature | The `From:` address. Domain must be verified in Resend. | e.g. `noreply@sovereignml.com`. |
+| `RESEND_FROM_EMAIL` | Feature | The `From:` address. Domain must be verified in Resend. | e.g. `noreply@atlasagents.dev`. |
 
 ## 10. Notifications — Telegram bot
 
@@ -116,7 +116,7 @@ Live-chat widget + in-app support tickets. The two `NEXT_PUBLIC_` vars drive the
 
 | Variable | Required? | What it does | How to obtain / generate |
 |----------|-----------|--------------|--------------------------|
-| `NEXT_PUBLIC_CHATWOOT_BASE_URL` | Feature | Your Chatwoot base URL (no trailing slash). | e.g. `https://chat.sovereignml.com`. |
+| `NEXT_PUBLIC_CHATWOOT_BASE_URL` | Feature | Your Chatwoot base URL (no trailing slash). | e.g. `https://chat.atlasagents.dev`. |
 | `NEXT_PUBLIC_CHATWOOT_WEBSITE_TOKEN` | Feature | Website-channel token (public) that drives the chat bubble. | Chatwoot → Inboxes → Website widget. |
 | `CHATWOOT_HMAC_TOKEN` | Optional | Enables widget identity verification. | Chatwoot inbox settings. |
 | `CHATWOOT_API_ACCESS_TOKEN` | Feature | Agent/bot API access token (server only), used to create tickets. | Chatwoot → Profile → Access token. |
@@ -204,7 +204,7 @@ Ed25519 keypair used to SSH into provisioned VMs.
 | `CLOUDFLARE_API_TOKEN` | Feature | Automatic proxied `A` records for managed agent hostnames + custom-hostname management. | Cloudflare token with **Zone:DNS:Edit** + **Zone:SSL:Edit** (add SSL/Certificates:Edit for SaaS) on the base zone only. |
 | `CLOUDFLARE_ZONE_ID` | Feature | Zone id for managed DNS. | Cloudflare dashboard → your zone → Overview. |
 | `CLOUDFLARE_SAAS_ZONE_ID` | Feature | SaaS-enabled zone for white-label custom hostnames. Falls back to `CLOUDFLARE_ZONE_ID`. | Your Cloudflare-for-SaaS zone id. |
-| `CLOUDFLARE_BASE_DOMAIN` | Feature | Base domain agent subdomains hang off. | e.g. `sovereignml.com`. |
+| `CLOUDFLARE_BASE_DOMAIN` | Feature | Base domain agent subdomains hang off. | e.g. `atlasagents.dev`. |
 | `CLOUDFLARE_FALLBACK_IP` | Optional | Wildcard landing host IP (used by `scripts/cloudflare-bootstrap.ts`). | Your app server IP. |
 | `CLOUDFLARE_ORIGIN_CERT_PEM` | Optional | Origin CA cert (PEM) installed on VMs for end-to-end TLS (enables Cloudflare **Full (strict)**). | Cloudflare → SSL/TLS → Origin Server → Create Certificate. |
 | `CLOUDFLARE_ORIGIN_CERT_KEY` | Optional | Matching origin CA private key (PEM). | Same as above. |
@@ -262,7 +262,7 @@ Per-instance uptime monitors. `BASE_URL` + `API_KEY` enable read-only `/metrics`
 
 | Variable | Required? | What it does | How to obtain / generate |
 |----------|-----------|--------------|--------------------------|
-| `UPTIME_KUMA_BASE_URL` | Feature | Your Kuma URL (no trailing slash). | e.g. `https://uptime.sovereignml.com`. |
+| `UPTIME_KUMA_BASE_URL` | Feature | Your Kuma URL (no trailing slash). | e.g. `https://uptime.atlasagents.dev`. |
 | `UPTIME_KUMA_USERNAME` | Feature | Service account for Socket.io writes (create/edit/delete monitors). **Must not have 2FA.** | Kuma admin account. |
 | `UPTIME_KUMA_PASSWORD` | Feature | Password paired with the username. | Kuma. |
 | `UPTIME_KUMA_API_KEY` | Feature | HTTP Basic password for the `/metrics` scrape. | Kuma → Settings → API Keys. |

@@ -4,6 +4,7 @@ import { useRef } from "react";
 import { motion, useScroll, useTransform } from "framer-motion";
 import { easing } from "@/lib/motion";
 import { CountUp } from "@/components/marketing/motion/count-up";
+import { BRANDING } from "@/configs/branding"
 
 // {{TODO: replace with real, documented customer metrics when available.}}
 // Until then these are illustrative examples, labeled as such in the UI below.
@@ -62,7 +63,7 @@ export function CaseStudyCarousel() {
             Built for outcomes like these.
           </h2>
           <p className="text-text-secondary text-lg max-w-[460px] mx-auto">
-            Illustrative examples of what teams automate with SovereignML.
+            Illustrative examples of what teams automate with {BRANDING.name}.
           </p>
           <span className="mt-5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-border-muted bg-background-faint text-[10px] font-bold uppercase tracking-wider text-text-secondary">
             Illustrative

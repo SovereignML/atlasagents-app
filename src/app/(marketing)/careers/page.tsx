@@ -14,10 +14,10 @@ export const metadata: Metadata = {
 const values = [
   {
     title: "Agents do the busywork",
-    desc: "We run our own product. Support, ops, and monitoring are handled by SovereignML agents, so the team works on the hard problems.",
+    desc: `We run our own product. Support, ops, and monitoring are handled by ${BRANDING.name} agents, so the team works on the hard problems.`,
   },
   {
-    title: "Sovereignty by default",
+    title: "Independence by default",
     desc: "Private instances, isolated data, no provider lock-in. We build the way we'd want our own infrastructure run.",
   },
   {
@@ -67,7 +67,7 @@ export default function CareersPage() {
         </h2>
         <p className="text-[var(--text-secondary)] text-sm leading-relaxed max-w-xl mx-auto mb-6">
           We&apos;re a small team and hire deliberately. If you think you can
-          make SovereignML better, we want to hear from you anyway — tell us
+          make {BRANDING.name} better, we want to hear from you anyway — tell us
           what you&apos;d build.
         </p>
         <Button

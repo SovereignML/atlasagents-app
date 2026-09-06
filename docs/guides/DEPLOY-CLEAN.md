@@ -1,6 +1,6 @@
 # Clean-database deployment (for dummies)
 
-> Stand up a brand-new SovereignML control plane from a bare VPS and an empty Postgres to a working, HTTPS, agents-deploying platform — in order, copy-paste, nothing assumed. This is the **canonical clean-install walkthrough**; it supersedes the Docker flow that used to live in [DEPLOYMENT.md](../DEPLOYMENT.md).
+> Stand up a brand-new Atlas Agents control plane from a bare VPS and an empty Postgres to a working, HTTPS, agents-deploying platform — in order, copy-paste, nothing assumed. This is the **canonical clean-install walkthrough**; it supersedes the Docker flow that used to live in [DEPLOYMENT.md](../DEPLOYMENT.md).
 
 Related: [ENVIRONMENT.md](ENVIRONMENT.md) (what every variable means), [deploy/README.md](../../deploy/README.md) (terse runbook), [DEPLOYMENT.md](../DEPLOYMENT.md) (scheduled-jobs + Stripe reference).
 
