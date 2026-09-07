@@ -33,6 +33,67 @@ const LEGACY_REDIRECT_EXCLUDED = ["api", "tg", "botapi", "ingest"]
  * in the dashboard. Returns [] when the app origin can't be resolved from env
  * (local dev), and skips any host that is already the canonical one.
  */
+/**
+ * Marketing paths this app still *has* but should no longer *serve*.
+ *
+ * The marketing site was extracted into its own repo, but `[APP]`'s
+ * `(marketing)` route group and root `page.tsx` were left in place — so the
+ * dashboard host was still answering with the landing page and a duplicate copy
+ * of every marketing route. That is bad for users (app.<domain>/ shows a
+ * brochure instead of their dashboard) and bad for SEO (two hosts serving
+ * identical /pricing, /terms, /privacy).
+ *
+ * Every path below exists on the marketing site, verified route-for-route, so
+ * forwarding loses nothing. The route group is deliberately NOT deleted: it is
+ * the fallback if the marketing site is ever unavailable, and keeping it makes
+ * this reversible by removing one function call.
+ *
+ * `/` is special — on the dashboard host the root belongs to the product, so it
+ * goes to `/dashboard` (which the proxy middleware bounces to `/login` for
+ * anonymous visitors) rather than off-site.
+ *
+ * All temporary (307): these are a deployment-topology decision, not a
+ * permanent URL change, and a cached 301 would be painful to walk back.
+ */
+const MARKETING_PATHS = [
+  "/pricing",
+  "/comparison",
+  "/docs",
+  "/community",
+  "/careers",
+  "/changelog",
+  "/team",
+  "/privacy",
+  "/terms",
+  "/refund",
+  "/sla",
+]
+
+function marketingRedirects() {
+  const siteOrigin = (
+    process.env.NEXT_PUBLIC_SITE_URL ?? BRANDING.siteUrl
+  ).replace(/\/$/, "")
+
+  // Without a site to send people to, serving the built-in pages beats
+  // redirecting into the void — so this is a no-op when unset/malformed.
+  let siteHost = ""
+  try {
+    siteHost = new URL(siteOrigin).hostname.toLowerCase()
+  } catch {
+    return []
+  }
+  if (!siteHost) return []
+
+  return [
+    { source: "/", destination: "/dashboard", permanent: false },
+    ...MARKETING_PATHS.map((path) => ({
+      source: path,
+      destination: `${siteOrigin}${path}`,
+      permanent: false,
+    })),
+  ]
+}
+
 function legacyHostRedirects() {
   const raw =
     process.env.NEXT_PUBLIC_APP_URL ??
@@ -151,8 +212,11 @@ const nextConfig: NextConfig = {
     const apex = wwwToApexRedirect()
     return [
       { source: "/signup", destination: "/register", permanent: false },
+      // Host-scoped, so they must be evaluated BEFORE the host-agnostic
+      // marketing rules below — Next.js takes the first match.
       ...legacyHostRedirects(),
       ...(apex ? [apex] : []),
+      ...marketingRedirects(),
     ]
   },
   async rewrites() {
