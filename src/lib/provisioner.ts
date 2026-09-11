@@ -43,6 +43,7 @@ import {
   generateGatewayToken,
   renderEnvFile,
 } from "@/lib/runtimes/shared"
+import { ENV_KEY_CHANGED, buildEnvKeyUpsertScript } from "@/lib/runtimes/env-upsert"
 import { getRuntime, type RuntimeEngine, type RuntimeId } from "@/lib/runtimes"
 import { FREE_DEMO_TTL_MS } from "@/configs/plans"
 import { PROVISION_EVENT } from "@/lib/provision-events"
@@ -764,57 +765,7 @@ echo "=== seed: done ==="
 `
 }
 
-/**
- * Upsert ONE key in an on-box env file, in place, and report whether it actually
- * changed. Used to push a changed value into a sidecar's `.env` on reprovision
- * WITHOUT re-rendering the whole file: that file has since been mutated on the box
- * (the admin seed flips `ENABLE_SIGNUP` to false) and it carries a session-signing
- * secret generated per provision and never persisted platform-side. Rewriting it
- * from the template would re-open public registration and log out every existing
- * chat user. Mirrors the `sed`-or-append shape the seed script already uses.
- *
- * Prints `ENV_KEY_UNCHANGED` when the value already matches (so the caller can skip
- * a needless service restart) and `ENV_KEY_CHANGED` after a verified write. Every
- * mutating command is `|| exit 1` and the result is re-read before success is
- * claimed — the script does not run under `set -e`, so a bare `sed` failure would
- * otherwise be masked by the trailing echo and reported as success.
- */
-const ENV_KEY_CHANGED = "ENV_KEY_CHANGED"
-const ENV_KEY_UNCHANGED = "ENV_KEY_UNCHANGED"
 
-function buildEnvKeyUpsertScript(opts: {
-  envPath: string
-  key: string
-  value: string
-}): string {
-  // `/` is the sed delimiter and `&` means "the whole match" on the replacement
-  // side; a backslash escapes either. Model slugs contain `/`, so this is load-bearing.
-  const sedSafe = opts.value.replace(/[\\&/]/g, "\\$&")
-  const line = `${opts.key}=${opts.value}`
-  return `#!/bin/bash
-set -uo pipefail
-ENV_PATH=${bashSingleQuoteForScript(opts.envPath)}
-if [ ! -f "\${ENV_PATH}" ]; then
-  echo "env file \${ENV_PATH} not found" >&2
-  exit 1
-fi
-# -F: the value is a literal, not a pattern (slugs contain "." and "/").
-if grep -qxF ${bashSingleQuoteForScript(line)} "\${ENV_PATH}"; then
-  echo "${ENV_KEY_UNCHANGED}"
-  exit 0
-fi
-if grep -q '^${opts.key}=' "\${ENV_PATH}"; then
-  sed -i 's/^${opts.key}=.*/${opts.key}=${sedSafe}/' "\${ENV_PATH}" || exit 1
-else
-  echo ${bashSingleQuoteForScript(line)} >> "\${ENV_PATH}" || exit 1
-fi
-if ! grep -qxF ${bashSingleQuoteForScript(line)} "\${ENV_PATH}"; then
-  echo "failed to set ${opts.key} in \${ENV_PATH}" >&2
-  exit 1
-fi
-echo "${ENV_KEY_CHANGED}"
-`
-}
 
 /**
  * Verify the gateway's OpenAI-compatible API actually answers — not just `/health`. Sources
@@ -3789,11 +3740,13 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
       message: `${runtime.displayName} service restarted with new config and identity files.`,
     })
 
-    // Keep the chat UI's pre-selected model in step with the gateway's. The init
-    // script above re-pinned Hermes' `model.default`; without this the sidecar still
-    // offers the model from first provision, so a user who switched models silently
-    // keeps chatting to the old one. Only DEFAULT_MODELS is touched — see
-    // buildEnvKeyUpsertScript for why the file is not re-rendered wholesale.
+    // Keep the chat UI's upstream connection and pre-selected model in step with
+    // the gateway's. The init script above re-pinned Hermes' `model.default`;
+    // without this the sidecar still offers the model from first provision, so a
+    // user who switched models silently keeps chatting to the old one — and a
+    // sidecar left on a stale gateway token lists no models at all. Only the four
+    // keys below are touched — see buildEnvKeyUpsertScript for why the file is not
+    // re-rendered wholesale.
     //
     // reprovisionBotEnv is driven by eight routes (tools, skills, instructions,
     // model, agent-type, token, byos-key, backup-restore), and only some change the
@@ -3803,17 +3756,33 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
     //
     // Best-effort throughout: a stale default is a worse experience, not a broken
     // agent, so nothing here fails the surrounding reprovision.
-    if (webuiEnabled && runtime.sidecar && llmConfig.model.trim()) {
+    if (webuiEnabled && runtime.sidecar) {
       const sidecar = runtime.sidecar
+      // The upstream connection, not just the model. A warm-pool VM bakes its
+      // sidecar against a placeholder gateway token; claim re-renders the file
+      // with the real one, but a box claimed before that landed — or one whose
+      // sidecar never restarted to re-read it — is left pointing at the
+      // placeholder. Open WebUI then gets 401 from /v1/models, shows an EMPTY
+      // model list, and DEFAULT_MODELS has nothing to select: the user opens the
+      // chat and cannot send a message. Upserting only DEFAULT_MODELS could never
+      // repair that, so a broken bot stayed broken through every reprovision.
+      //
+      // These four are exactly the keys that can go stale and are safe to rewrite.
+      // WEBUI_SECRET_KEY is deliberately NOT among them (rotating it logs out every
+      // chat user) and neither is ENABLE_SIGNUP (the admin seed owns it).
+      const entries = [
+        { key: "OPENAI_API_BASE_URL", value: `http://127.0.0.1:${runtime.gatewayPort}/v1` },
+        { key: "OPENAI_API_KEY", value: gatewayToken },
+        { key: "ENABLE_PERSISTENT_CONFIG", value: "false" },
+        ...(llmConfig.model.trim()
+          ? [{ key: "DEFAULT_MODELS", value: llmConfig.model.trim() }]
+          : []),
+      ]
       const modelStep = await sshRunScriptLogged(
         target,
-        buildEnvKeyUpsertScript({
-          envPath: sidecar.envPath,
-          key: "DEFAULT_MODELS",
-          value: llmConfig.model,
-        }),
+        buildEnvKeyUpsertScript({ envPath: sidecar.envPath, entries }),
         "writing_config",
-        "reprovision:sidecar default model",
+        "reprovision:sidecar connection + default model",
         { timeoutMs: 30_000 },
       )
       await logSshStep(instance.id, modelStep)
@@ -3822,14 +3791,16 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
         await db.insert(instanceLogs).values({
           instanceId: instance.id,
           level: "warn",
-          message: `Could not update the chat UI's default model (exit ${modelStep.exitCode}); it may still offer the previous model until the next deploy.`,
+          message: `Could not update the chat UI's connection settings (exit ${modelStep.exitCode}); it may keep using the previous model or fail to list models until the next deploy.`,
         })
       } else if (modelStep.stdout.includes(ENV_KEY_CHANGED)) {
         await sshSystemctlRestart(target, sidecar.serviceName)
         await db.insert(instanceLogs).values({
           instanceId: instance.id,
           level: "info",
-          message: `Chat UI restarted with default model ${llmConfig.model}.`,
+          message: llmConfig.model.trim()
+            ? `Chat UI restarted with default model ${llmConfig.model}.`
+            : "Chat UI restarted with refreshed connection settings.",
         })
       }
     }
