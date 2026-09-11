@@ -34,23 +34,20 @@ const LEGACY_REDIRECT_EXCLUDED = ["api", "tg", "botapi", "ingest"]
  * (local dev), and skips any host that is already the canonical one.
  */
 /**
- * Marketing paths this app still *has* but should no longer *serve*.
+ * Marketing paths this app answers for but does not own.
  *
- * The marketing site was extracted into its own repo, but `[APP]`'s
- * `(marketing)` route group and root `page.tsx` were left in place — so the
- * dashboard host was still answering with the landing page and a duplicate copy
- * of every marketing route. That is bad for users (app.<domain>/ shows a
- * brochure instead of their dashboard) and bad for SEO (two hosts serving
- * identical /pricing, /terms, /privacy).
+ * The marketing site was extracted into its own repo; these routes forwarded
+ * to it from here while `[APP]` still carried a duplicate copy of every page.
+ * Those pages have since been deleted — the `(marketing)` route group, the root
+ * `page.tsx`, and the components only they rendered are gone, archived in
+ * `Landing-Old-Backup`. So these redirects are no longer a preference over
+ * local pages; they are the only thing standing between these paths and a 404.
  *
- * Every path below exists on the marketing site, verified route-for-route, so
- * forwarding loses nothing. The route group is deliberately NOT deleted: it is
- * the fallback if the marketing site is ever unavailable, and keeping it makes
- * this reversible by removing one function call.
- *
- * `/` is special — on the dashboard host the root belongs to the product, so it
- * goes to `/dashboard` (which the proxy middleware bounces to `/login` for
- * anonymous visitors) rather than off-site.
+ * Every path below exists on the marketing site, verified route-for-route at the
+ * time of the extraction, so forwarding loses nothing. In-app links still point
+ * at the bare paths (`/privacy` and `/terms` in the register form, `/refund`,
+ * `/docs` from support, `/community` from the banned page) and reach the site
+ * through here, so do not drop an entry without repointing its callers first.
  *
  * All temporary (307): these are a deployment-topology decision, not a
  * permanent URL change, and a cached 301 would be painful to walk back.
@@ -70,22 +67,29 @@ const MARKETING_PATHS = [
 ]
 
 function marketingRedirects() {
+  // `/` is not conditional on the marketing site resolving: on the dashboard
+  // host the root belongs to the product, and there is no longer a root
+  // `page.tsx` to fall back to. It stays internal — the proxy middleware
+  // bounces anonymous visitors from /dashboard to /login.
+  const root = { source: "/", destination: "/dashboard", permanent: false }
+
   const siteOrigin = (
     process.env.NEXT_PUBLIC_SITE_URL ?? BRANDING.siteUrl
   ).replace(/\/$/, "")
 
-  // Without a site to send people to, serving the built-in pages beats
-  // redirecting into the void — so this is a no-op when unset/malformed.
+  // A malformed NEXT_PUBLIC_SITE_URL leaves nowhere to forward to. These paths
+  // then 404 rather than redirect into the void; the pages that used to back
+  // them no longer exist, so there is nothing to serve instead.
   let siteHost = ""
   try {
     siteHost = new URL(siteOrigin).hostname.toLowerCase()
   } catch {
-    return []
+    return [root]
   }
-  if (!siteHost) return []
+  if (!siteHost) return [root]
 
   return [
-    { source: "/", destination: "/dashboard", permanent: false },
+    root,
     ...MARKETING_PATHS.map((path) => ({
       source: path,
       destination: `${siteOrigin}${path}`,
