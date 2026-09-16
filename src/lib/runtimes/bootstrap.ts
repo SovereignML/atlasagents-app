@@ -31,6 +31,10 @@ export type BootstrapFramingOpts = {
   gatewayPort: number
   cfOriginCertPem?: string
   cfOriginKeyPem?: string
+  /** Port sshd listens on; the firewall opens this rather than a hardcoded 22. */
+  sshPort?: number
+  /** False on BYOS — add allow-rules but never turn the firewall on. */
+  manageFirewall?: boolean
 }
 
 function shellEscape(value: string): string {
@@ -65,6 +69,17 @@ export function buildBootstrapFraming(
   opts: BootstrapFramingOpts,
   runtimeInstallSteps: string,
 ): string {
+  // Default 22 / manage-the-firewall preserves the managed-VPS behaviour these
+  // options were factored out of; BYOS passes the real port and `false`.
+  const sshPortLiteral = String(opts.sshPort ?? 22)
+  const manageFirewall = opts.manageFirewall !== false
+  const firewallEnableBlock = manageFirewall
+    ? "  yes | ufw enable || true"
+    : "  # Not enabling ufw: this server belongs to the customer. Turning a\n" +
+      "  # firewall ON here could cut off whatever else they run on it. The\n" +
+      "  # allow-rules above are still added so the agent is reachable when a\n" +
+      "  # firewall is already active."
+
   let cfBlock = ""
   if (opts.cfOriginCertPem && opts.cfOriginKeyPem) {
     const certB64 = Buffer.from(opts.cfOriginCertPem, "utf8").toString("base64")
@@ -119,8 +134,12 @@ echo "=== Bootstrap started at $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 
 step() { CURRENT_STEP="$1"; echo "=== STEP: $1 ===" ; }
 
-# P1 transient: mirror flakiness
-APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=120"
+# P1 transient: mirror flakiness.
+# DPkg::Lock::Timeout: a real server (rather than a fresh cloud image) usually
+# has unattended-upgrades running right after boot, holding
+# /var/lib/dpkg/lock-frontend for minutes. Without this every apt call fails
+# instantly with "could not get lock" instead of waiting its turn.
+APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=120 -o DPkg::Lock::Timeout=120"
 
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
@@ -173,12 +192,23 @@ mkdir -p ${shellEscape(opts.installDir)}
 chown -R ${shellEscape(opts.systemUser)}:${shellEscape(opts.systemUser)} ${shellEscape(opts.installDir)}
 
 step "swap"
-if [ ! -f /swapfile ]; then
+# Skip when the box already has swap of any kind (partition, zram, another
+# swapfile) — it only checked for /swapfile before, so a customer server with a
+# swap partition got a second, redundant 2G file, which on a small disk hurts.
+# swapon is best-effort: it fails on container hosts (LXC/OpenVZ) where swap
+# isn't ours to configure, and under \`set -e\` that aborted the whole bootstrap.
+EXISTING_SWAP="$(awk 'NR>1 {print $1}' /proc/swaps 2>/dev/null | head -1 || true)"
+if [ -z "\${EXISTING_SWAP}" ] && [ ! -f /swapfile ]; then
   fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
   chmod 600 /swapfile
-  mkswap /swapfile
-  swapon /swapfile
-  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  if mkswap /swapfile >/dev/null 2>&1 && swapon /swapfile 2>/dev/null; then
+    grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  else
+    echo "swap unavailable on this host (container?) — continuing without it"
+    rm -f /swapfile
+  fi
+else
+  echo "swap already present (\${EXISTING_SWAP:-/swapfile}) — leaving it alone"
 fi
 
 ${runtimeInstallSteps}
@@ -186,10 +216,15 @@ ${runtimeInstallSteps}
 step "caddy_cf_snippets"
 ${cfBlock}
 step "firewall"
-ufw allow 22/tcp || true
-ufw allow 80/tcp || true
-ufw allow 443/tcp || true
-yes | ufw enable || true
+# Open the port sshd is ACTUALLY on. This was hardcoded to 22, which on a BYOS
+# server listening elsewhere meant enabling a firewall that blocked SSH — we
+# lost the box mid-provision and so did its owner.
+if command -v ufw >/dev/null 2>&1; then
+  ufw allow ${sshPortLiteral}/tcp || true
+  ufw allow 80/tcp || true
+  ufw allow 443/tcp || true
+${firewallEnableBlock}
+fi
 
 echo "=== Bootstrap completed at $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 echo "done" > "$STATUS"

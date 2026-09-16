@@ -27,6 +27,7 @@ import type { SidecarSpec } from "@/lib/runtimes/types"
 import { toolServicesForIds } from "@/configs/agent-tools"
 import { decryptSecret } from "@/lib/crypto-secret"
 import { routeModel } from "@/lib/model-router"
+import { sshTargetForInstance } from "@/lib/ssh-target"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
 import type { BudgetTier } from "@/lib/agent-config"
 
@@ -55,7 +56,7 @@ export async function reconfigureInstanceIngress(
   instance: LoadedInstance,
   opts: ReconfigureIngressOpts,
 ): Promise<void> {
-  const target = { host: instance.ipAddress as string, instanceId: instance.id }
+  const target = sshTargetForInstance(instance)
   const runtime = getRuntime(instance.runtime)
   const { domain, proxied } = opts
 
@@ -155,7 +156,7 @@ async function refreshSidecarPublicUrl(
     })?.url ?? null
   if (!publicUrl) return
 
-  const target = { host: instance.ipAddress as string, instanceId: instance.id }
+  const target = sshTargetForInstance(instance)
   const envPath = bashSingleQuoteForScript(sidecar.envPath)
   const service = bashSingleQuoteForScript(sidecar.serviceName)
   // `|` as the sed delimiter — the value is a URL and contains slashes.

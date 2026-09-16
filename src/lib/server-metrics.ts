@@ -15,6 +15,7 @@
 
 import type { InferSelectModel } from "drizzle-orm"
 import { db, instances, serverMetricSamples, and, eq, isNotNull, lt, sql } from "@/db"
+import { sshTargetForInstance } from "@/lib/ssh-target"
 import { sshRunScript, type SshTarget } from "@/lib/ssh"
 import {
   PROBE_SCRIPT,
@@ -40,13 +41,7 @@ const PROBE_TIMEOUT_MS = 15_000
  * pinning against instances.sshHostFingerprint.
  */
 function targetFor(instance: Instance): SshTarget {
-  const host = instance.deploymentTarget === "byos" ? instance.byosHost ?? instance.ipAddress : instance.ipAddress
-  const target: SshTarget = { host: host!, instanceId: instance.id }
-  if (instance.deploymentTarget === "byos") {
-    target.port = instance.byosPort ?? 22
-    target.username = instance.byosUser ?? "root"
-  }
-  return target
+  return sshTargetForInstance(instance)
 }
 
 async function probe(instance: Instance): Promise<ServerMetricSnapshot> {

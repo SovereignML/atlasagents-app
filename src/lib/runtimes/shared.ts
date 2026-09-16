@@ -390,6 +390,8 @@ ${browserInstallStep()}`
         gatewayPort: args.gatewayPort,
         cfOriginCertPem: args.cfOriginCertPem,
         cfOriginKeyPem: args.cfOriginKeyPem,
+        sshPort: args.sshPort,
+        manageFirewall: args.manageFirewall,
       },
       installSteps,
     )
