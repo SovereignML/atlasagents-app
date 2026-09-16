@@ -451,7 +451,7 @@ async function handleByosDeploy(req: NextRequest) {
         interval: billingInterval,
       },
       success_url: `${BRANDING.appUrl}/dashboard/instances/${instance.id}`,
-      cancel_url: `${BRANDING.appUrl}/dashboard/byos/connect`,
+      cancel_url: `${BRANDING.appUrl}/dashboard/byos/deploy`,
     })
 
     return NextResponse.json({

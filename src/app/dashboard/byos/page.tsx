@@ -1,15 +1,8 @@
 import Link from "next/link"
 import { redirect } from "next/navigation"
-import {
-  Server,
-  Plus,
-  KeyRound,
-  Wallet,
-  Check,
-} from "lucide-react"
+import { Plus, Server } from "lucide-react"
 
 import { auth } from "@/auth"
-import { db, desc, instances } from "@/db"
 import { Button } from "@/components/ui/button"
 import {
   Empty,
@@ -19,75 +12,78 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
-import { whereUserInstancesVisible } from "@/lib/instance-queries"
+import { getUserTeam } from "@/lib/team"
 import { getEffectiveUserId } from "@/lib/effective-user"
+import { listServersForTeam, MAX_IDLE_SERVERS_PER_TEAM } from "@/lib/byos-server"
 import { BYOS_PLAN, formatUsd } from "@/configs/plans"
+import { ServerCard, type ServerCardData } from "./server-card"
 
 const PLAN_FEATURES = [
-  "100 AI credits included (managed mode)",
-  "Full monitoring & alerts",
+  "Connecting a server is free",
+  "Live specs and health monitoring",
   "Managed updates & backups",
+  "Bring your own LLM key, or use credits",
   "No vendor lock-in",
 ]
 
 export default async function ByosPage() {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
-  // Resolve through impersonation so an admin viewing-as a user sees their agents.
+  // Resolve through impersonation so an admin viewing-as a user sees their servers.
   const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
+  const team = await getUserTeam(effectiveUserId)
 
-  const rows = await db.query.instances.findMany({
-    where: whereUserInstancesVisible(effectiveUserId),
-    orderBy: desc(instances.createdAt),
-  })
+  const servers = team ? await listServersForTeam(team.teamId) : []
+  const idleUsed = servers.filter((s) => s.agentCount === 0).length
 
-  const items = rows.filter(
-    (i) => i.deploymentTarget === "byos" && i.status !== "deleted",
-  )
+  const cards: ServerCardData[] = servers.map((s) => ({
+    id: s.id,
+    label: s.label,
+    host: s.host,
+    port: s.port,
+    sshUser: s.sshUser,
+    status: s.status,
+    lastError: s.lastError,
+    lastCheckedAt: s.lastCheckedAt?.toISOString() ?? null,
+    hwCpuCores: s.hwCpuCores,
+    hwRamTotalMb: s.hwRamTotalMb,
+    hwDiskTotalGb: s.hwDiskTotalGb,
+    hwDiskUsedGb: s.hwDiskUsedGb,
+    hwOsName: s.hwOsName,
+    hwOsVersion: s.hwOsVersion,
+    hwKernel: s.hwKernel,
+    capacityAgents: s.capacityAgents,
+    agentCount: s.agentCount,
+  }))
 
   return (
     <PageContainer>
       <PageHeader
-        title="Bring Your Own Server"
-        description="Run managed agents on infrastructure you own. Isolated by default — your data never leaves your box."
+        title="Your servers"
+        description="Run managed agents on hardware you own. Connecting a server is free — you're only charged when you install an agent on one."
       />
 
-      <div className="grid grid-cols-1 gap-[18px] lg:grid-cols-[minmax(0,1fr)_320px] items-start">
-        {/* LEFT COLUMN */}
+      <div className="grid grid-cols-1 items-start gap-[18px] lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-[18px]">
-          {/* Connect-a-server intro card */}
-          <div className="rounded-2xl border border-border bg-card p-6">
-            <div className="flex items-start gap-4">
-              <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
-                <Server className="size-5" />
-              </div>
-              <div className="min-w-0 space-y-1">
-                <h2 className="text-base font-semibold text-foreground">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">
+              {servers.length === 0
+                ? "No servers connected yet."
+                : `${servers.length} connected · ${idleUsed}/${MAX_IDLE_SERVERS_PER_TEAM} without an agent`}
+            </p>
+            <Button
+              variant="gradient"
+              size="pill"
+              render={
+                <Link href="/dashboard/byos/connect">
+                  <Plus data-icon="inline-start" />
                   Connect a server
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  Paste our fleet SSH key into your box and we&apos;ll act as
-                  its management panel: deploy, monitor, restart, and configure
-                  your agent. No user SSH secret is ever stored.
-                </p>
-              </div>
-            </div>
-            <div className="mt-5 flex justify-center">
-              <Button
-                variant="gradient"
-                size="pill"
-                render={
-                  <Link href="/dashboard/byos/connect">
-                    <Plus data-icon="inline-start" />
-                    Connect a server
-                  </Link>
-                }
-              />
-            </div>
+                </Link>
+              }
+            />
           </div>
 
-          {/* Connected servers */}
-          {items.length === 0 ? (
+          {cards.length === 0 ? (
             <Empty>
               <EmptyHeader>
                 <EmptyMedia variant="icon">
@@ -95,178 +91,35 @@ export default async function ByosPage() {
                 </EmptyMedia>
                 <EmptyTitle>No connected servers yet</EmptyTitle>
                 <EmptyDescription>
-                  Connect a server you own and we&apos;ll act as its management
-                  panel: deploy, monitor, restart, and configure your agent.
+                  Add our SSH key to a server you own and we&apos;ll check it over and show you
+                  exactly what it can run. It costs nothing, and nothing is installed until you
+                  choose an agent.
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
           ) : (
-            <div className="overflow-hidden rounded-2xl border border-border bg-card">
-              <div className="flex items-center justify-between border-b border-border px-5 py-4">
-                <h2 className="text-base font-semibold text-foreground">
-                  Connected servers
-                </h2>
-                <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-muted-foreground">
-                  {items.length} {items.length === 1 ? "server" : "servers"}
-                </span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-sidebar">
-                      <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-                        Server
-                      </th>
-                      <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-                        Specs
-                      </th>
-                      <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-                        Agents
-                      </th>
-                      <th className="px-5 py-2.5 text-left font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-                        Status
-                      </th>
-                      <th className="px-5 py-2.5 text-right font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-                        <span className="sr-only">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {items.map((i) => {
-                      const host =
-                        i.byosHost ?? i.ipAddress ?? null
-                      const port =
-                        i.byosPort && i.byosPort !== 22 ? `:${i.byosPort}` : ""
-                      const addr = host
-                        ? `${i.byosUser ?? "root"}@${host}${port}`
-                        : null
-                      const specs =
-                        i.hwCpuCores != null || i.hwRamTotalMb != null
-                          ? [
-                              i.hwCpuCores != null ? `${i.hwCpuCores} vCPU` : null,
-                              i.hwRamTotalMb != null
-                                ? `${(i.hwRamTotalMb / 1024).toFixed(1)} GB`
-                                : null,
-                            ]
-                              .filter(Boolean)
-                              .join(" · ")
-                          : null
-                      // Prefer the real SSH reachability probe; fall back to the
-                      // provisioning status before the first probe has run.
-                      const isConnected =
-                        i.hwHealth != null
-                          ? i.hwHealth === "reachable"
-                          : i.status === "running"
-                      const isUnreachable = i.hwHealth === "unreachable"
-                      return (
-                        <tr
-                          key={i.id}
-                          className="group transition-colors hover:bg-muted/40"
-                        >
-                          <td className="px-5 py-4">
-                            <Link
-                              href={`/dashboard/instances/${i.id}`}
-                              className="flex items-center gap-3"
-                            >
-                              <span className="flex size-[34px] shrink-0 items-center justify-center rounded-lg border border-border bg-secondary text-muted-foreground">
-                                <Server className="size-4" />
-                              </span>
-                              <span className="min-w-0">
-                                <span className="block truncate font-medium text-foreground">
-                                  {i.name}
-                                </span>
-                                <span className="block truncate font-mono text-[11px] text-muted-foreground">
-                                  {addr ?? "—"}
-                                </span>
-                              </span>
-                            </Link>
-                          </td>
-                          <td className="px-5 py-4 font-mono text-[12px] text-muted-foreground">
-                            {specs ? (
-                              <span className="min-w-0">
-                                <span className="block text-foreground/80">{specs}</span>
-                                {i.hwOsName && (
-                                  <span className="block truncate text-[11px] text-muted-foreground">
-                                    {i.hwOsName}
-                                  </span>
-                                )}
-                              </span>
-                            ) : (
-                              "—"
-                            )}
-                          </td>
-                          <td className="px-5 py-4 font-mono text-[12px] text-muted-foreground">
-                            —
-                          </td>
-                          <td className="px-5 py-4">
-                            {isConnected ? (
-                              <span className="inline-flex items-center gap-1.5 text-[12px] text-foreground/80">
-                                <span className="relative flex size-2">
-                                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400/70" />
-                                  <span className="relative inline-flex size-2 rounded-full bg-emerald-400" />
-                                </span>
-                                connected
-                              </span>
-                            ) : isUnreachable ? (
-                              <span className="inline-flex items-center gap-1.5 text-[12px] text-red-500">
-                                <span className="inline-flex size-2 rounded-full bg-red-500" />
-                                unreachable
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">
-                                <span className="inline-flex size-2 rounded-full bg-muted-foreground/50" />
-                                {i.status.replace(/_/g, " ")}
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-5 py-4 text-right">
-                            <span className="inline-flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
-                              {i.byosLlmMode === "own_key" ? (
-                                <>
-                                  <KeyRound className="size-3.5" /> own key
-                                </>
-                              ) : (
-                                <>
-                                  <Wallet className="size-3.5" /> credits
-                                </>
-                              )}
-                            </span>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
+            <div className="space-y-[18px]">
+              {cards.map((s) => (
+                <ServerCard key={s.id} server={s} />
+              ))}
             </div>
           )}
         </div>
 
-        {/* RIGHT RAIL — BYOS plan */}
         <aside className="rounded-2xl border border-border bg-card p-6">
-          <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-            BYOS plan
+          <p className="font-mono text-[11px] uppercase tracking-[0.1em] text-muted-foreground">
+            Bring your own server
           </p>
-          <div className="mt-2 flex items-end gap-1.5">
-            <span className="font-mono text-4xl font-semibold leading-none text-primary">
-              {formatUsd(BYOS_PLAN.displayPriceMonthly)}
-            </span>
-            <span className="pb-0.5 text-sm text-muted-foreground">/mo</span>
-          </div>
-          <p className="mt-3 text-sm text-muted-foreground">
-            A flat monthly fee per connected server. We manage the agent; you
-            keep the hardware and the data. Managed-AI servers start with 100
-            credits, then top up anytime.
+          <p className="mt-2 text-3xl font-semibold text-foreground">
+            {formatUsd(BYOS_PLAN.displayPriceMonthly)}
+            <span className="ml-1 text-sm font-normal text-muted-foreground">/mo per agent</span>
           </p>
-          <ul className="mt-5 space-y-3">
-            {PLAN_FEATURES.map((feature) => (
-              <li
-                key={feature}
-                className="flex items-start gap-2.5 text-sm text-foreground/90"
-              >
-                <Check className="mt-0.5 size-4 shrink-0 text-primary" />
-                {feature}
-              </li>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Billed only once an agent is installed. Connected servers with no agent cost nothing.
+          </p>
+          <ul className="mt-5 space-y-2 border-t border-border pt-5 text-sm text-muted-foreground">
+            {PLAN_FEATURES.map((f) => (
+              <li key={f}>{f}</li>
             ))}
           </ul>
         </aside>

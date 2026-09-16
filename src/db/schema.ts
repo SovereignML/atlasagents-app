@@ -477,6 +477,13 @@ export const instances = pgTable(
     // our SSH_FLEET_PUBLIC_KEY into its root authorized_keys; we connect with
     // the fleet private key (same path as the Linode VPS flow, minus VM
     // creation). No user SSH secret is stored.
+    //
+    // The server this agent runs on. Agents are installed ONTO an already-
+    // connected ByosServer, so this is the connection's source of truth; the
+    // byosHost/byosPort/byosUser columns below are denormalized copies kept in
+    // sync from the server row so existing read paths (and the SSH target
+    // helper) keep working unchanged.
+    byosServerId: text().references(() => byosServers.id, { onDelete: "set null" }),
     byosHost: text(),
     byosPort: integer().default(22),
     byosUser: text().default("root"),
@@ -601,6 +608,101 @@ export const instanceAccess = pgTable(
     uniqueIndex("InstanceAccess_instanceId_userId_key").on(t.instanceId, t.userId),
     index("InstanceAccess_instanceId_idx").on(t.instanceId),
     index("InstanceAccess_userId_idx").on(t.userId),
+  ],
+)
+
+// ──────────────────────────────────────────────────────────────────────
+// Bring Your Own Server — the customer's machine as a first-class object.
+//
+// A BYOS server used to BE an Instance row: byosHost/byosPort/byosUser were
+// columns on it, so "a server" and "an agent" were the same thing and neither
+// could exist without the other. That forced the customer to pay before we had
+// ever touched the box — and we only discovered it was incompatible afterwards.
+//
+// Now: connecting a server is free and creates one of these rows. We SSH in,
+// verify access, read the real hardware, and show it. Agents reference the
+// server (instances.byosServerId) and are what actually costs money. One server
+// is designed to hold several agents; v1 enforces one, v2 lifts that.
+//
+// No customer SSH secret is ever stored — we authenticate with the platform
+// fleet key, which they install themselves.
+// ──────────────────────────────────────────────────────────────────────
+export const byosServers = pgTable(
+  "ByosServer",
+  {
+    id: cuid().primaryKey(),
+    teamId: text()
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    // Who connected it. Kept alongside teamId for attribution; ownership and
+    // access control are team-scoped, matching instances.
+    userId: text()
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** User-facing name; defaults to the host when they don't supply one. */
+    label: text().notNull(),
+
+    // --- Connection ---
+    host: text().notNull(),
+    port: integer().default(22).notNull(),
+    sshUser: text().default("root").notNull(),
+    /**
+     * Whether privileged commands need `sudo -n` on this box. Resolved live at
+     * connect time (id -u, then sudo -n true) and PERSISTED — it used to be
+     * computed inline during provisioning and thrown away, so every later
+     * operation on a non-root server ran unprivileged and failed.
+     */
+    sshElevate: boolean().default(false).notNull(),
+    /** TOFU pin, same contract as instances.sshHostFingerprint. */
+    sshHostFingerprint: text(),
+
+    // --- Reachability ---
+    /** "connecting" | "reachable" | "unreachable" */
+    status: text().default("connecting").notNull(),
+    lastCheckedAt: timestamp({ mode: "date", withTimezone: false }),
+    lastError: text(),
+
+    // --- Platform identity (drives artifact selection + compatibility) ---
+    /** /etc/os-release ID, e.g. "ubuntu" | "debian". */
+    osId: text(),
+    /** /etc/os-release VERSION_CODENAME, e.g. "noble". */
+    osCodename: text(),
+    /** uname -m, e.g. "x86_64". Anything else is refused. */
+    arch: text(),
+
+    // --- Measured hardware. Mirrors the instances.hw* block deliberately:
+    // same probe, same parser, same semantics (specs are NOT cleared on a
+    // failed probe, so last-known values stay visible).
+    hwCpuCores: integer(),
+    hwCpuLoad1: doublePrecision(),
+    hwRamTotalMb: integer(),
+    hwRamUsedMb: integer(),
+    hwDiskTotalGb: integer(),
+    hwDiskUsedGb: integer(),
+    hwOsName: text(),
+    hwOsVersion: text(),
+    hwKernel: text(),
+    hwUptimeSec: integer(),
+
+    /**
+     * How many agents this box is estimated to hold, from the measured specs
+     * and the per-runtime footprints in src/configs/agent-footprint.ts.
+     * Advisory — it drives the "fits ~N more" line, not a hard limit.
+     */
+    capacityAgents: integer().default(0).notNull(),
+
+    createdAt: now(),
+    updatedAt: timestamp({ mode: "date", withTimezone: false })
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    // One row per (team, host, port) — reconnecting the same box updates it
+    // rather than silently accumulating duplicates.
+    uniqueIndex("ByosServer_teamId_host_port_key").on(t.teamId, t.host, t.port),
+    index("ByosServer_teamId_idx").on(t.teamId),
+    index("ByosServer_status_idx").on(t.status),
   ],
 )
 
@@ -1917,6 +2019,10 @@ export const instancesRelations = relations(instances, ({ one, many }) => ({
     fields: [instances.botHostId],
     references: [botHosts.id],
   }),
+  byosServer: one(byosServers, {
+    fields: [instances.byosServerId],
+    references: [byosServers.id],
+  }),
   provider: one(providers, {
     fields: [instances.providerId],
     references: [providers.id],
@@ -1928,6 +2034,14 @@ export const instancesRelations = relations(instances, ({ one, many }) => ({
 }))
 
 export const botHostsRelations = relations(botHosts, ({ many }) => ({
+  instances: many(instances),
+}))
+
+export const byosServersRelations = relations(byosServers, ({ one, many }) => ({
+  team: one(teams, { fields: [byosServers.teamId], references: [teams.id] }),
+  user: one(users, { fields: [byosServers.userId], references: [users.id] }),
+  // Designed as many from day one: one server is meant to hold several agents.
+  // v1 enforces a single agent at the install endpoint, not in the schema.
   instances: many(instances),
 }))
 

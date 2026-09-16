@@ -23,6 +23,18 @@ export type SshTarget = {
    * hosts connect as root and leave this unset.
    */
   elevate?: boolean
+  /**
+   * Expected `sha256:<hash>` host key, for targets pinned somewhere other than
+   * `instances` — BYOS servers, which are verified before any agent exists.
+   * Mismatch aborts the connection. Ignored when `instanceId` is set (that path
+   * pins against the instance row instead).
+   */
+  expectedHostFingerprint?: string
+  /**
+   * Called with the observed `sha256:<hash>` on connect, so a first contact can
+   * record a pin for later connects to verify against.
+   */
+  onHostFingerprint?: (fingerprint: string) => void
 }
 
 function loadPrivateKey(): string {
@@ -54,17 +66,37 @@ async function connect(target: SshTarget): Promise<NodeSSH> {
   if (target.instanceId) {
     return connectAndPin(target, target.instanceId)
   }
-  // Legacy path — no instance to pin against (shared-host bootstrap).
+  // Not an instance. BYOS *servers* are pinned too — on byosServers, before any
+  // agent exists — so honour an explicitly supplied pin and report what we saw
+  // so a first connect can record one. Neither set ⇒ the legacy unpinned path
+  // (shared-host bootstrap, which has no row to pin against yet).
   const ssh = new NodeSSH()
+  let observed: string | null = null
   await ssh.connect({
     host: target.host,
     port: target.port ?? 22,
     username: target.username ?? "root",
     privateKey: loadPrivateKey(),
+    hostHash: "sha256",
+    hostVerifier: (hash: string) => {
+      observed = `sha256:${hash}`
+      return true
+    },
     readyTimeout: 20_000,
     keepaliveInterval: 10_000,
     keepaliveCountMax: 3,
   })
+  if (observed) {
+    if (target.expectedHostFingerprint && target.expectedHostFingerprint !== observed) {
+      ssh.dispose()
+      throw new Error(
+        `SSH host fingerprint mismatch for ${target.host}: expected ` +
+          `${target.expectedHostFingerprint}, got ${observed}. The server's host key ` +
+          `changed — reinstalled, or someone is intercepting the connection.`,
+      )
+    }
+    target.onHostFingerprint?.(observed)
+  }
   return ssh
 }
 

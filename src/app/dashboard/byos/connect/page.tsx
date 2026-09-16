@@ -3,9 +3,13 @@ import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
 import { normalizePem } from "@/lib/ssh"
-import { BYOS_PLAN, formatUsd } from "@/configs/plans"
-import { ByosConnectForm } from "./connect-form"
+import { ConnectServerForm } from "./connect-server-form"
 
+/**
+ * Connect a server you already own — free, and separate from installing an
+ * agent on it. This page only establishes access and reads the machine; the
+ * agent (and the charge) comes afterwards from the server's card.
+ */
 export default async function ByosConnectPage() {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
@@ -18,14 +22,10 @@ export default async function ByosConnectPage() {
   return (
     <PageContainer>
       <PageHeader
-        title="Connect your server"
-        description={`Bring your own server. We install, run, and manage the OpenClaw agent on it for a flat ${formatUsd(BYOS_PLAN.displayPriceMonthly)}/mo per server.`}
+        title="Connect a server"
+        description="Point us at a server you own. We'll check it and show you what it can run — free, and nothing is installed until you add an agent."
       />
-      <ByosConnectForm
-        fleetPublicKey={fleetPublicKey}
-        priceMonthly={BYOS_PLAN.displayPriceMonthly}
-        priceYearly={BYOS_PLAN.displayPriceYearly}
-      />
+      <ConnectServerForm fleetPublicKey={fleetPublicKey} />
     </PageContainer>
   )
 }

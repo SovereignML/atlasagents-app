@@ -16,6 +16,7 @@
 import type { InferSelectModel } from "drizzle-orm"
 import { db, instances, serverMetricSamples, and, eq, isNotNull, lt, sql } from "@/db"
 import { sshTargetForInstance } from "@/lib/ssh-target"
+import { refreshServer as refreshServerSnapshot } from "@/lib/byos-server"
 import { sshRunScript, type SshTarget } from "@/lib/ssh"
 import {
   PROBE_SCRIPT,
@@ -127,6 +128,27 @@ export async function collectServerMetrics(): Promise<ServerMetricsReport> {
         )
       }
     }
+  }
+
+  // Agentless BYOS servers are probed too. Connecting a server is free and the
+  // dashboard shows its live specs and health, so the snapshot has to keep
+  // being refreshed even before an agent is installed on it. They carry no
+  // instanceId, so they contribute no history samples — just a fresh snapshot.
+  try {
+    const servers = await db.query.byosServers.findMany()
+    for (const server of servers) {
+      report.scanned++
+      try {
+        await refreshServerSnapshot(server.id)
+        report.matched++
+      } catch (err) {
+        report.errors.push(
+          `server ${server.id}: ${err instanceof Error ? err.message : String(err)}`,
+        )
+      }
+    }
+  } catch (err) {
+    report.errors.push(`byos servers: ${err instanceof Error ? err.message : String(err)}`)
   }
 
   // Append history, then prune past the retention window. Best-effort: a failure
