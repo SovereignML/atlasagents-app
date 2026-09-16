@@ -37,7 +37,13 @@ import { getTenantOpenRouterKey } from "@/lib/tenant"
 import { reconcilePendingCustomHostnames } from "@/lib/tenant-branding"
 
 const ORPHAN_GRACE_MS = 15 * 60 * 1000 // 15 minutes — gives in-flight creates room to commit
-const PROVISIONING_TTL_MS = 20 * 60 * 1000 // 20 minutes
+/**
+ * How long a row may sit in `provisioning` before we treat it as dead. Pass 4
+ * below reclaims anything older to `failed_provisioning`. Exported because the
+ * retry endpoint uses the same threshold to decide a stalled deploy is safe to
+ * restart — the two must not disagree.
+ */
+export const PROVISIONING_TTL_MS = 20 * 60 * 1000 // 20 minutes
 // LEGACY WIRE FORMAT — deliberately NOT renamed in the Atlas Agents
 // rebrand. Every live DigitalOcean/Linode VM already carries this tag and the
 // orphan sweep below matches on it; renaming orphans the whole fleet.

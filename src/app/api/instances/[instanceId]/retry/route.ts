@@ -5,6 +5,8 @@ import { db, instances, instanceLogs, eq } from "@/db"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { canOperateInstance } from "@/lib/instance-access"
 import { retryProvisionBot } from "@/lib/provisioner"
+import { PROVISIONING_TTL_MS } from "@/lib/reconciler"
+import { decideRetryEligibility } from "@/lib/retry-eligibility"
 
 // Retry a failed deployment by recreating from scratch: any partial provider
 // VM + managed DNS record is torn down, provisioning state is cleared, and a
@@ -33,17 +35,25 @@ export async function POST(
   if (!isAdmin && !(await canOperateInstance(effectiveUserId, instance.id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
-  if (instance.status !== "failed_provisioning") {
-    return NextResponse.json(
-      { error: `Cannot retry instance in ${instance.status} state` },
-      { status: 409 }
-    )
+  // A clean failure is retryable, and so is a deploy that STALLED — see
+  // decideRetryEligibility for why the reconciler's TTL is the right threshold.
+  const decision = decideRetryEligibility({
+    status: instance.status,
+    lastTransitionAt: instance.lastTransitionAt,
+    createdAt: instance.createdAt,
+    ttlMs: PROVISIONING_TTL_MS,
+  })
+  if (!decision.ok) {
+    return NextResponse.json({ error: decision.reason }, { status: 409 })
   }
+  const isStalled = decision.stalled
 
   await db.insert(instanceLogs).values({
     instanceId,
     level: "info",
-    message: `Retrying deployment (recreate from scratch), requested by ${isAdmin ? "admin" : "user"}.`,
+    message:
+      `Retrying deployment (recreate from scratch), requested by ${isAdmin ? "admin" : "user"}` +
+      `${isStalled ? " after the previous attempt stalled" : ""}.`,
   })
 
   // Fire-and-forget — provisioning runs in the background and the client polls

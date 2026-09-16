@@ -11,8 +11,9 @@
 #   crontab -e
 #   * * * * * /path/to/repo/scripts/cron-tick.sh >> /var/log/redesigned-giggle/cron.log 2>&1
 #
-# Daily/nightly jobs (backups, prunes, reconcile) are NOT included here — wire
-# those as separate, less-frequent crontab lines.
+# Nightly jobs (backups, prunes) are NOT included here — wire those as separate
+# crontab lines. Jobs that need to be periodic but not every minute are gated on
+# the current minute via tick_every below, so this stays a single crontab entry.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -44,9 +45,28 @@ tick() {
   echo "[cron-tick] $(date -u +%FT%TZ) POST $path -> $code"
 }
 
+# Run $2... only on minutes divisible by $1. `10#` forces base-10 so a leading
+# zero (08, 09) isn't parsed as octal.
+MINUTE=$((10#$(date -u +%M)))
+tick_every() {
+  local every="$1"; shift
+  if (( MINUTE % every == 0 )); then
+    tick "$@"
+  fi
+}
+
 # Frequent endpoints (run every minute). Add more lines as needed.
 tick /api/internal/uptime-sync  UPTIME_SYNC_CRON_TOKEN
 tick /api/internal/metrics-collect  METRICS_COLLECT_CRON_TOKEN
 tick /api/internal/alerts-eval  ALERTS_EVAL_CRON_TOKEN
 tick /api/billing/usage-sync    USAGE_SYNC_CRON_TOKEN
 tick /api/internal/demo-reap    DEMO_REAP_CRON_TOKEN
+
+# Periodic, not per-minute.
+#
+# reconcile reclaims deployments stranded in `provisioning` past
+# PROVISIONING_TTL_MS (20 min, src/lib/reconciler.ts) into failed_provisioning,
+# which is what makes them retryable. Running it only nightly meant a deploy
+# killed by an app restart stayed unrecoverable for up to 24 hours. It calls
+# provider APIs, so it is heavier than the per-minute jobs — every 10 minutes.
+tick_every 10 /api/admin/reconcile  RECONCILE_CRON_TOKEN

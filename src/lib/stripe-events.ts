@@ -14,6 +14,7 @@ import {
 } from "@/db"
 import { stripe } from "@/lib/stripe"
 import { provisionBot } from "@/lib/provisioner"
+import { ensureProvisioningFailed } from "@/lib/instance-state"
 import { fundWallet } from "@/lib/openrouter-billing"
 import { clawBackFunds } from "@/lib/billing"
 import { describeVmError } from "@/lib/vm-provider"
@@ -99,6 +100,14 @@ export async function handleCheckoutSessionCompleted(
       .where(eq(instances.id, instanceId))
   }
 
+  // Provisioning failure must NOT be silent. This used to catch, log to stderr
+  // and carry on — so the row could sit in `provisioning` forever while the
+  // instance log below cheerfully claimed "Status: running." The subscription
+  // upsert still runs either way (the customer HAS paid and IS subscribed;
+  // that is independent of whether the box came up), but the outcome is now
+  // recorded on the instance so the dashboard, the retry endpoint and the
+  // reconciler all see the truth.
+  let provisionError: string | null = null
   try {
     const fresh = await db.query.instances.findFirst({
       where: eq(instances.id, instanceId),
@@ -107,9 +116,12 @@ export async function handleCheckoutSessionCompleted(
       await provisionBot(fresh)
     }
   } catch (err) {
-    console.error(
-      `[stripe] provisionBot failed for ${instanceId}: ${await describeVmError(err)}`,
-    )
+    provisionError = await describeVmError(err)
+    console.error(`[stripe] provisionBot failed for ${instanceId}: ${provisionError}`)
+    // rollbackProvisioning already marks most failures, but throws that happen
+    // before a target provisioner runs (lock contention, a bad row) skip it.
+    // This is idempotent and no-ops when the status is already terminal.
+    await ensureProvisioningFailed(instanceId, provisionError)
   }
 
   // Atomic upsert keyed on the existing unique index Subscription_instanceId_key.
@@ -137,8 +149,11 @@ export async function handleCheckoutSessionCompleted(
 
   await db.insert(instanceLogs).values({
     instanceId,
-    level: "info",
-    message: "Deployment provisioned via Stripe checkout. Status: running.",
+    level: provisionError ? "error" : "info",
+    message: provisionError
+      ? `Payment succeeded, but provisioning failed: ${provisionError}. ` +
+        `Your subscription is active — retry the deployment from the agent page.`
+      : "Deployment provisioned via Stripe checkout. Status: running.",
   })
 
   // Fire-and-forget analytics; no-op when PostHog isn't configured.

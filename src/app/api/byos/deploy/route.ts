@@ -161,6 +161,25 @@ async function handleByosDeploy(req: NextRequest) {
     )
   }
 
+  // ── Payment gate — BEFORE any DB write ────────────────────────────
+  // BYOS is paid-only (no free tier), so a deploy that can't reach Stripe can
+  // never complete. This check used to live at the very bottom of the route,
+  // *after* the instance INSERT — so every attempt in a Stripe-less
+  // environment stranded a `pending` row. countTeamAgents() counts anything
+  // not "deleted" against the team's agent cap, so a user who retried a few
+  // times stopped getting the 503 and started getting "Agent limit reached"
+  // instead. Fail here, before we touch the database.
+  if (!isStripeConfigured() && !isDevBypassAllowed()) {
+    console.error("[byos/deploy] payments unavailable; refusing before any DB write")
+    return NextResponse.json(
+      {
+        error:
+          "Payments are temporarily unavailable, so we can't connect your server yet. You have not been charged.",
+      },
+      { status: 503 },
+    )
+  }
+
   // ── Resolve plan ──────────────────────────────────────────────────
   const planConfig = findPlanBySlug("byos")
   if (!planConfig) {
@@ -441,7 +460,9 @@ async function handleByosDeploy(req: NextRequest) {
     })
   }
 
-  // BYOS requires Stripe in production — never SSH-provision a server for free.
+  // Defence in depth: the payment gate above already rejected this case before
+  // the INSERT, so reaching here means Stripe config changed mid-request. Keep
+  // the guard — never SSH-provision a customer's server for free.
   if (!isDevBypassAllowed()) {
     return NextResponse.json(STRIPE_NOT_CONFIGURED, { status: 503 })
   }
