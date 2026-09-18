@@ -115,10 +115,14 @@ const DEFAULT_POOL_PLAN = process.env.POOL_PLAN_CODE ?? "s-2vcpu-4gb"
 const DEFAULT_POOL_REGION = process.env.POOL_REGION_CODE ?? "fra1"
 
 /**
- * Starting policy (see plan): 3 Hermes + 2 OpenClaw ready in the primary
- * region. A claim fires an immediate replacement, so after one claim of each
- * runtime the transient floor is 2 Hermes + 1 OpenClaw until the replacements
- * reach `ready`. Sizes are env-overridable.
+ * Policy: 2 Hermes + 1 OpenClaw ready in the primary region (was 3 + 2). A
+ * claim fires an immediate replacement, so after one claim of each runtime the
+ * transient floor is 1 Hermes + 0 OpenClaw until the replacements reach
+ * `ready` — an OpenClaw deploy arriving during that window takes the cold path.
+ * That is the accepted trade for holding fewer idle VMs. Sizes are
+ * env-overridable via POOL_SIZE_HERMES / POOL_SIZE_OPENCLAW, and a size of 0
+ * disables that target entirely (it is then skipped by both the create loop and
+ * the reap's active-key set).
  */
 export function getPoolTargets(): PoolTarget[] {
   return [
@@ -128,7 +132,7 @@ export function getPoolTargets(): PoolTarget[] {
       providerSlug: DEFAULT_POOL_PROVIDER,
       planCode: DEFAULT_POOL_PLAN,
       regionCode: DEFAULT_POOL_REGION,
-      size: Number(process.env.POOL_SIZE_HERMES ?? 3),
+      size: Number(process.env.POOL_SIZE_HERMES ?? 2),
     },
     {
       runtime: "openclaw",
@@ -136,7 +140,7 @@ export function getPoolTargets(): PoolTarget[] {
       providerSlug: DEFAULT_POOL_PROVIDER,
       planCode: DEFAULT_POOL_PLAN,
       regionCode: DEFAULT_POOL_REGION,
-      size: Number(process.env.POOL_SIZE_OPENCLAW ?? 2),
+      size: Number(process.env.POOL_SIZE_OPENCLAW ?? 1),
     },
   ]
 }

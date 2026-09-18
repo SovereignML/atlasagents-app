@@ -295,8 +295,8 @@ Pre-booted, pre-URL'd VMs kept ready so a deploy can **claim** one and skip cold
 | Variable | Required? | What it does | How to obtain / generate |
 |----------|-----------|--------------|--------------------------|
 | `POOL_ENABLED` | Optional | Set `false` to disable the pool entirely; blank = auto-on when creds present. | Leave blank, or `false`. |
-| `POOL_SIZE_HERMES` | Optional | Target ready Hermes VMs. | Default `3`. |
-| `POOL_SIZE_OPENCLAW` | Optional | Target ready OpenClaw VMs. | Default `2`. |
+| `POOL_SIZE_HERMES` | Optional | Target ready Hermes VMs. | Default `2`. |
+| `POOL_SIZE_OPENCLAW` | Optional | Target ready OpenClaw VMs. `0` disables the OpenClaw pool. | Default `1`. |
 | `POOL_REFILL_INTERVAL_MS` | Optional | In-process refill cadence (ms). | Default `60000`. |
 | `POOL_PROVIDER_SLUG` | Optional | Provider the pool warms — **must match where deploys route** or claims miss. | Align to your primary provider (e.g. `digitalocean`). |
 | `POOL_PLAN_CODE` | Optional | Provider plan code the pool warms. | Must match the deploy plan/region. |
