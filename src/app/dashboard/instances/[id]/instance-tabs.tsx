@@ -76,6 +76,10 @@ import { ToolsTab } from "./instance-tools-tab"
 import { SkillsTab } from "./instance-skills-tab"
 import { FilesTab } from "./instance-files-browser"
 import { BRANDING } from "@/configs/branding"
+// Was a hand-maintained copy of this list living in this file, which drifted
+// the moment the real catalog changed — it still offered the retired
+// "Content Agent". Import the source of truth instead.
+import { AGENT_CATEGORIES, categoryDisplayName } from "@/configs/agent-categories"
 
 type InstanceLite = {
   id: string
@@ -123,17 +127,6 @@ type InstanceLite = {
   hwCheckedAt: string | null
   hwError: string | null
 }
-
-const AGENT_CATEGORIES = [
-  { slug: "automation", name: "Automation Agent" },
-  { slug: "devops", name: "DevOps Agent" },
-  { slug: "support", name: "Support Agent" },
-  { slug: "research", name: "Research Agent" },
-  { slug: "content", name: "Content Agent" },
-  { slug: "sales", name: "Sales Agent" },
-  { slug: "social", name: "Social Media Manager" },
-  { slug: "custom", name: "Custom Agent" },
-] as const
 
 type LogLite = { id: string; level: string; message: string; createdAt: string }
 
@@ -1974,7 +1967,7 @@ function AgentTypeCard({ instance }: { instance: InstanceLite }) {
           <SelectGroup>
             {AGENT_CATEGORIES.map((cat) => (
               <SelectItem key={cat.slug} value={cat.slug}>
-                {cat.name}
+                {categoryDisplayName(cat.slug, instance.runtime)}
               </SelectItem>
             ))}
           </SelectGroup>

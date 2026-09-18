@@ -57,6 +57,7 @@ import { routeDeployment, logRoutingDecision, type Candidate } from "@/lib/vps-r
 import { MAX_FAILOVER_ATTEMPTS } from "@/configs/routing"
 import { createAgentSubdomain, deleteAgentSubdomain } from "@/lib/agent-dns"
 import { deleteDnsRecord, getCloudflareTokenForTeam } from "@/lib/cloudflare"
+import { sshTargetForInstance } from "@/lib/ssh-target"
 import { generateMockIp } from "@/lib/instance"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
 import { notify } from "@/lib/notifications/dispatch"
@@ -89,6 +90,7 @@ import {
 } from "@/configs/agent-tools"
 import type { ToolService, ToolServiceRoute } from "@/lib/runtimes/types"
 import { claimWarmVm, isPoolEnabled } from "@/lib/warm-pool"
+import { platformOwnsHostVm } from "@/lib/byos-install"
 
 type Instance = InferSelectModel<typeof instances>
 
@@ -554,6 +556,18 @@ MAX_CD_RETRIES=2
 
 # --- Phase B: Caddy + systemd ---
 echo "=== provision: caddyfile_write ==="
+# We replace the Caddyfile wholesale. On a BYOS box that file may be the
+# customer's, serving sites that have nothing to do with us, so keep a
+# timestamped copy before clobbering it — recovering their config should not
+# require a restore from backup. Only the first overwrite makes a .atlas-orig
+# copy; later reprovisions roll a dated one so we never lose the true original.
+if [ -s /etc/caddy/Caddyfile ]; then
+  if [ ! -f /etc/caddy/Caddyfile.atlas-orig ]; then
+    cp -a /etc/caddy/Caddyfile /etc/caddy/Caddyfile.atlas-orig || true
+  else
+    cp -a /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.bak.\$(date -u +%Y%m%dT%H%M%SZ)" || true
+  fi
+fi
 echo ${bashSingleQuoteForScript(opts.caddyB64)} | base64 -d > /etc/caddy/Caddyfile
 
 echo "=== provision: caddy_validate ==="
@@ -900,12 +914,7 @@ function usesSystemd(instance: Instance): boolean {
  * port / login user (stored on the row); managed VPS always uses root@22.
  */
 function sshTargetFor(instance: Instance): SshTarget {
-  const target: SshTarget = { host: instance.ipAddress!, instanceId: instance.id }
-  if (instance.deploymentTarget === "byos") {
-    target.port = instance.byosPort ?? 22
-    target.username = instance.byosUser ?? "root"
-  }
-  return target
+  return sshTargetForInstance(instance)
 }
 
 /* ------------------------------------------------------------------ */
@@ -1515,6 +1524,19 @@ async function acquireBootedVm(
   runtime: RuntimeEngine,
   opts: AcquireOpts,
 ): Promise<AcquiredVm> {
+  // A BYOS agent must never reach this function. Everything below it creates,
+  // claims or deletes a machine, and a BYOS machine is the customer's hardware.
+  // provisionBotLocked already routes byos → provisionByosBot, so this can only
+  // fire if that routing is broken by a future refactor — which is exactly when
+  // we want a loud throw rather than a warm-pool claim (or a deleteVM in
+  // handleFailedAttempt) landing on someone's own server.
+  if (!platformOwnsHostVm(instance.deploymentTarget)) {
+    throw new Error(
+      `acquireBootedVm called for a ${instance.deploymentTarget} instance (${instance.id}); ` +
+        "the platform does not own that machine and must not create, claim or destroy it",
+    )
+  }
+
   // Sticky retry: an earlier attempt already created the VM.
   if (instance.vmId) {
     const provider = await getVmProviderById(instance.providerId)
@@ -2620,13 +2642,21 @@ async function provisionByosBot(instance: Instance): Promise<ProvisionResult> {
       cfOriginCertPem,
       cfOriginKeyPem,
       webuiEnabled: Boolean(instance.webuiEnabled) && Boolean(runtime.sidecar),
+      // The customer's sshd may be on any port, and the box is not ours to
+      // firewall — see BootstrapRenderArgs. Passing the wrong port here, or
+      // enabling ufw at all, locks the owner out of their own server.
+      sshPort: port,
+      manageFirewall: false,
     })
     const bootstrapStep = await sshRunScriptLogged(
       target,
       bootstrapScript,
       currentStage,
       "byos:bootstrap (install node/caddy/runtime)",
-      { timeoutMs: 600_000 },
+      // A customer box builds everything from source (no cloud-init, no warm
+      // pool) and may sit behind a slow mirror; 600s was tight enough that a
+      // Hermes + Open WebUI install could be killed just short of finishing.
+      { timeoutMs: 900_000 },
     )
     await logSshStep(instance.id, bootstrapStep)
     if (bootstrapStep.exitCode !== 0 && bootstrapStep.exitCode !== null) {

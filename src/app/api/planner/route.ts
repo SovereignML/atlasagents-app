@@ -2,7 +2,9 @@ import { NextResponse } from "next/server"
 import { AGENT_CATEGORIES } from "@/configs/agent-categories"
 import { rateLimit } from "@/lib/rate-limit"
 
-const PRO_AGENTS = new Set(["devops", "research", "content", "sales", "social"])
+// Templates that suggest the Operator tier. "default" is deliberately absent:
+// it is the entry-level choice and falls through to the Builder suggestion.
+const PRO_AGENTS = new Set(["devops", "research", "sales", "social"])
 
 export async function POST(request: Request) {
   try {

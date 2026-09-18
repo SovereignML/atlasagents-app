@@ -146,6 +146,20 @@ export type BootstrapRenderArgs = {
   cfOriginKeyPem?: string
   /** When true, the runtime appends its sidecar install steps (Docker + image pull). */
   webuiEnabled?: boolean
+  /**
+   * The port sshd actually listens on. Defaults to 22. BYOS servers may use
+   * anything — and the firewall step opens THIS port, not a hardcoded 22.
+   * Getting it wrong locks us (and the customer) out of their own machine.
+   */
+  sshPort?: number
+  /**
+   * Whether this host's firewall is ours to turn on. True for VMs we provision;
+   * **false for BYOS**, where the box is the customer's and may already be
+   * serving unrelated traffic. When false we still add our allow-rules (so the
+   * agent is reachable if a firewall is already active) but never run
+   * `ufw enable`. Defaults to true, preserving managed-VPS behaviour.
+   */
+  manageFirewall?: boolean
 }
 
 /** Inputs to a sidecar's `.env` builder (e.g. Open WebUI fronting Hermes). */

@@ -10,6 +10,7 @@ import type { InferSelectModel } from "drizzle-orm"
 
 import type { instances } from "@/db"
 import { getRuntime } from "@/lib/runtimes"
+import { sshTargetForInstance as buildSshTarget } from "@/lib/ssh-target"
 import { sshRun, sshWriteFile, type SshTarget, type SshRunResult } from "@/lib/ssh"
 
 type Instance = InferSelectModel<typeof instances>
@@ -70,12 +71,7 @@ export function sshTargetForInstance(instance: Instance): SshTarget {
   if (!instance.ipAddress) {
     throw new FileUnsupportedError("This agent has no reachable host yet.")
   }
-  const target: SshTarget = { host: instance.ipAddress, instanceId: instance.id }
-  if (instance.deploymentTarget === "byos") {
-    target.port = instance.byosPort ?? 22
-    target.username = instance.byosUser ?? "root"
-  }
-  return target
+  return buildSshTarget(instance)
 }
 
 /**

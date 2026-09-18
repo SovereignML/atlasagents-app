@@ -3,7 +3,13 @@ import Link from "next/link"
 import { db, desc, instances, orphanEvents, sql } from "@/db"
 import { requireAdminPage } from "@/lib/admin-guard"
 import { runtimeLabel } from "@/lib/runtimes/labels"
-import { getPoolHealth, listWarmVms, type PoolHealthEntry } from "@/lib/warm-pool"
+import {
+  getPoolHealth,
+  listRecentBakeFailures,
+  listWarmVms,
+  type BakeFailureRecord,
+  type PoolHealthEntry,
+} from "@/lib/warm-pool"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -89,6 +95,10 @@ export default async function AdminInstancesPage({
 
   const poolHealth = active === "pool" ? await getPoolHealth() : null
   const warmVmRows = active === "pool" ? await listWarmVms() : []
+  // Failed rows are destroyed in the same refill pass that marks them, so the
+  // live rows below can never show a failure. These come from OrphanEvent and
+  // are the only view that makes a churning pool visible in the UI.
+  const bakeFailures = active === "pool" ? await listRecentBakeFailures(20) : []
 
   return (
     <PageContainer>
@@ -208,7 +218,7 @@ export default async function AdminInstancesPage({
 
       {/* ── Pre-Baked VMs (warm pool) ── */}
       {active === "pool" && poolHealth && (
-        <PoolTab health={poolHealth} rows={warmVmRows} />
+        <PoolTab health={poolHealth} rows={warmVmRows} bakeFailures={bakeFailures} />
       )}
 
       {/* ── Orphans ── */}
@@ -263,9 +273,11 @@ export default async function AdminInstancesPage({
 function PoolTab({
   health,
   rows,
+  bakeFailures,
 }: {
   health: { enabled: boolean; entries: PoolHealthEntry[] }
   rows: Array<Awaited<ReturnType<typeof listWarmVms>>[number]>
+  bakeFailures: BakeFailureRecord[]
 }) {
   return (
     <div className="space-y-6">
@@ -328,6 +340,38 @@ function PoolTab({
             )
           })}
         </div>
+      )}
+
+      {/* Recent bake failures. Deliberately ABOVE the live rows: when the pool
+          is churning, the live rows look healthy (a few VMs mid-bake) and this
+          is the only thing on the page that says otherwise. */}
+      {bakeFailures.length > 0 && (
+        <Card size="sm" className="border-destructive/40">
+          <CardHeader>
+            <CardTitle className="text-sm text-destructive">
+              Recent bake failures ({bakeFailures.length})
+            </CardTitle>
+            <CardDescription>
+              Each one is a VM that was created, billed, and destroyed without ever becoming
+              usable. A steady stream here means the pool is looping — deploys are silently
+              falling back to cold provisioning, and creates pause automatically once a pool key
+              trips the breaker. The failing bootstrap step is named at the end of each entry.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {bakeFailures.map((f) => (
+              <details key={f.id} className="rounded border border-border/60 p-2">
+                <summary className="cursor-pointer font-mono text-xs text-muted-foreground">
+                  {ago(f.detectedAt)} · vm#{f.vmId}
+                  {f.ipAddress && ` · ${f.ipAddress}`}
+                </summary>
+                <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all font-mono text-[10px] text-muted-foreground">
+                  {f.detail}
+                </pre>
+              </details>
+            ))}
+          </CardContent>
+        </Card>
       )}
 
       {/* Warm-VM rows */}

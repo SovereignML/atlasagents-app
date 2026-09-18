@@ -30,7 +30,7 @@ import { Input } from "@/components/ui/input"
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
 import { RuntimeLogo } from "@/components/dashboard/runtime-logo"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { AGENT_CATEGORIES } from "@/configs/agent-categories"
+import { AGENT_CATEGORIES, categoryDisplayName } from "@/configs/agent-categories"
 import { BRANDING } from "@/configs/branding"
 import { DEPLOYABLE_PLANS, PLANS, type PlanConfig } from "@/configs/plans"
 import { SERVER_TYPES, type ServerTypeConfig } from "@/configs/server-types"
@@ -421,7 +421,9 @@ export default function DeployPage() {
                           <Icon className="size-4" />
                         </span>
                         <div>
-                          <p className="text-sm font-medium text-foreground">{cat.name}</p>
+                          <p className="text-sm font-medium text-foreground">
+                            {categoryDisplayName(cat.slug, runtime)}
+                          </p>
                           <p className="mt-0.5 text-[11px] text-muted-foreground">
                             Runs on {RUNTIME_OPTIONS.find((r) => r.value === runtime)?.label ?? runtime}
                           </p>

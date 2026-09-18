@@ -23,6 +23,18 @@ export type SshTarget = {
    * hosts connect as root and leave this unset.
    */
   elevate?: boolean
+  /**
+   * Expected `sha256:<hash>` host key, for targets pinned somewhere other than
+   * `instances` — BYOS servers, which are verified before any agent exists.
+   * Mismatch aborts the connection. Ignored when `instanceId` is set (that path
+   * pins against the instance row instead).
+   */
+  expectedHostFingerprint?: string
+  /**
+   * Called with the observed `sha256:<hash>` on connect, so a first contact can
+   * record a pin for later connects to verify against.
+   */
+  onHostFingerprint?: (fingerprint: string) => void
 }
 
 function loadPrivateKey(): string {
@@ -54,17 +66,37 @@ async function connect(target: SshTarget): Promise<NodeSSH> {
   if (target.instanceId) {
     return connectAndPin(target, target.instanceId)
   }
-  // Legacy path — no instance to pin against (shared-host bootstrap).
+  // Not an instance. BYOS *servers* are pinned too — on byosServers, before any
+  // agent exists — so honour an explicitly supplied pin and report what we saw
+  // so a first connect can record one. Neither set ⇒ the legacy unpinned path
+  // (shared-host bootstrap, which has no row to pin against yet).
   const ssh = new NodeSSH()
+  let observed: string | null = null
   await ssh.connect({
     host: target.host,
     port: target.port ?? 22,
     username: target.username ?? "root",
     privateKey: loadPrivateKey(),
+    hostHash: "sha256",
+    hostVerifier: (hash: string) => {
+      observed = `sha256:${hash}`
+      return true
+    },
     readyTimeout: 20_000,
     keepaliveInterval: 10_000,
     keepaliveCountMax: 3,
   })
+  if (observed) {
+    if (target.expectedHostFingerprint && target.expectedHostFingerprint !== observed) {
+      ssh.dispose()
+      throw new Error(
+        `SSH host fingerprint mismatch for ${target.host}: expected ` +
+          `${target.expectedHostFingerprint}, got ${observed}. The server's host key ` +
+          `changed — reinstalled, or someone is intercepting the connection.`,
+      )
+    }
+    target.onHostFingerprint?.(observed)
+  }
   return ssh
 }
 
@@ -460,6 +492,30 @@ function shellEscape(value: string): string {
 /** Last bytes of bootstrap.log (must be end of file — apt/npm can emit huge lines). */
 const BOOTSTRAP_LOG_TAIL_BYTES = 24_000
 
+/**
+ * Read the tail of the bootstrap log off a box whose bake just failed or hung.
+ *
+ * Always resolves — a diagnostic read must never be the thing that throws on an
+ * already-failing path. Callers get a placeholder string instead of an error.
+ * Extracted so every bake reader (the VPS poller and the warm pool) captures the
+ * SAME evidence: the warm pool used to record only `bootstrap failed:<step>` and
+ * then delete the row, which left no way to find out what the step actually did.
+ */
+export async function sshReadBootstrapLogTail(
+  target: SshTarget,
+  bytes = BOOTSTRAP_LOG_TAIL_BYTES,
+): Promise<string> {
+  try {
+    const r = await sshRun(
+      target,
+      `tail -c ${bytes} ${BOOTSTRAP_LOG} 2>/dev/null || echo '(no log)'`,
+    )
+    return r.stdout
+  } catch {
+    return "(could not read bootstrap log)"
+  }
+}
+
 export async function sshPollBootstrap(
   target: SshTarget,
   /** Allow npm retries + slow mirrors (see bootstrap install_runtime_pkg). */
@@ -482,16 +538,7 @@ export async function sshPollBootstrap(
 
     if (status.startsWith("failed:")) {
       const failedStep = status.slice(7)
-      let logTail = ""
-      try {
-        const logResult = await sshRun(
-          target,
-          `tail -c ${BOOTSTRAP_LOG_TAIL_BYTES} ${BOOTSTRAP_LOG} 2>/dev/null || echo '(no log)'`,
-        )
-        logTail = logResult.stdout
-      } catch {
-        logTail = "(could not read bootstrap log)"
-      }
+      const logTail = await sshReadBootstrapLogTail(target)
       throw new Error(
         `Bootstrap failed at step "${failedStep}". Log tail (last ${BOOTSTRAP_LOG_TAIL_BYTES} bytes):\n${logTail}`,
       )
@@ -500,16 +547,7 @@ export async function sshPollBootstrap(
   }
 
   // Timeout — try to read log for diagnostics
-  let logTail = ""
-  try {
-    const logResult = await sshRun(
-      target,
-      `tail -c ${BOOTSTRAP_LOG_TAIL_BYTES} ${BOOTSTRAP_LOG} 2>/dev/null || echo '(no log)'`,
-    )
-    logTail = logResult.stdout
-  } catch {
-    logTail = "(could not read bootstrap log)"
-  }
+  const logTail = await sshReadBootstrapLogTail(target)
   throw new Error(
     `Bootstrap timed out after ${timeoutMs / 1000}s. Log tail (last ${BOOTSTRAP_LOG_TAIL_BYTES} bytes):\n${logTail}`,
   )

@@ -31,10 +31,40 @@ export type BootstrapFramingOpts = {
   gatewayPort: number
   cfOriginCertPem?: string
   cfOriginKeyPem?: string
+  /** Port sshd listens on; the firewall opens this rather than a hardcoded 22. */
+  sshPort?: number
+  /** False on BYOS — add allow-rules but never turn the firewall on. */
+  manageFirewall?: boolean
 }
 
 function shellEscape(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+/**
+ * Which NodeSource distribution to install, derived from the runtime's own
+ * `minNodeVersion`.
+ *
+ * This used to be hardcoded to `setup_22.x` while `minNodeVersion` was a
+ * parameter, so the two could silently disagree — and they did. OpenClaw
+ * declared a minimum of 22.14.0, the box got Node 22, `verify_node` passed, and
+ * then `npm install --engine-strict openclaw@latest` refused with EBADENGINE
+ * because the published package requires Node >=24.16. Every OpenClaw bootstrap
+ * failed at `install_runtime`: warm-pool bakes looped create/fail/destroy, and
+ * cold VPS and BYOS installs failed outright.
+ *
+ * Deriving it means a runtime states its Node requirement in exactly one place
+ * and the box gets that Node. Raising a runtime's `minNode` is now sufficient.
+ */
+function nodeSourceMajor(minNodeVersion: string): number {
+  const major = Number.parseInt(minNodeVersion.split(".")[0] ?? "", 10)
+  if (!Number.isInteger(major) || major < 18 || major > 99) {
+    throw new Error(
+      `Cannot derive a NodeSource major from minNodeVersion "${minNodeVersion}" — ` +
+        "expected a semver like \"24.16.0\".",
+    )
+  }
+  return major
 }
 
 /**
@@ -65,6 +95,19 @@ export function buildBootstrapFraming(
   opts: BootstrapFramingOpts,
   runtimeInstallSteps: string,
 ): string {
+  // Default 22 / manage-the-firewall preserves the managed-VPS behaviour these
+  // options were factored out of; BYOS passes the real port and `false`.
+  const sshPortLiteral = String(opts.sshPort ?? 22)
+  // Install the Node major the runtime actually requires (see nodeSourceMajor).
+  const nodeMajor = nodeSourceMajor(opts.minNodeVersion)
+  const manageFirewall = opts.manageFirewall !== false
+  const firewallEnableBlock = manageFirewall
+    ? "  yes | ufw enable || true"
+    : "  # Not enabling ufw: this server belongs to the customer. Turning a\n" +
+      "  # firewall ON here could cut off whatever else they run on it. The\n" +
+      "  # allow-rules above are still added so the agent is reachable when a\n" +
+      "  # firewall is already active."
+
   let cfBlock = ""
   if (opts.cfOriginCertPem && opts.cfOriginKeyPem) {
     const certB64 = Buffer.from(opts.cfOriginCertPem, "utf8").toString("base64")
@@ -97,10 +140,19 @@ CURRENT_STEP="init"
 
 cleanup() {
   local ec=$?
+  # Status first, always. Everything below is best-effort; the one thing that
+  # must survive is the name of the step that failed.
   if [ $ec -ne 0 ]; then
     echo "failed:\${CURRENT_STEP}" > "$STATUS"
     echo "=== BOOTSTRAP FAILED at step \${CURRENT_STEP} (exit $ec) ===" >> "$LOG"
   fi
+  # Close the tee pipe and let it drain before we exit. Bash does not wait for a
+  # process substitution to finish, so on an abrupt \`set -e\` abort the final
+  # writes can in principle be lost. Cheap insurance rather than a fix for an
+  # observed truncation: every reader of this log reads its TAIL, so the end of
+  # it is the one part that must not go missing.
+  exec 1>&- 2>&- || true
+  sleep 1 || true
 }
 trap cleanup EXIT
 
@@ -119,8 +171,12 @@ echo "=== Bootstrap started at $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 
 step() { CURRENT_STEP="$1"; echo "=== STEP: $1 ===" ; }
 
-# P1 transient: mirror flakiness
-APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=120"
+# P1 transient: mirror flakiness.
+# DPkg::Lock::Timeout: a real server (rather than a fresh cloud image) usually
+# has unattended-upgrades running right after boot, holding
+# /var/lib/dpkg/lock-frontend for minutes. Without this every apt call fails
+# instantly with "could not get lock" instead of waiting its turn.
+APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=120 -o DPkg::Lock::Timeout=120"
 
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
@@ -136,7 +192,7 @@ curl --retry 5 --retry-delay 3 -1sLf 'https://dl.cloudsmith.io/public/caddy/stab
 curl --retry 5 --retry-delay 3 -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
 
 step "nodejs_repo"
-curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors https://deb.nodesource.com/setup_22.x | bash -
+curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors https://deb.nodesource.com/setup_${nodeMajor}.x | bash -
 
 step "install_nodejs_caddy"
 apt-get $APT_OPTS install -y nodejs caddy
@@ -173,12 +229,23 @@ mkdir -p ${shellEscape(opts.installDir)}
 chown -R ${shellEscape(opts.systemUser)}:${shellEscape(opts.systemUser)} ${shellEscape(opts.installDir)}
 
 step "swap"
-if [ ! -f /swapfile ]; then
+# Skip when the box already has swap of any kind (partition, zram, another
+# swapfile) — it only checked for /swapfile before, so a customer server with a
+# swap partition got a second, redundant 2G file, which on a small disk hurts.
+# swapon is best-effort: it fails on container hosts (LXC/OpenVZ) where swap
+# isn't ours to configure, and under \`set -e\` that aborted the whole bootstrap.
+EXISTING_SWAP="$(awk 'NR>1 {print $1}' /proc/swaps 2>/dev/null | head -1 || true)"
+if [ -z "\${EXISTING_SWAP}" ] && [ ! -f /swapfile ]; then
   fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
   chmod 600 /swapfile
-  mkswap /swapfile
-  swapon /swapfile
-  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  if mkswap /swapfile >/dev/null 2>&1 && swapon /swapfile 2>/dev/null; then
+    grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  else
+    echo "swap unavailable on this host (container?) — continuing without it"
+    rm -f /swapfile
+  fi
+else
+  echo "swap already present (\${EXISTING_SWAP:-/swapfile}) — leaving it alone"
 fi
 
 ${runtimeInstallSteps}
@@ -186,10 +253,15 @@ ${runtimeInstallSteps}
 step "caddy_cf_snippets"
 ${cfBlock}
 step "firewall"
-ufw allow 22/tcp || true
-ufw allow 80/tcp || true
-ufw allow 443/tcp || true
-yes | ufw enable || true
+# Open the port sshd is ACTUALLY on. This was hardcoded to 22, which on a BYOS
+# server listening elsewhere meant enabling a firewall that blocked SSH — we
+# lost the box mid-provision and so did its owner.
+if command -v ufw >/dev/null 2>&1; then
+  ufw allow ${sshPortLiteral}/tcp || true
+  ufw allow 80/tcp || true
+  ufw allow 443/tcp || true
+${firewallEnableBlock}
+fi
 
 echo "=== Bootstrap completed at $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 echo "done" > "$STATUS"

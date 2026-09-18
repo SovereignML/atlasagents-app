@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Check, Copy, KeyRound, Wallet } from "lucide-react"
+import { Check, Cpu, HardDrive, KeyRound, MemoryStick, Server, Wallet } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -16,7 +16,8 @@ import {
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { AGENT_CATEGORIES } from "@/configs/agent-categories"
+import { AGENT_CATEGORIES, categoryDisplayName } from "@/configs/agent-categories"
+import { capacityByRuntime, footprintKey, getFootprint } from "@/configs/agent-footprint"
 import {
   BYO_LLM_PROVIDERS,
   getByoProvider,
@@ -25,16 +26,38 @@ import {
 } from "@/configs/llm-providers"
 import { cn } from "@/lib/utils"
 import { BRANDING } from "@/configs/branding"
+import { formatUsd } from "@/configs/plans"
+
+/** The connected server this agent is being installed onto. */
+export type InstallServer = {
+  id: string
+  label: string
+  host: string
+  port: number
+  sshUser: string
+  status: string
+  hwCpuCores: number | null
+  hwRamTotalMb: number | null
+  hwDiskTotalGb: number | null
+  hwOsName: string | null
+  hwOsVersion: string | null
+  capacityAgents: number
+}
 
 type LlmMode = "managed_credits" | "own_key"
 type BillingInterval = "month" | "year"
 type Runtime = "openclaw" | "hermes"
-type Step = "server" | "agent" | "project" | "billing"
 
-const STEPS: Step[] = ["server", "agent", "project", "billing"]
+// The server is already connected and inspected by the time we get here, so
+// there is no "Server" step: the flow is about the agent, not the machine.
+// Model access is its own step rather than a tail on the server form — it is a
+// billing decision, and burying it under an SSH form hid it.
+type Step = "agent" | "model" | "project" | "billing"
+
+const STEPS: Step[] = ["agent", "model", "project", "billing"]
 const STEP_LABELS: Record<Step, string> = {
-  server: "Server",
   agent: "Agent",
+  model: "Model",
   project: "Project",
   billing: "Billing",
 }
@@ -56,28 +79,28 @@ function deploymentSlug(raw: string) {
     .replace(/^-+|-+$/g, "")
 }
 
-export function ByosConnectForm({
-  fleetPublicKey,
+function gb(mb: number | null): string {
+  return mb == null ? "—" : `${Math.round((mb / 1024) * 10) / 10} GB`
+}
+
+export function ByosInstallForm({
+  server,
   priceMonthly,
   priceYearly,
 }: {
-  fleetPublicKey: string | null
+  server: InstallServer
   priceMonthly: number
   priceYearly: number
 }) {
   const router = useRouter()
 
-  const [step, setStep] = useState<Step>("server")
+  const [step, setStep] = useState<Step>("agent")
   const [submitting, setSubmitting] = useState(false)
-  const [copied, setCopied] = useState(false)
 
   // Agent step
   const [runtime, setRuntime] = useState<Runtime>("openclaw")
 
-  // Server step
-  const [host, setHost] = useState("")
-  const [port, setPort] = useState("22")
-  const [user, setUser] = useState("root")
+  // Model step
   const [llmMode, setLlmMode] = useState<LlmMode>("managed_credits")
   const [ownApiKey, setOwnApiKey] = useState("")
   const [ownProvider, setOwnProvider] = useState<ByoProviderId>("openrouter")
@@ -105,9 +128,17 @@ export function ByosConnectForm({
   const fee = interval === "year" ? priceYearly : priceMonthly
   const feeSuffix = interval === "year" ? "/yr" : "/mo"
 
-  const authorizedKeysCmd = fleetPublicKey
-    ? `mkdir -p ~/.ssh && echo '${fleetPublicKey}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`
-    : ""
+  // What we measured on this box, against what each runtime needs. Hermes on
+  // BYOS always ships the Open WebUI sidecar (agent-create sets webuiEnabled
+  // from the runtime), so it is sized as the heavier "hermes-webui" variant.
+  const probed = server.hwCpuCores != null
+  const capacity = capacityByRuntime({
+    cpuCores: server.hwCpuCores,
+    ramTotalMb: server.hwRamTotalMb,
+    diskTotalGb: server.hwDiskTotalGb,
+  })
+  const fitsRuntime = (r: Runtime) => !probed || capacity[footprintKey(r, r === "hermes")] > 0
+  const selectedFootprint = getFootprint(footprintKey(runtime, runtime === "hermes"))
 
   // A non-OpenRouter direct key (primary or fallback) only runs on Hermes —
   // OpenClaw's package is hardwired to OpenRouter. When the user picks one, the
@@ -122,7 +153,7 @@ export function ByosConnectForm({
     if (forcesHermes && runtime !== "hermes") setRuntime("hermes")
   }, [forcesHermes, runtime])
 
-  // Server-step completeness for the own-key path.
+  // Model-step completeness for the own-key path.
   const ownKeyReady =
     llmMode !== "own_key" ||
     (ownApiKey.trim().length > 0 &&
@@ -134,10 +165,10 @@ export function ByosConnectForm({
 
   const canNext = (() => {
     switch (step) {
-      case "server":
-        return host.trim().length > 0 && ownKeyReady
       case "agent":
         return true
+      case "model":
+        return ownKeyReady
       case "project":
         return name.trim().length >= 2 && !!useCase
       case "billing":
@@ -150,24 +181,11 @@ export function ByosConnectForm({
   }
   function prev() {
     if (stepIdx > 0) setStep(STEPS[stepIdx - 1])
-    else router.back()
-  }
-
-  async function copyCmd() {
-    if (!authorizedKeysCmd) return
-    try {
-      await navigator.clipboard.writeText(authorizedKeysCmd)
-      setCopied(true)
-      toast.success("Command copied")
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      toast.error("Couldn't copy. Select and copy manually.")
-    }
+    else router.push("/dashboard/byos")
   }
 
   async function submit() {
     if (!name.trim()) return toast.error("Give your agent a name")
-    if (!host.trim()) return toast.error("Enter your server's host / IP")
     if (!useCase) return toast.error("Pick a use case")
     if (llmMode === "own_key") {
       if (!ownApiKey.trim())
@@ -191,9 +209,9 @@ export function ByosConnectForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
-          byosHost: host.trim(),
-          byosPort: Number(port) || 22,
-          byosUser: user.trim() || "root",
+          // The server, not a host: the API reads the connection off the
+          // connected row so the agent is linked to the machine it lands on.
+          byosServerId: server.id,
           billingInterval: interval,
           llmMode,
           ownApiKey: llmMode === "own_key" ? ownApiKey.trim() : undefined,
@@ -229,13 +247,13 @@ export function ByosConnectForm({
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        toast.error(data.error || `Could not connect your server (${res.status})`)
+        toast.error(data.error || `Could not install your agent (${res.status})`)
         return
       }
       if (data.checkoutUrl) {
         window.location.href = data.checkoutUrl
       } else {
-        toast.success("Server connected! Provisioning your agent...")
+        toast.success("Installing your agent...")
         router.push(`/dashboard/instances/${data.instanceId}`)
       }
     } catch {
@@ -247,6 +265,46 @@ export function ByosConnectForm({
 
   return (
     <>
+      {/* The machine, stated once and not editable here. Changing which server
+          an agent goes on means picking a different one from the list. */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-border bg-card px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Server className="size-4 shrink-0 text-muted-foreground" />
+          <span className="truncate font-medium text-foreground">{server.label}</span>
+          <span className="truncate font-mono text-xs text-muted-foreground">
+            {server.sshUser}@{server.host}
+            {server.port !== 22 ? `:${server.port}` : ""}
+          </span>
+        </div>
+        {probed && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5">
+              <Cpu className="size-3.5" />
+              {server.hwCpuCores} vCPU
+            </span>
+            <span className="flex items-center gap-1.5">
+              <MemoryStick className="size-3.5" />
+              {gb(server.hwRamTotalMb)}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <HardDrive className="size-3.5" />
+              {server.hwDiskTotalGb != null ? `${server.hwDiskTotalGb} GB` : "—"}
+            </span>
+            {server.hwOsName && (
+              <span>{`${server.hwOsName} ${server.hwOsVersion ?? ""}`.trim()}</span>
+            )}
+          </div>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="ml-auto"
+          onClick={() => router.push("/dashboard/byos")}
+        >
+          Change server
+        </Button>
+      </div>
+
       <div className="flex items-center gap-1 overflow-x-auto pb-2">
         {STEPS.map((s, i) => {
           const isActive = s === step
@@ -285,87 +343,102 @@ export function ByosConnectForm({
 
       <Card>
         <CardContent className="space-y-6 py-6">
-          {step === "server" && (
+          {step === "agent" && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-lg font-semibold text-foreground">Your Server</h2>
+                <h2 className="text-lg font-semibold text-foreground">Choose Your Agent</h2>
                 <p className="text-sm text-muted-foreground">
-                  We install and manage the agent on a server you own. Nothing is
-                  provisioned on our side.
+                  Pick the runtime that powers your agent. We size it against the
+                  hardware we measured on {server.label}.
                 </p>
-              </div>
-
-              <FieldGroup>
-                <div className="grid gap-4 sm:grid-cols-[1fr_120px_140px]">
-                  <Field>
-                    <FieldLabel htmlFor="byos-host">Host / IP</FieldLabel>
-                    <Input
-                      id="byos-host"
-                      placeholder="203.0.113.10"
-                      value={host}
-                      onChange={(e) => setHost(e.target.value)}
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="byos-port">SSH port</FieldLabel>
-                    <Input
-                      id="byos-port"
-                      inputMode="numeric"
-                      value={port}
-                      onChange={(e) => setPort(e.target.value)}
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="byos-user">SSH user</FieldLabel>
-                    <Input
-                      id="byos-user"
-                      value={user}
-                      onChange={(e) => setUser(e.target.value)}
-                    />
-                  </Field>
-                </div>
-                <FieldDescription>
-                  Ubuntu 22.04+ is recommended. The SSH user must have root / sudo
-                  access.
-                </FieldDescription>
-              </FieldGroup>
-
-              <div className="space-y-3">
-                <div>
-                  <p className="text-sm font-medium text-foreground">Grant us SSH access</p>
-                  <p className="text-sm text-muted-foreground">
-                    Run this on your server (as the SSH user above) so we can connect
-                    with our fleet key. We never store a password or your private key.
-                  </p>
-                </div>
-                {fleetPublicKey ? (
-                  <div className="flex min-w-0 items-center gap-2">
-                    <code className="min-w-0 flex-1 truncate rounded-md border bg-muted px-3 py-2 font-mono text-xs">
-                      {authorizedKeysCmd}
-                    </code>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="shrink-0"
-                      onClick={copyCmd}
-                    >
-                      {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-                      {copied ? "Copied" : "Copy command"}
-                    </Button>
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    The platform SSH fleet key isn&apos;t configured yet. Ask your
-                    administrator to set <code>SSH_FLEET_PUBLIC_KEY</code>.
-                  </p>
-                )}
               </div>
 
               <div className="space-y-2">
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                  Model access
+                  Runtime Engine
                 </p>
+                <ToggleGroup
+                  value={[runtime]}
+                  onValueChange={(v) => {
+                    if (!v[0]) return
+                    // A direct-provider key forces Hermes — ignore attempts to
+                    // switch back to OpenClaw.
+                    if (forcesHermes && v[0] !== "hermes") return
+                    setRuntime(v[0] as Runtime)
+                  }}
+                  className="grid w-full grid-cols-1 gap-2 md:grid-cols-2"
+                  spacing={1}
+                >
+                  {RUNTIME_OPTIONS.map((r) => {
+                    const disabled = forcesHermes && r.value !== "hermes"
+                    const fits = fitsRuntime(r.value)
+                    const fp = getFootprint(footprintKey(r.value, r.value === "hermes"))
+                    return (
+                      <ToggleGroupItem
+                        key={r.value}
+                        value={r.value}
+                        variant="outline"
+                        disabled={disabled}
+                        className={cn(
+                          "h-auto flex-col items-start whitespace-normal p-4 text-left",
+                          SELECTED_GLOW,
+                          disabled && "opacity-50"
+                        )}
+                      >
+                        <p className="text-sm font-medium text-foreground">{r.label}</p>
+                        <p className="text-xs text-muted-foreground">{r.hint}</p>
+                        {fp && (
+                          <p
+                            className={cn(
+                              "mt-1.5 text-xs",
+                              probed && !fits ? "text-amber-500" : "text-muted-foreground"
+                            )}
+                          >
+                            Needs ~{fp.vcpu} vCPU · {gb(fp.ramMb)} RAM · {fp.diskGb} GB disk
+                            {probed && !fits ? " — tight on this server" : ""}
+                          </p>
+                        )}
+                      </ToggleGroupItem>
+                    )
+                  })}
+                </ToggleGroup>
+                {forcesHermes && (
+                  <p className="text-xs text-muted-foreground">
+                    Your chosen key provider runs on Hermes, so OpenClaw isn&apos;t
+                    available for this agent.
+                  </p>
+                )}
+                {probed && !fitsRuntime(runtime) && selectedFootprint && (
+                  <p className="text-xs text-amber-500">
+                    {server.label} has {server.hwCpuCores} vCPU and{" "}
+                    {gb(server.hwRamTotalMb)} of RAM, which is below what{" "}
+                    {selectedFootprint.label}{" "}
+                    usually wants once the OS is accounted for. It&apos;s your hardware,
+                    so we won&apos;t stop you — but expect it to be slow.
+                  </p>
+                )}
+                {runtime === "hermes" && (
+                  <p className="text-xs text-muted-foreground">
+                    Hermes ships with the Open WebUI chat interface bundled, which is
+                    what makes it the heavier of the two.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {step === "model" && (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">Model access</h2>
+                <p className="text-sm text-muted-foreground">
+                  How your agent pays for the model it runs on. This is separate from
+                  the management fee — you can change it later from the agent&apos;s
+                  page.
+                </p>
+              </div>
+
+              <div className="space-y-2">
                 <ToggleGroup
                   value={[llmMode]}
                   onValueChange={(v) => v[0] && setLlmMode(v[0] as LlmMode)}
@@ -573,67 +646,6 @@ export function ByosConnectForm({
             </div>
           )}
 
-          {step === "agent" && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-lg font-semibold text-foreground">Choose Your Agent</h2>
-                <p className="text-sm text-muted-foreground">
-                  Pick the runtime that powers your agent.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                  Runtime Engine
-                </p>
-                <ToggleGroup
-                  value={[runtime]}
-                  onValueChange={(v) => {
-                    if (!v[0]) return
-                    // A direct-provider key forces Hermes — ignore attempts to
-                    // switch back to OpenClaw.
-                    if (forcesHermes && v[0] !== "hermes") return
-                    setRuntime(v[0] as Runtime)
-                  }}
-                  className="grid w-full grid-cols-1 gap-2 md:grid-cols-2"
-                  spacing={1}
-                >
-                  {RUNTIME_OPTIONS.map((r) => {
-                    const disabled = forcesHermes && r.value !== "hermes"
-                    return (
-                      <ToggleGroupItem
-                        key={r.value}
-                        value={r.value}
-                        variant="outline"
-                        disabled={disabled}
-                        className={cn(
-                          "h-auto flex-col items-start whitespace-normal p-4 text-left",
-                          SELECTED_GLOW,
-                          disabled && "opacity-50"
-                        )}
-                      >
-                        <p className="text-sm font-medium text-foreground">{r.label}</p>
-                        <p className="text-xs text-muted-foreground">{r.hint}</p>
-                      </ToggleGroupItem>
-                    )
-                  })}
-                </ToggleGroup>
-                {forcesHermes && (
-                  <p className="text-xs text-muted-foreground">
-                    Your chosen key provider runs on Hermes, so OpenClaw isn&apos;t
-                    available for this agent.
-                  </p>
-                )}
-                {runtime === "hermes" && (
-                  <p className="text-xs text-muted-foreground">
-                    Hermes ships with the Open WebUI chat interface bundled. Your server must have
-                    at least 2GB RAM to run Hermes and Open WebUI.
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-
           {step === "project" && (
             <div className="space-y-6">
               <div>
@@ -680,7 +692,9 @@ export function ByosConnectForm({
                         SELECTED_GLOW
                       )}
                     >
-                      <p className="text-sm font-medium text-foreground">{cat.name}</p>
+                      <p className="text-sm font-medium text-foreground">
+                        {categoryDisplayName(cat.slug, runtime)}
+                      </p>
                       <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
                         {cat.description}
                       </p>
@@ -741,23 +755,12 @@ export function ByosConnectForm({
                     <CardDescription className="text-xs uppercase tracking-wide">
                       Server
                     </CardDescription>
-                    <p className="font-medium text-foreground">
-                      {user.trim() || "root"}@{host.trim() || "-"}
-                      {port && port !== "22" ? `:${port}` : ""}
-                    </p>
+                    <p className="font-medium text-foreground">{server.label}</p>
                   </CardHeader>
                   <CardContent>
-                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      {llmMode === "own_key" ? (
-                        <>
-                          <KeyRound className="size-3.5" /> Your {ownDef?.label ?? "own"} key
-                          {fallbackEnabled ? " (+ fallback)" : ""}
-                        </>
-                      ) : (
-                        <>
-                          <Wallet className="size-3.5" /> {BRANDING.name} Credits
-                        </>
-                      )}
+                    <p className="truncate font-mono text-xs text-muted-foreground">
+                      {server.sshUser}@{server.host}
+                      {server.port !== 22 ? `:${server.port}` : ""}
                     </p>
                   </CardContent>
                 </Card>
@@ -766,10 +769,38 @@ export function ByosConnectForm({
                     <CardDescription className="text-xs uppercase tracking-wide">
                       Agent
                     </CardDescription>
-                    <p className="font-medium text-foreground">{selectedCategory?.name ?? "-"}</p>
+                    <p className="font-medium text-foreground">
+                      {useCase ? categoryDisplayName(useCase, runtime) : "-"}
+                    </p>
                   </CardHeader>
                   <CardContent>
                     <p className="text-xs text-muted-foreground">Runtime: {runtimeLabel}</p>
+                  </CardContent>
+                </Card>
+                <Card size="sm">
+                  <CardHeader>
+                    <CardDescription className="text-xs uppercase tracking-wide">
+                      Model
+                    </CardDescription>
+                    <p className="font-medium text-foreground">
+                      {llmMode === "own_key"
+                        ? `Your ${ownDef?.label ?? "own"} key`
+                        : `${BRANDING.name} Credits`}
+                    </p>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      {llmMode === "own_key" ? (
+                        <>
+                          <KeyRound className="size-3.5" />
+                          {fallbackEnabled ? "With a fallback key" : "No fallback"}
+                        </>
+                      ) : (
+                        <>
+                          <Wallet className="size-3.5" /> 100 starter credits included
+                        </>
+                      )}
+                    </p>
                   </CardContent>
                 </Card>
                 <Card size="sm">
@@ -785,16 +816,6 @@ export function ByosConnectForm({
                     </p>
                   </CardContent>
                 </Card>
-                <Card size="sm">
-                  <CardHeader>
-                    <CardDescription className="text-xs uppercase tracking-wide">
-                      Billing
-                    </CardDescription>
-                    <p className="font-medium text-foreground">
-                      {interval === "year" ? "Yearly" : "Monthly"}
-                    </p>
-                  </CardHeader>
-                </Card>
               </div>
 
               <Card className="border-ring bg-ring/5">
@@ -802,14 +823,14 @@ export function ByosConnectForm({
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Management fee</span>
                     <span className="text-foreground">
-                      ${fee.toLocaleString()}
+                      {formatUsd(fee)}
                       {feeSuffix}
                     </span>
                   </div>
                   <div className="flex justify-between border-t pt-3">
                     <span className="font-semibold text-foreground">Total</span>
                     <span className="text-xl font-bold text-foreground">
-                      ${fee.toLocaleString()}
+                      {formatUsd(fee)}
                       <span className="text-sm font-normal text-muted-foreground">
                         {feeSuffix}
                       </span>
@@ -843,7 +864,7 @@ export function ByosConnectForm({
               onClick={submit}
               disabled={submitting || !canNext}
             >
-              {submitting ? "Connecting..." : "Connect server & continue"}
+              {submitting ? "Installing..." : "Install agent"}
             </Button>
           ) : (
             <Button variant="gradient" size="pill" onClick={next} disabled={!canNext}>

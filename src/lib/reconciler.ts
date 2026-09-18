@@ -16,6 +16,7 @@
 
 import {
   db,
+  pool,
   instances,
   orphanEvents,
   eq,
@@ -27,7 +28,12 @@ import {
 import { describeVmError } from "@/lib/vm-provider"
 import { getVmProviderById, getAllEnabledProviders } from "@/lib/providers"
 import { getWarmVmIds } from "@/lib/warm-pool"
-import { logInstanceEvent, transitionInstance } from "@/lib/instance-state"
+import {
+  isInstanceLockHeld,
+  logInstanceEvent,
+  transitionInstance,
+} from "@/lib/instance-state"
+import { classifyProvisioning } from "@/lib/provision-liveness"
 import {
   listRuntimeKeys,
   revokeRuntimeKey,
@@ -37,7 +43,29 @@ import { getTenantOpenRouterKey } from "@/lib/tenant"
 import { reconcilePendingCustomHostnames } from "@/lib/tenant-branding"
 
 const ORPHAN_GRACE_MS = 15 * 60 * 1000 // 15 minutes — gives in-flight creates room to commit
-const PROVISIONING_TTL_MS = 20 * 60 * 1000 // 20 minutes
+/**
+ * Fallback age past which a `provisioning` row counts as dead **when we cannot
+ * read its advisory lock**. The lock is the primary signal (see
+ * provision-liveness.ts); this is only the safety net.
+ *
+ * Was 20 minutes and used as the *only* signal, which was shorter than a
+ * legitimate provision and so reclaimed live deploys. The budgets it has to
+ * clear, from the provisioner's own timeouts:
+ *
+ *   managed: create_vm + wait_boot + waiting_ssh (120s)
+ *            + bootstrap poll (`sshPollBootstrap`, 1_200_000ms = 20m)
+ *            + configure/health/commit (~900s)            ≈ 40m
+ *   byos:    waiting_ssh (120s) + bootstrap (900_000ms = 15m)
+ *            + configure/health/commit (~900s)            ≈ 32m
+ *
+ * 60 minutes clears both with headroom. A longer fallback costs nothing now:
+ * a row whose worker has actually died holds no lock and is reclaimed within
+ * LOCKLESS_GRACE_MS, so recovery no longer waits this out.
+ *
+ * Exported because the retry endpoint uses the same threshold — the two must
+ * not disagree.
+ */
+export const PROVISIONING_TTL_MS = 60 * 60 * 1000 // 60 minutes
 // LEGACY WIRE FORMAT — deliberately NOT renamed in the Atlas Agents
 // rebrand. Every live DigitalOcean/Linode VM already carries this tag and the
 // orphan sweep below matches on it; renaming orphans the whole fleet.
@@ -58,6 +86,8 @@ type ReconcileReport = {
   /** White-label custom domains whose CF cert went active and were marked verified. */
   customHostnamesVerified: number
   errors: string[]
+  /** True when a concurrent run already held the lock and this call did no work. */
+  skipped?: boolean
 }
 
 // LEGACY WIRE FORMAT — deliberately NOT renamed in the Atlas Agents
@@ -66,7 +96,22 @@ type ReconcileReport = {
 // See docs/REBRAND-LEGACY-IDENTIFIERS.md.
 const OR_LABEL_PREFIX = "sovereign-"
 
-export async function runReconciler(): Promise<ReconcileReport> {
+/**
+ * Which passes to run.
+ *
+ * `fast` is everything that bounds money or gates a provisioning decision: the
+ * orphan VM sweep, retried deletes, failed-row cleanup, stuck-deploy reclaim
+ * and the reconciledAt stamp. `full` adds the housekeeping that is expensive
+ * and not time-critical — listing every OpenRouter key and healing its spend
+ * cap. Split so the cheap half can run on a tight interval without paying for
+ * the expensive half 96 times a day.
+ */
+export type ReconcileScope = "fast" | "full"
+
+export type ReconcileOpts = { scope?: ReconcileScope }
+
+export async function runReconciler(opts: ReconcileOpts = {}): Promise<ReconcileReport> {
+  const scope: ReconcileScope = opts.scope ?? "full"
   const report: ReconcileReport = {
     orphansDetected: 0,
     orphansDeleted: 0,
@@ -266,7 +311,18 @@ export async function runReconciler(): Promise<ReconcileReport> {
   for (const row of provisioningRows) {
     const stamp = row.lastTransitionAt ?? row.createdAt
     if (!stamp) continue
-    if (now - stamp.getTime() < PROVISIONING_TTL_MS) continue
+
+    // Ask whether anything is actually provisioning this, rather than assuming
+    // from age. `provisionBot` holds the instance lock for the whole run, so a
+    // held lock means a live deploy that must not be touched — this loop used
+    // to reclaim those out from under themselves whenever a legitimate
+    // provision outran the TTL.
+    const liveness = classifyProvisioning({
+      ageMs: now - stamp.getTime(),
+      lockHeld: await isInstanceLockHeld(row.id),
+      ttlMs: PROVISIONING_TTL_MS,
+    })
+    if (liveness !== "dead") continue
 
     report.stuckProvisioning++
     let vmDeleted = false
@@ -314,7 +370,7 @@ export async function runReconciler(): Promise<ReconcileReport> {
   // Skipped silently if OPENROUTER_PROVISIONING_KEY is not set — keeps the
   // reconciler usable for fleets that haven't enabled per-instance keys yet.
   // ─────────────────────────────────────────────────────────────────────
-  if (process.env.OPENROUTER_PROVISIONING_KEY) {
+  if (scope === "full" && process.env.OPENROUTER_PROVISIONING_KEY) {
     // (a) Instance rows with leftover keyId after deletion.
     const leftover = await db.query.instances.findMany({
       where: and(
@@ -477,6 +533,7 @@ export async function runReconciler(): Promise<ReconcileReport> {
   console.log(
     JSON.stringify({
       kind: "reconcile_report",
+      scope,
       providers: sweepTargets.map((t) => t.slug),
       ...report,
       scannedProviderVMs,
@@ -484,4 +541,64 @@ export async function runReconciler(): Promise<ReconcileReport> {
     }),
   )
   return report
+}
+
+/** Fleet-wide advisory-lock key serializing reconcile runs ("RCNC" in hex). */
+const RECONCILE_LOCK_KEY = 0x52_43_4e_43
+
+/**
+ * Serialized entry point for the reconcile cron.
+ *
+ * The endpoint fires on a timer and a full run (provider `listVMs` per
+ * provider, health probes, OpenRouter key listing, Cloudflare hostname checks)
+ * can easily outlast the gap to the next tick — and the caller's curl
+ * `--max-time` aborts the *client*, not this handler, so an overlap is
+ * invisible from the outside. Two overlapping runs both issue provider
+ * deletes (Pass 1 orphan sweep, Pass 3 failed cleanup) against the same rows,
+ * so overlapping was never safe. An overlapping run is now a no-op that
+ * returns `skipped: true`.
+ *
+ * Uses a dedicated session client so the lock is tied to a connection we
+ * control for the whole run. Mirrors `runOpenRouterUsageSyncLocked`.
+ */
+export async function runReconcilerLocked(
+  opts: ReconcileOpts = {},
+): Promise<ReconcileReport> {
+  const client = await pool.connect()
+  let locked = false
+  try {
+    const res = await client.query<{ ok: boolean }>(
+      "SELECT pg_try_advisory_lock($1) AS ok",
+      [RECONCILE_LOCK_KEY],
+    )
+    locked = res.rows[0]?.ok === true
+    if (!locked) {
+      console.log(
+        JSON.stringify({ kind: "reconcile_report", skipped: true, reason: "lock_contended" }),
+      )
+      return {
+        orphansDetected: 0,
+        orphansDeleted: 0,
+        deletingRetried: 0,
+        deletingCompleted: 0,
+        failedCleanups: 0,
+        stuckProvisioning: 0,
+        openRouterKeysRevoked: 0,
+        openRouterLimitsHealed: 0,
+        customHostnamesVerified: 0,
+        errors: [],
+        skipped: true,
+      }
+    }
+    return await runReconciler(opts)
+  } finally {
+    if (locked) {
+      try {
+        await client.query("SELECT pg_advisory_unlock($1)", [RECONCILE_LOCK_KEY])
+      } catch {
+        // session ending / lock already released — harmless
+      }
+    }
+    client.release()
+  }
 }

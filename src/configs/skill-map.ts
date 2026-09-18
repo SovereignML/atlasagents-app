@@ -11,6 +11,11 @@ import { defaultSkillsForCategory } from "@/configs/agent-skills"
  * (actual tool invocation) come later; for now they're descriptive.
  */
 export const SKILL_MAP: Record<string, readonly string[]> = {
+  default: [
+    "understand_request",
+    "plan_steps",
+    "summarize_outcome",
+  ],
   automation: [
     "schedule_task",
     "parse_structured_data",
@@ -38,13 +43,6 @@ export const SKILL_MAP: Record<string, readonly string[]> = {
     "summarize_document",
     "extract_entities",
     "compare_sources",
-  ],
-  content: [
-    "draft_post",
-    "rewrite_tone",
-    "generate_outline",
-    "seo_optimize",
-    "schedule_publish",
   ],
   sales: [
     "score_lead",
