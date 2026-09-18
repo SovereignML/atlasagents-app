@@ -47,4 +47,20 @@ describe("OpenClaw VPS Node floor", () => {
     // produce a broken agent, so failing the bake is the correct outcome.
     expect(script).toContain("--engine-strict")
   })
+
+  it("does not retry an engine mismatch", () => {
+    // Observed in production: three identical EBADENGINE attempts per bake.
+    // Retrying a deterministic refusal wastes ~25s and, worse, fills the
+    // bounded bootstrap.log tail with three copies of the same error, pushing
+    // out the context above it that names the step and the versions.
+    const script = openclawRuntime.renderBootstrap({
+      gatewayPort: openclawRuntime.gatewayPort,
+      webuiEnabled: false,
+    })
+    expect(script).toContain("EBADENGINE")
+    expect(script).toContain("not retrying")
+    // The transient-failure retry loop must survive alongside it.
+    expect(script).toContain("npm install attempt $a/$max")
+    expect(script).toContain("npm cache clean --force")
+  })
 })
