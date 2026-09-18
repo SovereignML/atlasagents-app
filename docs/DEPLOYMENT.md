@@ -385,13 +385,29 @@ the tail of `/var/log/bootstrap.log` naming the step that failed. A bake that
 *hung* rather than failed is probed once per refill run before it is destroyed,
 so it reports whether the box was unreachable or wedged on a particular step.
 
+**This has happened once already, and it is the first thing to rule out.** In
+September 2026 `openclaw@2026.9.4` raised `engines.node` to
+`>=24.16.0 <25 || >=26.1.0` while the bootstrap installed Node 22 — so
+`npm install --engine-strict` refused with EBADENGINE, every OpenClaw bake died
+at `install_runtime`, and the pool looped on it. Hermes was unaffected because
+it is a Python runtime. The fix was to derive the NodeSource major from the
+runtime's own `minNode` (they used to be able to disagree) and raise OpenClaw's
+floor to 24.16.0. **The same break would have failed every cold VPS deploy and
+every BYOS install too** — the pool was just the loudest symptom.
+
+To check whether a runtime has outrun its Node floor:
+
+```bash
+npm view openclaw engines      # compare against OPENCLAW_VPS_MIN_NODE
+```
+
 Common causes, in rough order:
 
-- **A package that no longer installs on the pool image.** The runtime is
-  installed as `<pkg>@latest` with `--engine-strict`, so an upstream release that
-  raises its Node engine requirement above the bootstrap's `minNode` breaks every
-  bake with no deploy on our side. Pin `OPENCLAW_VERSION` / the Hermes equivalent
-  to recover, then raise `minNode` deliberately.
+- **The runtime package outgrew the box's Node.** As above. The runtime is
+  installed as `<pkg>@latest`, so an upstream release can break every bake with
+  no deploy on our side. Pin `OPENCLAW_VERSION` in `.env` to recover
+  immediately, then raise `minNode` deliberately (which now also selects the
+  Node the bootstrap installs).
 - **An OOM during the runtime install** on an undersized `POOL_PLAN_CODE`.
 - **A provider quota** refusing new VMs.
 - **A broken apt repo** — the bootstrap adds the Caddy, NodeSource and Google

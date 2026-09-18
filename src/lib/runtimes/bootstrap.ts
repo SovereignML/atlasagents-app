@@ -42,6 +42,32 @@ function shellEscape(value: string): string {
 }
 
 /**
+ * Which NodeSource distribution to install, derived from the runtime's own
+ * `minNodeVersion`.
+ *
+ * This used to be hardcoded to `setup_22.x` while `minNodeVersion` was a
+ * parameter, so the two could silently disagree — and they did. OpenClaw
+ * declared a minimum of 22.14.0, the box got Node 22, `verify_node` passed, and
+ * then `npm install --engine-strict openclaw@latest` refused with EBADENGINE
+ * because the published package requires Node >=24.16. Every OpenClaw bootstrap
+ * failed at `install_runtime`: warm-pool bakes looped create/fail/destroy, and
+ * cold VPS and BYOS installs failed outright.
+ *
+ * Deriving it means a runtime states its Node requirement in exactly one place
+ * and the box gets that Node. Raising a runtime's `minNode` is now sufficient.
+ */
+function nodeSourceMajor(minNodeVersion: string): number {
+  const major = Number.parseInt(minNodeVersion.split(".")[0] ?? "", 10)
+  if (!Number.isInteger(major) || major < 18 || major > 99) {
+    throw new Error(
+      `Cannot derive a NodeSource major from minNodeVersion "${minNodeVersion}" — ` +
+        "expected a semver like \"24.16.0\".",
+    )
+  }
+  return major
+}
+
+/**
  * Install a headless browser for the browser tool. Spliced into a runtime's
  * `runtimeInstallSteps`, so it runs inside the framing where `step` and
  * `APT_OPTS` are defined.
@@ -72,6 +98,8 @@ export function buildBootstrapFraming(
   // Default 22 / manage-the-firewall preserves the managed-VPS behaviour these
   // options were factored out of; BYOS passes the real port and `false`.
   const sshPortLiteral = String(opts.sshPort ?? 22)
+  // Install the Node major the runtime actually requires (see nodeSourceMajor).
+  const nodeMajor = nodeSourceMajor(opts.minNodeVersion)
   const manageFirewall = opts.manageFirewall !== false
   const firewallEnableBlock = manageFirewall
     ? "  yes | ufw enable || true"
@@ -164,7 +192,7 @@ curl --retry 5 --retry-delay 3 -1sLf 'https://dl.cloudsmith.io/public/caddy/stab
 curl --retry 5 --retry-delay 3 -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
 
 step "nodejs_repo"
-curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors https://deb.nodesource.com/setup_22.x | bash -
+curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors https://deb.nodesource.com/setup_${nodeMajor}.x | bash -
 
 step "install_nodejs_caddy"
 apt-get $APT_OPTS install -y nodejs caddy

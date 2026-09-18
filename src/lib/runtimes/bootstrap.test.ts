@@ -109,3 +109,39 @@ describe("buildBootstrapFraming() — host-state safety", () => {
     expect(script).toContain("DPkg::Lock::Timeout=120")
   })
 })
+
+describe("buildBootstrapFraming() — Node version contract", () => {
+  // The bug this locks down: the framing hardcoded `setup_22.x` while
+  // `minNodeVersion` was a parameter, so a runtime could declare one Node and
+  // the box could get another. OpenClaw declared 22.14.0, got Node 22, passed
+  // verify_node, and then npm refused the package with EBADENGINE because it
+  // requires >=24.16 — failing every fresh OpenClaw bootstrap at
+  // `install_runtime`, which the warm pool then retried forever.
+  it("installs the NodeSource major the runtime actually asks for", () => {
+    expect(buildBootstrapFraming({ ...opts, minNodeVersion: "24.16.0" }, "")).toContain(
+      "deb.nodesource.com/setup_24.x",
+    )
+    expect(buildBootstrapFraming({ ...opts, minNodeVersion: "22.14.0" }, "")).toContain(
+      "deb.nodesource.com/setup_22.x",
+    )
+  })
+
+  it("never installs a Node older than the runtime's declared minimum", () => {
+    for (const min of ["22.14.0", "24.16.0", "26.1.0"]) {
+      const script = buildBootstrapFraming({ ...opts, minNodeVersion: min }, "")
+      const installed = Number(script.match(/setup_(\d+)\.x/)?.[1])
+      expect(installed).toBe(Number(min.split(".")[0]))
+      // verify_node checks the same value, so the two can no longer disagree.
+      expect(script).toContain(`RUNTIME_MIN_NODE='${min}'`)
+    }
+  })
+
+  it("refuses a minNodeVersion it cannot derive a major from", () => {
+    // Failing at render time is the point: a silently wrong Node major is what
+    // produced an endless create/fail/destroy loop in production.
+    expect(() => buildBootstrapFraming({ ...opts, minNodeVersion: "latest" }, "")).toThrow(
+      /Cannot derive a NodeSource major/,
+    )
+    expect(() => buildBootstrapFraming({ ...opts, minNodeVersion: "" }, "")).toThrow()
+  })
+})
