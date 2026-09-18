@@ -90,6 +90,7 @@ import {
 } from "@/configs/agent-tools"
 import type { ToolService, ToolServiceRoute } from "@/lib/runtimes/types"
 import { claimWarmVm, isPoolEnabled } from "@/lib/warm-pool"
+import { platformOwnsHostVm } from "@/lib/byos-install"
 
 type Instance = InferSelectModel<typeof instances>
 
@@ -1523,6 +1524,19 @@ async function acquireBootedVm(
   runtime: RuntimeEngine,
   opts: AcquireOpts,
 ): Promise<AcquiredVm> {
+  // A BYOS agent must never reach this function. Everything below it creates,
+  // claims or deletes a machine, and a BYOS machine is the customer's hardware.
+  // provisionBotLocked already routes byos → provisionByosBot, so this can only
+  // fire if that routing is broken by a future refactor — which is exactly when
+  // we want a loud throw rather than a warm-pool claim (or a deleteVM in
+  // handleFailedAttempt) landing on someone's own server.
+  if (!platformOwnsHostVm(instance.deploymentTarget)) {
+    throw new Error(
+      `acquireBootedVm called for a ${instance.deploymentTarget} instance (${instance.id}); ` +
+        "the platform does not own that machine and must not create, claim or destroy it",
+    )
+  }
+
   // Sticky retry: an earlier attempt already created the VM.
   if (instance.vmId) {
     const provider = await getVmProviderById(instance.providerId)
