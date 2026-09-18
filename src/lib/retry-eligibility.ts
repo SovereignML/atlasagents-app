@@ -1,6 +1,8 @@
-// Whether a deployment may be retried. Kept dependency-free (no DB, no network,
-// no imports) so the decision matrix is unit-testable in isolation — the retry
-// route does the lookup, supplies the TTL, and calls this.
+// Whether a deployment may be retried. Kept free of DB/network so the decision
+// matrix is unit-testable in isolation — the retry route does the lookup,
+// supplies the TTL and the lock state, and calls this.
+
+import { classifyProvisioning } from "./provision-liveness"
 
 export type RetryProbe = {
   status: string
@@ -14,6 +16,13 @@ export type RetryProbe = {
    * of the reconciler's DB dependencies.
    */
   ttlMs: number
+  /**
+   * Whether the per-instance provisioning lock is held. `true` means a worker
+   * is genuinely mid-provision and retry must be refused however old the row
+   * looks; `false` means nothing is running it, so retry need not wait out the
+   * TTL at all. `null`/omitted falls back to the age heuristic.
+   */
+  lockHeld?: boolean | null
   /** Injectable for tests. */
   now?: number
 }
@@ -34,11 +43,12 @@ export type RetryDecision =
  *     retry endpoint refused it and the only thing that would ever move it was
  *     the reconciler, which ran nightly.
  *
- * "Stalled" reuses the reconciler's TTL deliberately: past that threshold the
- * reconciler would reclaim and tear the row down anyway, so allowing a
- * user-initiated retry at the same point is no more aggressive than the status
- * quo — and it cannot race a live provision, because a genuinely running one
- * holds the instance lock and `provisionBot` rejects a second entrant.
+ * "Stalled" is decided by `classifyProvisioning`, the same helper the
+ * reconciler uses, so the two can never disagree about whether a deploy is
+ * dead. It prefers the advisory lock over age: a running provision holds that
+ * lock for its whole duration and is never declared stalled, while a row whose
+ * worker died holds no lock and becomes retryable in ~2 minutes instead of
+ * after the (deliberately generous) TTL.
  */
 export function decideRetryEligibility(probe: RetryProbe): RetryDecision {
   if (probe.status === "failed_provisioning") {
@@ -47,8 +57,12 @@ export function decideRetryEligibility(probe: RetryProbe): RetryDecision {
 
   if (probe.status === "provisioning") {
     const since = probe.lastTransitionAt ?? probe.createdAt
-    const age = (probe.now ?? Date.now()) - since.getTime()
-    if (age > probe.ttlMs) {
+    const liveness = classifyProvisioning({
+      ageMs: (probe.now ?? Date.now()) - since.getTime(),
+      lockHeld: probe.lockHeld ?? null,
+      ttlMs: probe.ttlMs,
+    })
+    if (liveness === "dead") {
       return { ok: true, stalled: true }
     }
     return {

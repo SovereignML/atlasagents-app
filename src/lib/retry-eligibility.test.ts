@@ -94,4 +94,61 @@ describe("decideRetryEligibility()", () => {
       expect(d.ok === false && d.reason).toContain(status)
     },
   )
+
+  // ── Lock-aware behaviour ───────────────────────────────────────────
+  // The lock, not age, decides whether a `provisioning` row is dead.
+
+  it("refuses retry while the provisioning lock is held, however old the row is", () => {
+    // A BYOS Hermes install can legitimately outrun the TTL. Retrying it
+    // underneath itself would tear down a working deploy.
+    const d = decideRetryEligibility({
+      status: "provisioning",
+      lastTransitionAt: at(TTL * 5),
+      createdAt: at(TTL * 5),
+      ttlMs: TTL,
+      lockHeld: true,
+      now: NOW,
+    })
+    expect(d.ok).toBe(false)
+  })
+
+  it("allows retry well before the TTL when no lock is held", () => {
+    const d = decideRetryEligibility({
+      status: "provisioning",
+      lastTransitionAt: at(5 * 60 * 1000),
+      createdAt: at(5 * 60 * 1000),
+      ttlMs: TTL,
+      lockHeld: false,
+      now: NOW,
+    })
+    expect(d).toEqual({ ok: true, stalled: true })
+  })
+
+  it("does not retry a provision that just started and has not locked yet", () => {
+    const d = decideRetryEligibility({
+      status: "provisioning",
+      lastTransitionAt: at(5_000),
+      createdAt: at(5_000),
+      ttlMs: TTL,
+      lockHeld: false,
+      now: NOW,
+    })
+    expect(d.ok).toBe(false)
+  })
+
+  it("falls back to the TTL when the lock state is unknown", () => {
+    const probe = {
+      status: "provisioning",
+      lastTransitionAt: at(TTL + 1),
+      createdAt: at(TTL + 1),
+      ttlMs: TTL,
+      now: NOW,
+    }
+    expect(decideRetryEligibility({ ...probe, lockHeld: null })).toEqual({
+      ok: true,
+      stalled: true,
+    })
+    // Omitting lockHeld entirely must behave the same as null.
+    expect(decideRetryEligibility(probe)).toEqual({ ok: true, stalled: true })
+  })
 })

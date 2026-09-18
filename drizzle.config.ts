@@ -9,11 +9,14 @@ if (!process.env.DATABASE_URL) {
 
 export default defineConfig({
   schema: "./src/db/schema.ts",
-  // Versioned migrations live here. `npm run db:generate` writes SQL +
-  // snapshot into this directory; `npm run db:migrate` applies them.
-  // `npm run db:push` is the legacy direct-sync path — keep using it for
-  // local dev iteration, but production schema changes should ship a
-  // generated migration so they're reviewable and reversible.
+  // Output dir for `npm run db:generate`. NOTE: generate/migrate are NOT the
+  // shipping path today, and this comment used to claim the opposite.
+  // `drizzle-kit push` is authoritative — CLAUDE.md and NOT-TO-DO.md both
+  // forbid running generate/migrate against a real database, because there is
+  // no populated migrations journal, so `migrate` would try to replay
+  // everything and fail on already-existing columns. The deploy entrypoint
+  // runs `push --force` non-fatally. If versioned migrations ever become the
+  // real path, that decision has to be made in those two files first.
   out: "./drizzle/migrations",
   dialect: "postgresql",
   dbCredentials: { url: process.env.DATABASE_URL },

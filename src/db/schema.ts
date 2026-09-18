@@ -622,7 +622,11 @@ export const instanceAccess = pgTable(
 // Now: connecting a server is free and creates one of these rows. We SSH in,
 // verify access, read the real hardware, and show it. Agents reference the
 // server (instances.byosServerId) and are what actually costs money. One server
-// is designed to hold several agents; v1 enforces one, v2 lifts that.
+// is designed to hold several agents, and nothing caps that today: the
+// install endpoint does NOT limit agents per server. `capacityAgents` and the
+// "room for about N" line it drives are advisory sizing only — a customer's
+// own hardware is theirs to overcommit. (Earlier revisions of this comment
+// claimed v1 enforced one agent per server. It never did.)
 //
 // No customer SSH secret is ever stored — we authenticate with the platform
 // fleet key, which they install themselves.
@@ -2041,7 +2045,8 @@ export const byosServersRelations = relations(byosServers, ({ one, many }) => ({
   team: one(teams, { fields: [byosServers.teamId], references: [teams.id] }),
   user: one(users, { fields: [byosServers.userId], references: [users.id] }),
   // Designed as many from day one: one server is meant to hold several agents.
-  // v1 enforces a single agent at the install endpoint, not in the schema.
+  // Not capped anywhere — neither here nor at the install endpoint. See the
+  // ByosServer block above.
   instances: many(instances),
 }))
 

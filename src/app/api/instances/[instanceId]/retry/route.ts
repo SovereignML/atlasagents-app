@@ -7,6 +7,7 @@ import { canOperateInstance } from "@/lib/instance-access"
 import { retryProvisionBot } from "@/lib/provisioner"
 import { PROVISIONING_TTL_MS } from "@/lib/reconciler"
 import { decideRetryEligibility } from "@/lib/retry-eligibility"
+import { isInstanceLockHeld } from "@/lib/instance-state"
 
 // Retry a failed deployment by recreating from scratch: any partial provider
 // VM + managed DNS record is torn down, provisioning state is cleared, and a
@@ -42,6 +43,12 @@ export async function POST(
     lastTransitionAt: instance.lastTransitionAt,
     createdAt: instance.createdAt,
     ttlMs: PROVISIONING_TTL_MS,
+    // The authoritative signal: a live provision holds this lock for its whole
+    // run, so this both protects a slow-but-working deploy from being retried
+    // underneath itself and lets a genuinely dead one be retried in ~2 minutes
+    // rather than after the TTL.
+    lockHeld:
+      instance.status === "provisioning" ? await isInstanceLockHeld(instance.id) : null,
   })
   if (!decision.ok) {
     return NextResponse.json({ error: decision.reason }, { status: 409 })

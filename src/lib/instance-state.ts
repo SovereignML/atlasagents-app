@@ -156,6 +156,26 @@ export async function withInstanceLock<T>(
 }
 
 /**
+ * Is another worker holding this instance's provisioning lock right now?
+ *
+ * Implemented as a try-acquire: if we get the lock, nobody held it. The lock is
+ * an `xact` lock, so it is released the moment this probe's transaction ends —
+ * acquiring it here cannot block a provision that starts a millisecond later.
+ *
+ * Returns `null` when the probe itself fails, so callers can tell "not held"
+ * apart from "could not tell" instead of treating a database blip as a dead
+ * deploy. See `classifyProvisioning` in provision-liveness.ts.
+ */
+export async function isInstanceLockHeld(instanceId: string): Promise<boolean | null> {
+  try {
+    const probe = await withInstanceLock(instanceId, async () => true)
+    return !probe.acquired
+  } catch {
+    return null
+  }
+}
+
+/**
  * Best-effort: drive a still-non-terminal instance to `failed_provisioning`.
  *
  * The target-specific provisioners already mark failed via `rollbackProvisioning`,
