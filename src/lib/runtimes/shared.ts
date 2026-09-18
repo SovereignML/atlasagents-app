@@ -353,13 +353,27 @@ WantedBy=multi-user.target
 RUNTIME_PKG_SPEC=${shellEscapeForBash(pkgSpec)}
 
 install_runtime_pkg() {
-  local max=3 a=1
+  local max=3 a=1 out
+  out="$(mktemp)"
   while [ "$a" -le "$max" ]; do
     echo "=== npm install attempt $a/$max ==="
-    if SHARP_IGNORE_GLOBAL_LIBVIPS=1 npm install -g --no-audit --no-fund --loglevel=warn --engine-strict "$RUNTIME_PKG_SPEC"; then
+    if SHARP_IGNORE_GLOBAL_LIBVIPS=1 npm install -g --no-audit --no-fund --loglevel=warn --engine-strict "$RUNTIME_PKG_SPEC" 2>&1 | tee "$out"; then
+      rm -f "$out"
       return 0
     fi
+    # EBADENGINE is deterministic — the published package does not support the
+    # Node on this box, and no amount of retrying changes that. Bail on the
+    # first one. Retrying it three times cost ~25s per bake and, worse, filled
+    # the bounded log tail with three identical errors, crowding out the
+    # context above them that says which step and which versions.
+    if grep -q "EBADENGINE" "$out"; then
+      echo "npm refused $RUNTIME_PKG_SPEC for this Node version (EBADENGINE) — not retrying."
+      echo "Raise the runtime's minNode (which also selects the Node the bootstrap installs) or pin the package version."
+      rm -f "$out"
+      return 1
+    fi
     if [ "$a" -eq "$max" ]; then
+      rm -f "$out"
       return 1
     fi
     if [ "$a" -eq $((max - 1)) ]; then
@@ -368,6 +382,7 @@ install_runtime_pkg() {
     sleep $((5 * a))
     a=$((a + 1))
   done
+  rm -f "$out"
   return 1
 }
 
