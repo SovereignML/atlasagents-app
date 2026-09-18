@@ -34,8 +34,21 @@ const LABELS: Record<string, string> = {
   branding: "Branding",
 }
 
-function labelFor(segment: string) {
-  return LABELS[segment] ?? "Detail"
+/**
+ * Full-path overrides, checked before the per-segment labels.
+ *
+ * Needed where the same segment means different things in different places:
+ * "deploy" under /dashboard is the managed-VPS wizard, but under /dashboard/byos
+ * it installs an agent onto hardware the customer already owns — nothing is
+ * deployed on our side, so "Deploy Agent" read wrong there.
+ */
+const PATH_LABELS: Record<string, string> = {
+  "/dashboard/byos/deploy": "Install an agent",
+  "/dashboard/byos/connect": "Connect a server",
+}
+
+function labelFor(segment: string, path: string) {
+  return PATH_LABELS[path] ?? LABELS[segment] ?? "Detail"
 }
 
 export function DashboardBreadcrumbs() {
@@ -43,11 +56,14 @@ export function DashboardBreadcrumbs() {
   const segments = pathname.split("/").filter(Boolean)
 
   // Build cumulative crumbs starting at /dashboard.
-  const crumbs = segments.map((segment, i) => ({
-    label: labelFor(segment),
-    href: "/" + segments.slice(0, i + 1).join("/"),
-    isLast: i === segments.length - 1,
-  }))
+  const crumbs = segments.map((segment, i) => {
+    const href = "/" + segments.slice(0, i + 1).join("/")
+    return {
+      label: labelFor(segment, href),
+      href,
+      isLast: i === segments.length - 1,
+    }
+  })
 
   if (crumbs.length === 0) return null
 

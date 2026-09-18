@@ -99,7 +99,11 @@ export const AGENT_SKILLS: readonly AgentSkill[] = [
     icon: "PenLine",
     description:
       "Draft on-brand content with a clear structure and sensible SEO, proposing an outline before long-form.",
-    category: "content",
+    // Re-homed from the retired "content" category onto the Social Media
+    // Agent, which absorbed content duties when Content Agent was removed.
+    // Left uncategorized it would have matched no template and stopped being
+    // offered as a default skill to anyone.
+    category: "social",
     requiredTools: ["web_search"],
     promptGuidance:
       "For content, match the brand voice and propose a structure/outline before drafting long-form. Apply sensible on-page SEO (clear title, headings, natural keyword use) without keyword stuffing.",

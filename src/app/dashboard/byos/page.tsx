@@ -12,8 +12,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
-import { getUserTeam } from "@/lib/team"
-import { getEffectiveUserId } from "@/lib/effective-user"
+import { getEffectiveTeam } from "@/lib/effective-user"
 import { listServersForTeam, MAX_IDLE_SERVERS_PER_TEAM } from "@/lib/byos-server"
 import { BYOS_PLAN, formatUsd } from "@/configs/plans"
 import { ServerCard, type ServerCardData } from "./server-card"
@@ -29,11 +28,14 @@ const PLAN_FEATURES = [
 export default async function ByosPage() {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
-  // Resolve through impersonation so an admin viewing-as a user sees their servers.
-  const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
-  const team = await getUserTeam(effectiveUserId)
+  // Resolve through impersonation so an admin viewing-as a user sees their
+  // servers. getEffectiveTeam (not getUserTeam(effectiveUserId)) because under
+  // "act as customer" the team is PINNED to the child team in the cookie, which
+  // is not necessarily that owner's mutable activeTeamId — and this page must
+  // resolve the same team the connect/install routes write to.
+  const ctx = await getEffectiveTeam()
 
-  const servers = team ? await listServersForTeam(team.teamId) : []
+  const servers = ctx ? await listServersForTeam(ctx.teamId) : []
   const idleUsed = servers.filter((s) => s.agentCount === 0).length
 
   const cards: ServerCardData[] = servers.map((s) => ({

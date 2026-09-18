@@ -16,6 +16,24 @@ export type AgentCategory = {
 
 export const AGENT_CATEGORIES: readonly AgentCategory[] = [
   {
+    // The engine as it ships, with no role layered on top. Deliberately first:
+    // it is the "I just want the agent" choice, and every other entry in this
+    // list is a specialization of it. Its label is resolved at render time to
+    // "Default Hermes Agent" or "Default OpenClaw Agent" from the runtime the
+    // user picked a step earlier — see `categoryDisplayName`.
+    slug: "default",
+    name: "Default Agent",
+    role: "General Assistant",
+    icon: "Bot",
+    description:
+      "The runtime's stock agent, exactly as it ships. General-purpose, with no role persona or playbooks applied.",
+    examples: [
+      "General-purpose chat & tasks",
+      "Run whatever you instruct it to",
+      "A blank slate to build on",
+    ],
+  },
+  {
     slug: "automation",
     name: "Automation Agent",
     role: "Automation Specialist",
@@ -64,18 +82,6 @@ export const AGENT_CATEGORIES: readonly AgentCategory[] = [
     ],
   },
   {
-    slug: "content",
-    name: "Content Agent",
-    role: "Content Strategist",
-    icon: "PenTool",
-    description: "Create, schedule, and optimize content across channels.",
-    examples: [
-      "Blog & social media posts",
-      "Email newsletter drafts",
-      "SEO content optimization",
-    ],
-  },
-  {
     slug: "sales",
     name: "Sales Agent",
     role: "Sales Development Rep",
@@ -89,10 +95,14 @@ export const AGENT_CATEGORIES: readonly AgentCategory[] = [
   },
   {
     slug: "social",
-    name: "Social Media Manager",
+    name: "Social Media Agent",
+    // The job title stays "Social Media Manager" — that is what the agent
+    // self-identifies as in its persona files. Only the product-facing label
+    // changed, to match the naming of every other entry ("… Agent").
     role: "Social Media Manager",
     icon: "Share2",
-    description: "Your autonomous social media team: generate content, schedule posts, and grow your audience.",
+    description:
+      "Your autonomous social media team: generate content, schedule posts, and grow your audience.",
     examples: [
       "Content generation & scheduling",
       "Engagement optimization",
@@ -119,6 +129,8 @@ export const AGENT_CATEGORIES: readonly AgentCategory[] = [
  * persona) and `generateIdentityMd` (the supporting identity card).
  */
 export const CATEGORY_DIRECTIVES: Record<string, string> = {
+  default:
+    "You are a general-purpose assistant with no specialization. Follow the user's instructions directly and do not assume a domain or a house style they have not asked for. When a task is ambiguous, ask rather than guess.",
   automation:
     "You specialize in automating workflows, processing structured data, and orchestrating multi-step business operations without human intervention. Prefer deterministic execution over exploratory reasoning.",
   devops:
@@ -127,6 +139,13 @@ export const CATEGORY_DIRECTIVES: Record<string, string> = {
     "You specialize in customer-facing support: triaging tickets, drafting empathetic replies, and escalating to humans when confidence is low. Always acknowledge the user's frustration before proposing a fix.",
   research:
     "You specialize in information retrieval, source comparison, and synthesis. Cite sources when available. Distinguish facts from inferences. Summarize first, then offer to expand.",
+  // LEGACY — "Content Agent" was retired from AGENT_CATEGORIES, so this is no
+  // longer selectable. Kept because agents deployed while it existed still
+  // carry `use_case: "content"`, and their persona is regenerated from this map
+  // on every reprovision/agent-type save. Dropping it would silently demote
+  // those agents to the generic directive. Remove once none remain:
+  //   SELECT COUNT(*) FROM "Instance"
+  //   WHERE status != 'deleted' AND "agentConfig"->>'use_case' = 'content';
   content:
     "You specialize in content creation, editing, and SEO optimization across blogs, social media, and newsletters. Match the brand voice. Propose structure before drafting long-form content.",
   sales:
@@ -135,6 +154,39 @@ export const CATEGORY_DIRECTIVES: Record<string, string> = {
     "You specialize in social media management: generating platform-native captions, scheduling posts, analyzing engagement metrics, and proposing content calendars. Adapt tone per platform (LinkedIn vs Twitter vs Instagram).",
   custom:
     "You are a general-purpose specialist. Adapt your approach to the user's domain and instructions. Ask clarifying questions when the task is ambiguous.",
+}
+
+/** The stock-engine template, whose label depends on the chosen runtime. */
+export const DEFAULT_CATEGORY_SLUG = "default"
+
+/**
+ * Runtime id → product label. A deliberate copy of the two runtime display
+ * names rather than an import: this module is pulled into client components
+ * (both deploy wizards, the agent-type picker), and `@/lib/runtimes` drags the
+ * provisioner's module graph with it. Source of truth is
+ * `src/lib/runtimes/{openclaw,hermes}.ts` — keep in sync if a third engine
+ * lands.
+ */
+const RUNTIME_LABELS: Record<string, string> = {
+  openclaw: "OpenClaw",
+  hermes: "Hermes",
+}
+
+/**
+ * The label to show for a category.
+ *
+ * Identical to `category.name` for every specialization. The `default`
+ * template is the exception: it has no identity of its own, so it is named
+ * after the engine it runs — "Default Hermes Agent" / "Default OpenClaw
+ * Agent". Falls back to the plain "Default Agent" when no runtime is known
+ * yet (or is one we don't have a label for), so the UI never renders
+ * "Default undefined Agent".
+ */
+export function categoryDisplayName(slug: string, runtime?: string | null): string {
+  const category = findCategory(slug)
+  if (category.slug !== DEFAULT_CATEGORY_SLUG) return category.name
+  const label = runtime ? RUNTIME_LABELS[runtime] : undefined
+  return label ? `Default ${label} Agent` : category.name
 }
 
 /** Resolve a category by slug, falling back to "custom". */
