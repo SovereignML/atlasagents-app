@@ -21,6 +21,8 @@ import {
   providers,
   eq,
   and,
+  desc,
+  like,
   inArray,
   isNotNull,
   sql,
@@ -34,9 +36,18 @@ import {
   sshRun,
   sshRunScript,
   sshObserveHostFingerprint,
+  sshReadBootstrapLogTail,
   type SshTarget,
 } from "@/lib/ssh"
 import { BOOTSTRAP_STATUS } from "@/lib/runtimes/bootstrap"
+import {
+  describeBakeFailure,
+  describeOpenCircuit,
+  isChurnedVm,
+  isCircuitOpen,
+  MIN_VIABLE_AGE_MS,
+  recordFailure,
+} from "@/lib/warm-pool-breaker"
 
 export type PoolTarget = {
   runtime: RuntimeId
@@ -54,12 +65,45 @@ export type WarmPoolReport = {
   reaped: number
   created: number
   errors: string[]
+  /** Pool keys whose creates are paused by the failure circuit breaker. */
+  pausedKeys?: string[]
   /** True when a run was skipped because another refill already held the lock. */
   skipped?: boolean
 }
 
 /** How long a VM may sit in creating/bootstrapping before we give up on it. */
 const BOOTSTRAP_TTL_MS = 30 * 60 * 1000 // 30 min — comfortably over a cold bootstrap
+
+/**
+ * Bytes of bootstrap.log kept on a failed bake. Smaller than the VPS path's 24KB
+ * tail: this is a pool VM with no customer waiting on it, and the value is
+ * copied into an OrphanEvent that outlives the row — the failing step and its
+ * immediate output sit at the very end of the log, so 8KB is ample.
+ */
+const WARM_LOG_TAIL_BYTES = 8_000
+/** Hard cap on `lastError` so one runaway log can't bloat the row. */
+const LAST_ERROR_MAX_CHARS = 12_000
+/**
+ * Hung bakes diagnosed per refill run. A hung pool fails the same way on every
+ * VM, so one diagnosis per run is the whole signal; the cap keeps this cron
+ * short (plan 028's no-long-work rule) when several rows time out at once.
+ */
+const MAX_HUNG_DIAGNOSES_PER_RUN = 1
+
+/**
+ * Recent bake-failure timestamps per pool key, feeding the create circuit
+ * breaker (warm-pool-breaker.ts). Without it a broken bake loops forever:
+ * failed row reaped within 60s → deficit → new VM → fails the same way, each
+ * lap billing a real VM.
+ *
+ * Deliberately in-process rather than a table. Refills are already serialized
+ * by an advisory lock and the app runs as a single pm2 fork, so there is one
+ * writer; and losing the count on restart is the right failure mode for a
+ * breaker — a restart gets a clean chance to refill rather than inheriting a
+ * latch nobody can see. The durable record of *why* is the OrphanEvent written
+ * by persistBakeFailure() — NOT WarmVm.lastError, whose row the reaper deletes.
+ */
+const bakeFailures = new Map<string, number[]>()
 /** Recycle ready VMs older than this so `latest` runtime packages don't drift. */
 const READY_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000 // 3 days
 /** A claimed row whose deploy is long done; the instance owns the VM now. */
@@ -170,19 +214,40 @@ async function createOneWarmVm(target: PoolTarget): Promise<void> {
     userData: bootstrapScript,
   })
 
-  await db.insert(warmVms).values({
-    poolKey: poolKeyFor(target),
-    providerId,
-    providerSlug: target.providerSlug,
-    providerPlanCode: target.planCode,
-    providerRegionCode: target.regionCode,
-    runtime: runtime.id,
-    webuiEnabled: target.webuiEnabled,
-    vmId: vm.id,
-    ipAddress: vm.ipv4?.[0] ?? null,
-    rootPasswordEnc: encryptSecret(rootPassword),
-    status: "creating",
-  })
+  // The VM is now billing. If we cannot record it, destroy it immediately
+  // rather than letting it leak: an untracked VM has no WarmVm row, so the pool
+  // sees the deficit as unmet and creates *another* one on the next 60s tick,
+  // while the untracked one bills until the reconciler's orphan sweep (up to 15
+  // min later, and only after its grace period) happens to notice. That is the
+  // same runaway shape as a failing bake, arriving by a different door.
+  try {
+    await db.insert(warmVms).values({
+      poolKey: poolKeyFor(target),
+      providerId,
+      providerSlug: target.providerSlug,
+      providerPlanCode: target.planCode,
+      providerRegionCode: target.regionCode,
+      runtime: runtime.id,
+      webuiEnabled: target.webuiEnabled,
+      vmId: vm.id,
+      ipAddress: vm.ipv4?.[0] ?? null,
+      rootPasswordEnc: encryptSecret(rootPassword),
+      status: "creating",
+    })
+  } catch (err) {
+    console.error(
+      `[warm-pool] could not record warm VM ${vm.id} (${target.providerSlug}); destroying it so it does not bill untracked:`,
+      err,
+    )
+    try {
+      await provider.deleteVM(vm.id)
+    } catch {
+      // The orphan sweep is the backstop — it matches on the "sovereignml" tag
+      // this VM carries, and the row that would have exempted it was never
+      // written, so it will be collected there.
+    }
+    throw err
+  }
 }
 
 /**
@@ -302,9 +367,21 @@ async function advanceWarmVm(row: typeof warmVms.$inferSelect): Promise<{
     }
 
     if (status.startsWith("failed:")) {
+      // Capture the evidence NOW, while the box is still alive and we already
+      // hold a working SSH session. The reaper destroys this VM (and deletes
+      // this row) within ~60s, so a bare `bootstrap failed:<step>` would be the
+      // only trace left — enough to know the bake broke, never enough to know
+      // why. The log tail is what names the failing command.
+      const logTail = await sshReadBootstrapLogTail(target, WARM_LOG_TAIL_BYTES)
       await db
         .update(warmVms)
-        .set({ status: "failed", lastError: `bootstrap ${status}` })
+        .set({
+          status: "failed",
+          lastError: `bootstrap ${status}\n--- bootstrap.log tail ---\n${logTail}`.slice(
+            0,
+            LAST_ERROR_MAX_CHARS,
+          ),
+        })
         .where(eq(warmVms.id, row.id))
       return { promotedReady: false }
     }
@@ -358,6 +435,73 @@ async function advanceWarmVm(row: typeof warmVms.$inferSelect): Promise<{
   }
 
   return { promotedReady: false }
+}
+
+/**
+ * Best-effort diagnosis of a bake that never finished. A hung row has no
+ * `lastError` — it timed out rather than reporting failure — so without this the
+ * only durable fact is "it hung", which does not tell you whether the box was
+ * unreachable, still chewing on apt, or wedged on one step.
+ *
+ * Tightly bounded and never throws: this runs inside the refill cron, which must
+ * stay short.
+ */
+async function diagnoseHungBake(row: typeof warmVms.$inferSelect): Promise<string> {
+  if (!row.ipAddress) return "no IP was ever assigned (provider never reported a running VM)"
+  const target: SshTarget = { host: row.ipAddress }
+  try {
+    await sshWaitReady(target, 10_000, 5_000)
+  } catch {
+    return `unreachable over SSH at ${row.ipAddress} after ${BOOTSTRAP_TTL_MS / 60_000}m`
+  }
+  let status = "(unknown)"
+  try {
+    const r = await sshRun(target, `cat ${BOOTSTRAP_STATUS} 2>/dev/null || echo pending`)
+    status = r.stdout.trim() || "(empty)"
+  } catch {
+    // fall through — the log tail is still worth having
+  }
+  const logTail = await sshReadBootstrapLogTail(target, WARM_LOG_TAIL_BYTES)
+  return `still at bootstrap status "${status}"\n--- bootstrap.log tail ---\n${logTail}`
+}
+
+/**
+ * Write a bake failure somewhere that OUTLIVES the row.
+ *
+ * The reaper deletes the WarmVm row seconds after the failure, taking
+ * `lastError` with it — so the pool could fail thousands of times and leave
+ * nothing behind to diagnose from. OrphanEvent is already the ledger for reaped
+ * warm VMs (they have no Instance row to carry state), so the reason goes there,
+ * plus stderr for whoever is reading pm2 logs.
+ */
+async function persistBakeFailure(
+  row: typeof warmVms.$inferSelect,
+  reason: string,
+): Promise<string> {
+  const notice = describeBakeFailure(
+    {
+      poolKey: row.poolKey,
+      vmId: row.vmId,
+      status: row.status,
+      createdAtMs: row.createdAt?.getTime() ?? null,
+      reason,
+    },
+    Date.now(),
+  )
+  console.error(`[warm-pool] ${notice}`)
+  try {
+    await db.insert(orphanEvents).values({
+      vmId: row.vmId ?? row.id,
+      action: "failed",
+      ipAddress: row.ipAddress,
+      resolvedAt: new Date(),
+      detail: notice.slice(0, LAST_ERROR_MAX_CHARS),
+    })
+  } catch {
+    // Durable-record insert is best-effort — never let it block the reap, and
+    // the console line above is already written.
+  }
+  return notice
 }
 
 /** Delete a warm VM at the provider + drop its row. Best-effort on the VM delete. */
@@ -439,19 +583,74 @@ export async function refillWarmPool(): Promise<WarmPoolReport> {
       .map((t) => poolKeyFor(t)),
   )
   const now = Date.now()
+  /** Bounds the hung-bake probing below to MAX_HUNG_DIAGNOSES_PER_RUN. */
+  let hungDiagnosed = 0
   const reapCandidates = await db.query.warmVms.findMany({})
   for (const row of reapCandidates) {
     const created = row.createdAt?.getTime() ?? now
     const ready = row.readyAt?.getTime() ?? now
     const claimed = row.claimedAt?.getTime() ?? now
     const staleKey = !activeKeys.has(row.poolKey)
+    const bakeFailed = row.status === "failed"
+    const bakeHung =
+      ["creating", "bootstrapping"].includes(row.status) && now - created > BOOTSTRAP_TTL_MS
     const shouldReap =
       staleKey ||
-      row.status === "failed" ||
-      (["creating", "bootstrapping"].includes(row.status) && now - created > BOOTSTRAP_TTL_MS) ||
+      bakeFailed ||
+      bakeHung ||
       (row.status === "ready" && now - ready > READY_MAX_AGE_MS) ||
       (row.status === "claimed" && now - claimed > CLAIMED_TTL_MS)
     if (!shouldReap) continue
+
+    // A settled `claimed` row is success — we drop the row and the instance
+    // keeps the VM, so nothing is destroyed and nothing is wasted.
+    const destroysVm = row.status !== "claimed"
+    // Beyond an outright bake failure and one that never finished, count any
+    // reap that destroys a VM too young to have been useful. A stale poolKey is
+    // *normally* a config change and a stale `ready` row is the 3-day recycle —
+    // but either one firing on a VM minutes old means create and reap disagree,
+    // and that is a money-burning loop no matter which rule is doing the
+    // burning. Age catches every loop shape; the bake-failure check alone only
+    // caught one of them.
+    const churned =
+      destroysVm && !bakeFailed && !bakeHung && isChurnedVm(row.createdAt?.getTime() ?? null, now)
+
+    if (bakeFailed || bakeHung || churned) {
+      bakeFailures.set(
+        row.poolKey,
+        recordFailure(bakeFailures.get(row.poolKey) ?? [], now),
+      )
+      // Preserve WHY before destroyWarmVm() deletes the row. A failed row
+      // already carries the bootstrap log tail in lastError (captured at the
+      // moment of failure); a hung one carries nothing, so probe it — capped
+      // per run so a wholly-broken pool can't stretch this cron out.
+      let reason = row.lastError ?? "(no lastError recorded)"
+      if (churned) {
+        // Name the rule that fired, since for a churn reap the rule IS the bug.
+        const rule = staleKey
+          ? `its poolKey "${row.poolKey}" matches no configured target (create and reap disagree — ` +
+            `check POOL_PROVIDER_SLUG / POOL_PLAN_CODE / POOL_REGION_CODE / POOL_SIZE_*)`
+          : `the "${row.status}" reap rule`
+        reason =
+          `destroyed by ${rule} at ${Math.round((now - created) / 1000)}s old — under the ` +
+          `${MIN_VIABLE_AGE_MS / 60_000}m minimum viable age, so this VM was billed and never usable`
+      } else if (bakeHung) {
+        if (hungDiagnosed < MAX_HUNG_DIAGNOSES_PER_RUN) {
+          hungDiagnosed++
+          reason = await diagnoseHungBake(row)
+        } else {
+          reason = `hung in "${row.status}" past the ${
+            BOOTSTRAP_TTL_MS / 60_000
+          }m bootstrap TTL (not probed — diagnosis cap reached this run)`
+        }
+      }
+      // Only the headline goes into the report — /api/internal/pool-refill
+      // returns it as JSON, and several failures each carrying an 8KB log tail
+      // would turn a status response into a payload. The full evidence is in
+      // the OrphanEvent row and the stderr line persistBakeFailure writes.
+      const notice = await persistBakeFailure(row, reason)
+      report.errors.push(notice.split("\n")[0])
+    }
     try {
       // A settled claimed VM belongs to its instance now — just drop the row,
       // don't delete the VM out from under a live agent.
@@ -471,6 +670,19 @@ export async function refillWarmPool(): Promise<WarmPoolReport> {
   for (const target of getPoolTargets()) {
     if (target.size <= 0) continue
     const key = poolKeyFor(target)
+
+    // Stop feeding a bake that keeps failing. The breaker closes on its own as
+    // failures age out, so a fixed pool refills without intervention.
+    const failures = bakeFailures.get(key) ?? []
+    if (isCircuitOpen(failures, now)) {
+      const notice = describeOpenCircuit(key, failures, now)
+      if (!report.pausedKeys) report.pausedKeys = []
+      report.pausedKeys.push(key)
+      report.errors.push(notice)
+      console.warn(`[warm-pool] ${notice}`)
+      continue
+    }
+
     try {
       const rows = await db.query.warmVms.findMany({
         where: and(
@@ -485,6 +697,12 @@ export async function refillWarmPool(): Promise<WarmPoolReport> {
         report.created++
       }
     } catch (err) {
+      // Feed the breaker: a create that keeps throwing is its own loop. It can
+      // also leak — provider.createVM may have succeeded before the row insert
+      // failed — and a leaked VM has no row, so it produces no churn signal and
+      // waits for the reconciler's orphan sweep. Counting the throw is what
+      // stops us re-entering the same create every 60s meanwhile.
+      bakeFailures.set(key, recordFailure(bakeFailures.get(key) ?? [], Date.now()))
       report.errors.push(`create ${key}: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
@@ -662,6 +880,39 @@ export async function getPoolHealth(): Promise<PoolHealth> {
   })
 
   return { enabled: isPoolEnabled(), entries }
+}
+
+/** One reaped bake failure, as recorded by persistBakeFailure(). */
+export type BakeFailureRecord = {
+  id: string
+  detectedAt: Date | null
+  vmId: string
+  ipAddress: string | null
+  detail: string
+}
+
+/**
+ * Recent bake failures, newest first.
+ *
+ * Read from `OrphanEvent`, not `WarmVm`: a failed row is destroyed in the same
+ * refill pass that marks it, so the live-rows view an operator sees is *always*
+ * empty of failures no matter how hard the pool is churning. That is precisely
+ * why a broken pool looked like a quiet one. These records survive.
+ */
+export async function listRecentBakeFailures(limit = 20): Promise<BakeFailureRecord[]> {
+  const rows = await db
+    .select({
+      id: orphanEvents.id,
+      detectedAt: orphanEvents.detectedAt,
+      vmId: orphanEvents.vmId,
+      ipAddress: orphanEvents.ipAddress,
+      detail: orphanEvents.detail,
+    })
+    .from(orphanEvents)
+    .where(and(eq(orphanEvents.action, "failed"), like(orphanEvents.detail, "warm-pool%")))
+    .orderBy(desc(orphanEvents.detectedAt))
+    .limit(limit)
+  return rows.map((r) => ({ ...r, detail: r.detail ?? "" }))
 }
 
 /**

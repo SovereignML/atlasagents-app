@@ -323,10 +323,85 @@ Several subsystems are driven by cron hitting authenticated endpoints with a `Au
 | `POST /api/internal/events-prune` | `EVENTS_RETENTION_CRON_TOKEN` | daily | Delete `AgentEvent` rows older than `EVENTS_RETENTION_DAYS` (default 30). Without this cron, the events table grows unbounded. |
 | `POST /api/internal/demo-reap` | `DEMO_REAP_CRON_TOKEN` | ~every 1 min | Tear down Free-tier demo agents whose 30-minute trial (`instances.expiresAt`) has elapsed — full `deleteBot()` teardown (VM, OpenRouter key, DNS, monitor). The dashboard **also self-sweeps** on load (throttled ~60s), so this cron only matters when nobody is viewing. |
 | `POST /api/internal/pool-refill` | `POOL_REFILL_CRON_TOKEN` | **optional** (~every 1 min) | Warm VM pool backstop. The pool is the **primary** managed-VPS delivery path and is **on by default** (opt-out via `POOL_ENABLED=false`) whenever a provider token + `SSH_FLEET_PRIVATE_KEY` are present. **The pool self-refills from an in-process scheduler started at server boot** (no external cron required): it advances in-flight pool VMs (creating → bootstrapping → ready, minting each VM's public URL at promote), reaps dead/stale ones, and backfills the deficit up to each target size (`POOL_SIZE_HERMES`, `POOL_SIZE_OPENCLAW`) every `POOL_REFILL_INTERVAL_MS` (default 60000). Deploys also claim a ready VM to hit sub-25s delivery and fire their own immediate replacement. This endpoint is now **optional** — a manual admin trigger or an extra external-cron backstop. It shares an advisory lock with the in-process tick, so a call during an active tick returns `{ skipped: true }` instead of racing it. Idempotent + short per run. |
-| `POST /api/admin/reconcile` | `RECONCILE_CRON_TOKEN` | daily | Orphan/state reconciliation; **also** runs provider health probes + budget/burn-rate sync so the router scores on fresh data ([PROVIDERS.md](PROVIDERS.md)). Allow ≥60s timeout. |
+| `POST /api/admin/reconcile?scope=fast` | `RECONCILE_CRON_TOKEN` | every 15 min | Orphan VM sweep, retried deletes, failed-row cleanup, stuck-deploy reclaim; **also** the provider health probe + budget/burn-rate sync, which this endpoint is the only caller of and which gate the router's "down" and hard-limit rejections ([PROVIDERS.md](PROVIDERS.md)). The interval is therefore a bound on both router staleness and how long an untracked VM can bill. Allow ≥120s timeout. |
+| `POST /api/admin/reconcile` (full) | `RECONCILE_CRON_TOKEN` | twice daily (03:00 / 15:00 UTC) | Everything in `fast`, plus the expensive housekeeping: listing and spend-cap-healing every OpenRouter key, and the credit-drift audit. Nothing here gates a live decision. Allow ≥300s timeout. |
 | `POST /api/admin/backups/cron` | `BACKUP_CRON_TOKEN` | nightly | Full `pg_dump` of the database, streamed to Cloudflare R2, with retention pruning. Requires R2 creds configured in `/admin/backups` and a `postgresql-client` on the app host. Allow ≥120s timeout. |
 
 Each can also be triggered manually by an admin session from the admin panel. Wire them with any scheduler (system cron, a GitHub Actions schedule, or an external uptime/cron service).
+
+### Diagnosing a warm pool that never reaches `ready`
+
+Symptom: deploys are slow (every one falls back to cold provisioning), and the
+provider bill shows VMs that live for a few minutes and vanish. That is a
+**failing bake** — the bootstrap script dies partway through, the row is marked
+`failed`, the reaper destroys it within ~60s, and the refill step immediately
+builds a replacement that fails the same way.
+
+Three things bound the damage automatically
+([`src/lib/warm-pool-breaker.ts`](../src/lib/warm-pool-breaker.ts)):
+
+- A **circuit breaker** stops creating for a pool key after
+  `MAX_FAILURES_PER_WINDOW` (3) failures in an hour. It closes by itself as
+  failures age out, so a fixed bake refills unattended. Paused keys come back in
+  the refill report as `pausedKeys`.
+- **Churn detection** feeds that breaker from three directions, not one: a bake
+  that fails, a bake that hangs past the 30-minute TTL, *and* any reap that
+  destroys a VM younger than `MIN_VIABLE_AGE_MS` (15 min) whatever rule fired.
+  The last one matters because counting bake failures alone only caught one
+  shape of loop — a pool key that create and reap disagree about would churn
+  just as expensively with the failure counter reading zero. A create that
+  throws counts too.
+- `POOL_ENABLED=false` is the manual tourniquet: deploys keep working on the cold
+  path, and nothing is built or billed.
+
+**Where to look first:** `/admin/instances` → **Pre-Baked VMs**. A "Recent bake
+failures" panel sits above the live rows, with the failing step and log tail for
+each. The live rows alone will never show a failure — a failed row is destroyed
+in the same refill pass that marks it — which is exactly why a churning pool used
+to look like a quiet one.
+
+**Where the reason lives.** Not in `WarmVm` — the reaper deletes that row seconds
+after the failure, which is why a bare `lastError` lookup usually finds nothing.
+The evidence is captured while the box is still alive and written somewhere
+durable. The admin panel above renders these; the raw sources are:
+
+```bash
+# Every bake failure, newest first, with the failing step + bootstrap.log tail.
+docker compose logs app | grep '\[warm-pool\] warm-pool bake failed'
+```
+
+```sql
+-- Same records, in the database, surviving a container restart.
+SELECT "detectedAt", "vmId", "ipAddress", detail
+FROM "OrphanEvent"
+WHERE action = 'failed' AND detail LIKE 'warm-pool%'
+ORDER BY "detectedAt" DESC
+LIMIT 20;
+```
+
+Each record carries the pool key (is one runtime broken or all of them?), the
+provider VM id (to reconcile against the bill), how long the bake survived, and
+the tail of `/var/log/bootstrap.log` naming the step that failed. A bake that
+*hung* rather than failed is probed once per refill run before it is destroyed,
+so it reports whether the box was unreachable or wedged on a particular step.
+
+Common causes, in rough order:
+
+- **A package that no longer installs on the pool image.** The runtime is
+  installed as `<pkg>@latest` with `--engine-strict`, so an upstream release that
+  raises its Node engine requirement above the bootstrap's `minNode` breaks every
+  bake with no deploy on our side. Pin `OPENCLAW_VERSION` / the Hermes equivalent
+  to recover, then raise `minNode` deliberately.
+- **An OOM during the runtime install** on an undersized `POOL_PLAN_CODE`.
+- **A provider quota** refusing new VMs.
+- **A broken apt repo** — the bootstrap adds the Caddy, NodeSource and Google
+  Chrome repos, and any of them failing aborts the run under `set -e`.
+
+If a VM is being destroyed within a minute or two of creation, read the pool key
+in the failure record before assuming the bake is at fault: a reap firing that
+early is more likely a `poolKey` mismatch (check `POOL_PROVIDER_SLUG`,
+`POOL_PLAN_CODE`, `POOL_REGION_CODE`) than a bootstrap that got far enough to
+fail. The churn records name which rule fired.
 
 ## Stripe go-live checklist
 

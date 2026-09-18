@@ -492,6 +492,30 @@ function shellEscape(value: string): string {
 /** Last bytes of bootstrap.log (must be end of file — apt/npm can emit huge lines). */
 const BOOTSTRAP_LOG_TAIL_BYTES = 24_000
 
+/**
+ * Read the tail of the bootstrap log off a box whose bake just failed or hung.
+ *
+ * Always resolves — a diagnostic read must never be the thing that throws on an
+ * already-failing path. Callers get a placeholder string instead of an error.
+ * Extracted so every bake reader (the VPS poller and the warm pool) captures the
+ * SAME evidence: the warm pool used to record only `bootstrap failed:<step>` and
+ * then delete the row, which left no way to find out what the step actually did.
+ */
+export async function sshReadBootstrapLogTail(
+  target: SshTarget,
+  bytes = BOOTSTRAP_LOG_TAIL_BYTES,
+): Promise<string> {
+  try {
+    const r = await sshRun(
+      target,
+      `tail -c ${bytes} ${BOOTSTRAP_LOG} 2>/dev/null || echo '(no log)'`,
+    )
+    return r.stdout
+  } catch {
+    return "(could not read bootstrap log)"
+  }
+}
+
 export async function sshPollBootstrap(
   target: SshTarget,
   /** Allow npm retries + slow mirrors (see bootstrap install_runtime_pkg). */
@@ -514,16 +538,7 @@ export async function sshPollBootstrap(
 
     if (status.startsWith("failed:")) {
       const failedStep = status.slice(7)
-      let logTail = ""
-      try {
-        const logResult = await sshRun(
-          target,
-          `tail -c ${BOOTSTRAP_LOG_TAIL_BYTES} ${BOOTSTRAP_LOG} 2>/dev/null || echo '(no log)'`,
-        )
-        logTail = logResult.stdout
-      } catch {
-        logTail = "(could not read bootstrap log)"
-      }
+      const logTail = await sshReadBootstrapLogTail(target)
       throw new Error(
         `Bootstrap failed at step "${failedStep}". Log tail (last ${BOOTSTRAP_LOG_TAIL_BYTES} bytes):\n${logTail}`,
       )
@@ -532,16 +547,7 @@ export async function sshPollBootstrap(
   }
 
   // Timeout — try to read log for diagnostics
-  let logTail = ""
-  try {
-    const logResult = await sshRun(
-      target,
-      `tail -c ${BOOTSTRAP_LOG_TAIL_BYTES} ${BOOTSTRAP_LOG} 2>/dev/null || echo '(no log)'`,
-    )
-    logTail = logResult.stdout
-  } catch {
-    logTail = "(could not read bootstrap log)"
-  }
+  const logTail = await sshReadBootstrapLogTail(target)
   throw new Error(
     `Bootstrap timed out after ${timeoutMs / 1000}s. Log tail (last ${BOOTSTRAP_LOG_TAIL_BYTES} bytes):\n${logTail}`,
   )

@@ -112,10 +112,19 @@ CURRENT_STEP="init"
 
 cleanup() {
   local ec=$?
+  # Status first, always. Everything below is best-effort; the one thing that
+  # must survive is the name of the step that failed.
   if [ $ec -ne 0 ]; then
     echo "failed:\${CURRENT_STEP}" > "$STATUS"
     echo "=== BOOTSTRAP FAILED at step \${CURRENT_STEP} (exit $ec) ===" >> "$LOG"
   fi
+  # Close the tee pipe and let it drain before we exit. Bash does not wait for a
+  # process substitution to finish, so on an abrupt \`set -e\` abort the final
+  # writes can in principle be lost. Cheap insurance rather than a fix for an
+  # observed truncation: every reader of this log reads its TAIL, so the end of
+  # it is the one part that must not go missing.
+  exec 1>&- 2>&- || true
+  sleep 1 || true
 }
 trap cleanup EXIT
 

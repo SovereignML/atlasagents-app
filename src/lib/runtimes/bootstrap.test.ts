@@ -29,6 +29,20 @@ describe("buildBootstrapFraming() — stale status/log reset", () => {
     expect(script).toContain(`mkdir -p "$(dirname "$LOG")"`)
   })
 
+  // Bash does not wait for `>(tee ...)` before exiting, so an abrupt set -e
+  // abort could in principle lose the tail of the log — the only part anyone
+  // reads, and the only part that says what actually broke. Hardening, not a
+  // fix for a reproduced truncation.
+  it("drains the log pipe before exiting so the failing output survives", () => {
+    const statusIdx = script.indexOf(`echo "failed:\${CURRENT_STEP}" > "$STATUS"`)
+    const drainIdx = script.indexOf("exec 1>&- 2>&-")
+    expect(statusIdx).toBeGreaterThan(-1)
+    expect(drainIdx).toBeGreaterThan(-1)
+    // The step name must be recorded BEFORE we start tearing down the pipe, so
+    // a failed drain can never cost us the step name as well.
+    expect(statusIdx).toBeLessThan(drainIdx)
+  })
+
   it("still wires the shared status/log contract used by the poller", () => {
     expect(script).toContain(`STATUS="${BOOTSTRAP_STATUS}"`)
     expect(script).toContain(`LOG="${BOOTSTRAP_LOG}"`)
