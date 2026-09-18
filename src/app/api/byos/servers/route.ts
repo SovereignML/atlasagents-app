@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
-import { getUserTeam } from "@/lib/team"
+import { getEffectiveTeam } from "@/lib/effective-user"
 import { isTeamSuspended } from "@/lib/tenant"
 import { BlockedHostError } from "@/lib/net-guard"
 import {
@@ -25,9 +25,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const team = await getUserTeam(session.user.id)
-  if (!team) return NextResponse.json({ error: "No active team" }, { status: 403 })
-  if (await isTeamSuspended(team.teamId)) {
+  // Honors impersonation / "act as customer": the server is connected INTO the
+  // customer's team, attributed to the customer, so it is visible to them and to
+  // the install wizard afterwards. Scoping this by `session.user.id` meant an
+  // admin helping a customer silently filed their machine under the admin's own
+  // team, where the customer could never see or install onto it.
+  const ctx = await getEffectiveTeam()
+  if (!ctx) return NextResponse.json({ error: "No active team" }, { status: 403 })
+  if (await isTeamSuspended(ctx.teamId)) {
     return NextResponse.json(
       { error: "This account is suspended. Contact your administrator." },
       { status: 403 },
@@ -43,8 +48,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const { server, verdict } = await connectServer({
-      teamId: team.teamId,
-      userId: session.user.id,
+      teamId: ctx.teamId,
+      userId: ctx.effectiveUserId,
       host: String(body.host ?? ""),
       port: body.port,
       sshUser: body.sshUser,
@@ -78,11 +83,11 @@ export async function GET() {
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
-  const team = await getUserTeam(session.user.id)
-  if (!team) return NextResponse.json({ error: "No active team" }, { status: 403 })
+  const ctx = await getEffectiveTeam()
+  if (!ctx) return NextResponse.json({ error: "No active team" }, { status: 403 })
 
   try {
-    const servers = await listServersForTeam(team.teamId)
+    const servers = await listServersForTeam(ctx.teamId)
     return NextResponse.json({
       servers,
       idleLimit: MAX_IDLE_SERVERS_PER_TEAM,

@@ -1,16 +1,23 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { db, byosServers, instances, and, eq, ne, sql } from "@/db"
-import { getUserTeam } from "@/lib/team"
+import { getEffectiveTeam } from "@/lib/effective-user"
 import { refreshServer } from "@/lib/byos-server"
 import { apiError } from "@/lib/api-error"
 
-/** Load a server, scoped to the caller's team. */
-async function loadOwned(serverId: string, userId: string) {
-  const team = await getUserTeam(userId)
-  if (!team) return null
+/**
+ * Load a server, scoped to the EFFECTIVE team — so an admin impersonating a
+ * customer can refresh and disconnect that customer's servers, matching the
+ * BYOS pages and the connect/install routes. Team scoping is what stops one
+ * customer reaching another's machine; impersonation only changes which team
+ * the caller is acting inside, and is itself re-authorized per request by
+ * getHonoredImpersonatedUserId().
+ */
+async function loadOwned(serverId: string) {
+  const ctx = await getEffectiveTeam()
+  if (!ctx) return null
   return db.query.byosServers.findFirst({
-    where: and(eq(byosServers.id, serverId), eq(byosServers.teamId, team.teamId)),
+    where: and(eq(byosServers.id, serverId), eq(byosServers.teamId, ctx.teamId)),
   })
 }
 
@@ -24,7 +31,7 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
   const { serverId } = await params
-  const owned = await loadOwned(serverId, session.user.id)
+  const owned = await loadOwned(serverId)
   if (!owned) return NextResponse.json({ error: "Server not found" }, { status: 404 })
 
   try {
@@ -52,7 +59,7 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
   const { serverId } = await params
-  const owned = await loadOwned(serverId, session.user.id)
+  const owned = await loadOwned(serverId)
   if (!owned) return NextResponse.json({ error: "Server not found" }, { status: 404 })
 
   try {

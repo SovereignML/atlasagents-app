@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
-import { db, eq, and, asc, instances, instanceLogs, regions, serverConfigs, users, plans, subscriptions } from "@/db"
+import { db, eq, and, asc, byosServers, instances, instanceLogs, regions, serverConfigs, users, plans, subscriptions } from "@/db"
 import {
   stripe,
   isStripeConfigured,
@@ -19,7 +19,8 @@ import { buildAgentFields } from "@/lib/agent-create"
 import { provisionBot } from "@/lib/provisioner"
 import { describeVmError } from "@/lib/vm-provider"
 import { assertPublicHost, BlockedHostError } from "@/lib/net-guard"
-import { getUserTeam } from "@/lib/team"
+import { getEffectiveTeam } from "@/lib/effective-user"
+import { byosConnectionFields, installBlockedReason } from "@/lib/byos-install"
 import { isTeamSuspended } from "@/lib/tenant"
 import { getTeamAgentLimit, countTeamAgents } from "@/lib/seats"
 import {
@@ -54,12 +55,19 @@ async function validateCustomBaseUrl(raw: string | undefined): Promise<string | 
 }
 
 /**
- * Bring Your Own Server deploy. Atlas Agents acts as the management panel for a
- * server the customer already owns: they paste our SSH_FLEET_PUBLIC_KEY into
- * their root authorized_keys and we connect with the fleet key (no VM created).
- * Billing is a flat recurring management fee (Stripe subscription); LLM usage
- * is either metered against the credit wallet ("managed_credits") or paid via
- * the customer's own key ("own_key", stored encrypted).
+ * Install an agent onto a server the customer has already connected.
+ *
+ * Takes a `byosServerId`, never a raw host: the machine was connected (and SSH
+ * access proven) for free beforehand via /api/byos/servers, and this route
+ * reads the connection off that row. Accepting a host here meant the paid flow
+ * re-asked for a machine we were already talking to, and the resulting instance
+ * had no link back to the server — leaving `agentCount`, the idle-server cap
+ * and the disconnect guard all reading zero.
+ *
+ * No VM is created. Billing is a flat recurring management fee (Stripe
+ * subscription); LLM usage is either metered against the credit wallet
+ * ("managed_credits") or paid via the customer's own key ("own_key", stored
+ * encrypted).
  */
 export async function POST(req: NextRequest) {
   try {
@@ -79,12 +87,23 @@ async function handleByosDeploy(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
+  // Identity for this install — honors impersonation / "act as customer",
+  // exactly as the managed deploy path does (src/app/api/deploy/route.ts).
+  // This route used to scope by `session.user.id` while every BYOS *page* used
+  // getEffectiveUserId(), so an admin viewing-as a customer could open the
+  // wizard and then get a 403 (or, worse, silently write the row into their own
+  // team). The agent is owned and billed to `effectiveUserId` — the customer —
+  // while the audit trail records the real admin as `actorUserId`.
+  const ctx = await getEffectiveTeam()
+  if (!ctx) {
+    return NextResponse.json({ error: "No active team" }, { status: 403 })
+  }
+  const { effectiveUserId, actorUserId, teamId } = ctx
+
   const body = await req.json()
   const {
     name,
-    byosHost,
-    byosPort = 22,
-    byosUser = "root",
+    byosServerId,
     billingInterval = "month",
     llmMode,
     ownApiKey,
@@ -97,9 +116,10 @@ async function handleByosDeploy(req: NextRequest) {
     agentConfig: agentConfigInput,
   } = body as {
     name: string
-    byosHost: string
-    byosPort?: number
-    byosUser?: string
+    // The connected server to install onto. The connection (host, port, user)
+    // is read off that row — it is deliberately NOT accepted from the caller,
+    // so an agent can only ever land on a server this team has connected.
+    byosServerId: string
     billingInterval?: "month" | "year"
     llmMode: "managed_credits" | "own_key"
     ownApiKey?: string
@@ -121,8 +141,11 @@ async function handleByosDeploy(req: NextRequest) {
   }
 
   // ── Validate ──────────────────────────────────────────────────────
-  if (!name || !byosHost) {
-    return NextResponse.json({ error: "Missing required fields (name, byosHost)" }, { status: 400 })
+  if (!name || !byosServerId) {
+    return NextResponse.json(
+      { error: "Missing required fields (name, byosServerId)" },
+      { status: 400 },
+    )
   }
   if (llmMode !== "managed_credits" && llmMode !== "own_key") {
     return NextResponse.json({ error: "Invalid llmMode" }, { status: 400 })
@@ -130,15 +153,49 @@ async function handleByosDeploy(req: NextRequest) {
   if (llmMode === "own_key" && !ownApiKey?.trim()) {
     return NextResponse.json({ error: "An API key is required when bringing your own key" }, { status: 400 })
   }
-  if (!Number.isInteger(byosPort) || byosPort < 1 || byosPort > 65535) {
-    return NextResponse.json({ error: "Invalid SSH port" }, { status: 400 })
+
+  // ── Gates, then the server ────────────────────────────────────────
+  // Agents are team-scoped, and so is the server: a serverId belonging to
+  // another team must not resolve, or one customer could install onto (and be
+  // billed for) another customer's machine.
+  //
+  // Same gates as the managed deploy path (createInstanceFromAgentFields):
+  // a suspended team (or a child of a suspended/de-entitled reseller) cannot
+  // deploy, and the per-team agent cap applies to BYOS agents too — otherwise
+  // BYOS would be a trivial bypass of both controls.
+  if (await isTeamSuspended(teamId)) {
+    return NextResponse.json(
+      { error: "This account is suspended. Contact your administrator." },
+      { status: 403 },
+    )
+  }
+  const agentLimit = await getTeamAgentLimit(teamId)
+  if (agentLimit != null && (await countTeamAgents(teamId)) >= agentLimit) {
+    return NextResponse.json(
+      { error: `Agent limit reached (${agentLimit}). Contact your administrator to raise it.` },
+      { status: 403 },
+    )
   }
 
-  // SSRF guard: we're about to SSH into this host as root with the fleet key.
-  // Reject loopback / link-local / cloud-metadata / RFC1918 targets (and
-  // hostnames that resolve to them) before persisting anything.
+  const byosServer = await db.query.byosServers.findFirst({
+    where: and(eq(byosServers.id, byosServerId), eq(byosServers.teamId, teamId)),
+  })
+  if (!byosServer) {
+    return NextResponse.json(
+      { error: "That server isn't connected to this account. Connect it first." },
+      { status: 404 },
+    )
+  }
+  const blocked = installBlockedReason(byosServer)
+  if (blocked) {
+    return NextResponse.json({ error: blocked }, { status: 409 })
+  }
+
+  // SSRF guard: we're about to SSH into this host with the fleet key. The
+  // address was already checked when the server was connected, but DNS can be
+  // repointed between then and now, so re-check before we dial.
   try {
-    await assertPublicHost(byosHost)
+    await assertPublicHost(byosServer.host)
   } catch (err) {
     if (err instanceof BlockedHostError) {
       return NextResponse.json({ error: err.message }, { status: 400 })
@@ -303,36 +360,12 @@ async function handleByosDeploy(req: NextRequest) {
     }
   }
 
-  // Agents are team-scoped — resolve the active team.
-  const team = await getUserTeam(session.user.id)
-  if (!team) {
-    return NextResponse.json({ error: "No active team" }, { status: 403 })
-  }
-
-  // Same gates as the managed deploy path (createInstanceFromAgentFields):
-  // a suspended team (or a child of a suspended/de-entitled reseller) cannot
-  // deploy, and the per-team agent cap applies to BYOS agents too — otherwise
-  // BYOS would be a trivial bypass of both controls.
-  if (await isTeamSuspended(team.teamId)) {
-    return NextResponse.json(
-      { error: "This account is suspended. Contact your administrator." },
-      { status: 403 },
-    )
-  }
-  const agentLimit = await getTeamAgentLimit(team.teamId)
-  if (agentLimit != null && (await countTeamAgents(team.teamId)) >= agentLimit) {
-    return NextResponse.json(
-      { error: `Agent limit reached (${agentLimit}). Contact your administrator to raise it.` },
-      { status: 403 },
-    )
-  }
-
   // ── Insert instance ───────────────────────────────────────────────
   const [instance] = await db
     .insert(instances)
     .values({
-      userId: session.user.id,
-      teamId: team.teamId,
+      userId: effectiveUserId,
+      teamId,
       name: name.trim(),
       slug: createSlug(name),
       regionId: region.id,
@@ -344,9 +377,10 @@ async function handleByosDeploy(req: NextRequest) {
       // derived identically to the managed path; deploymentTarget is forced to
       // "byos" in rawCfg above.
       ...agentFields,
-      byosHost: byosHost.trim(),
-      byosPort,
-      byosUser: byosUser.trim() || "root",
+      // Links the agent to the connected server AND copies the connection onto
+      // the instance row, which is what the provisioner, the metrics cron and
+      // sshTargetForInstance read. Both halves, always — see byos-install.ts.
+      ...byosConnectionFields(byosServer),
       byosLlmMode: llmMode,
       byosOwnApiKeyEnc:
         llmMode === "own_key" && ownApiKey ? encryptSecret(ownApiKey.trim()) : null,
@@ -372,14 +406,20 @@ async function handleByosDeploy(req: NextRequest) {
     .returning()
 
   await logAuditEvent({
-    userId: session.user.id,
+    // The REAL actor, with the customer recorded as onBehalfOf — same contract
+    // as createInstanceFromAgentFields. Undefined for a normal self-serve
+    // install, where actor and owner are the same person.
+    userId: actorUserId,
+    onBehalfOfUserId: actorUserId !== effectiveUserId ? effectiveUserId : undefined,
+    teamId,
     action: "instance.deploy",
     targetType: "instance",
     targetId: instance.id,
     targetLabel: instance.name,
     meta: {
       plan: "byos",
-      byosHost: byosHost.trim(),
+      byosServerId: byosServer.id,
+      byosHost: byosServer.host,
       llmMode,
       billingInterval,
       ...(llmMode === "own_key"
@@ -391,7 +431,7 @@ async function handleByosDeploy(req: NextRequest) {
   await db.insert(instanceLogs).values({
     instanceId: instance.id,
     level: "info",
-    message: `BYOS instance created for ${byosHost.trim()}. LLM mode: ${llmMode}${
+    message: `BYOS instance created on ${byosServer.label} (${byosServer.host}). LLM mode: ${llmMode}${
       llmMode === "own_key" ? ` (provider: ${ownProviderId})` : ""
     }. Awaiting payment.`,
   })
@@ -403,21 +443,24 @@ async function handleByosDeploy(req: NextRequest) {
   // ── Paid: Stripe Checkout (recurring management fee) ──────────────
   if (isStripeConfigured()) {
     const userRow = await db.query.users.findFirst({
-      where: eq(users.id, session.user.id),
-      columns: { stripeCustomerId: true },
+      where: eq(users.id, effectiveUserId),
+      columns: { stripeCustomerId: true, email: true },
     })
     let stripeCustomerId = userRow?.stripeCustomerId
 
     if (!stripeCustomerId) {
       const customer = await stripe.customers.create({
-        email: session.user.email ?? undefined,
-        metadata: { userId: session.user.id },
+        // The OWNER's email, read off the user row — not `session.user.email`,
+        // which under impersonation is the admin's and would stamp staff
+        // contact details onto the customer's billing record.
+        email: userRow?.email ?? undefined,
+        metadata: { userId: effectiveUserId },
       })
       stripeCustomerId = customer.id
       await db
         .update(users)
         .set({ stripeCustomerId })
-        .where(eq(users.id, session.user.id))
+        .where(eq(users.id, effectiveUserId))
     }
 
     const unitAmount = planUnitAmountCents(planConfig, billingInterval)
@@ -446,12 +489,14 @@ async function handleByosDeploy(req: NextRequest) {
       ],
       metadata: {
         instanceId: instance.id,
-        userId: session.user.id,
+        userId: effectiveUserId,
         planSlug: "byos",
         interval: billingInterval,
       },
       success_url: `${BRANDING.appUrl}/dashboard/instances/${instance.id}`,
-      cancel_url: `${BRANDING.appUrl}/dashboard/byos/deploy`,
+      // Back to the wizard for THIS server — the bare path now redirects to the
+      // server list, which would silently discard their choices.
+      cancel_url: `${BRANDING.appUrl}/dashboard/byos/deploy?serverId=${byosServer.id}`,
     })
 
     return NextResponse.json({
@@ -469,7 +514,7 @@ async function handleByosDeploy(req: NextRequest) {
 
   // ── Dev mode: skip Stripe, auto-provision ─────────────────────────
   const instanceId = instance.id
-  const userId = session.user.id
+  const userId = effectiveUserId
 
   ;(async () => {
     try {

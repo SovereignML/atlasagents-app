@@ -51,9 +51,54 @@ You only pay the $2.50/mo panel fee in `own_key` mode; in `managed_credits` you 
 
 The defining difference from the managed-VPS path: **no provider VM is allocated**. The flow in [`src/app/api/byos/deploy/route.ts`](../src/app/api/byos/deploy/route.ts):
 
-- The user pastes `SSH_FLEET_PUBLIC_KEY` into their own root `authorized_keys`; the control plane connects with the matching `SSH_FLEET_PRIVATE_KEY`. The fleet public key is intentionally surfaced in the UI — it's public key material.
+- The user pastes `SSH_FLEET_PUBLIC_KEY` into their own root `authorized_keys`; the control plane connects with the matching `SSH_FLEET_PRIVATE_KEY`. The fleet public key is intentionally surfaced in the UI — it's public key material. This happens once, when the server is **connected** (`/dashboard/byos/connect`), not per agent: by install time we already have SSH and the measured hardware.
 - To satisfy the `instances` foreign keys without a real DigitalOcean/Linode plan, the row points at a **sentinel** server config (`byos-managed`) and a **`self-hosted`** region (falling back to the first region if the BYOS seed hasn't run). These are placeholders, not billable compute.
 - `provisionBot()` ([`src/lib/provisioner.ts`](../src/lib/provisioner.ts)) then runs the normal install over SSH against the user's host — same runtime install as a managed instance (see [RUNTIMES.md](RUNTIMES.md)).
+
+### The platform never owns the machine
+
+`deploymentTarget === "byos"` means the host belongs to the customer, and two
+lifecycle rules follow from it:
+
+- **BYOS never touches the warm pool.** `provisionBotLocked()` routes `byos` to
+  `provisionByosBot()`, which has no VM lifecycle at all — it never creates,
+  claims or deletes a machine. The warm pool's failure mode is a create → fail →
+  destroy loop, which costs a wasted bill against a pool VM and would be
+  destroying someone's hardware here. The routing is the guarantee;
+  `acquireBootedVm()` additionally **throws** for a non-platform-owned target
+  (`platformOwnsHostVm()` in [`src/lib/byos-install.ts`](../src/lib/byos-install.ts))
+  so a future refactor of that routing fails loudly instead of silently.
+- **Teardown is an uninstall, not a delete.** Deleting a BYOS agent stops and
+  disables the systemd unit and removes the install dir over SSH, then marks the
+  instance deleted. The server stays online. There is no `deleteVM` on this path.
+
+A failed BYOS install is also terminal rather than looping: the instance is
+marked `failed_provisioning`, `collectDiagnostics()` writes the evidence to
+`InstanceLog`, and a retry is an explicit user action. Nothing re-attempts on a
+timer, and nothing is destroyed.
+
+### Impersonation
+
+Every BYOS route resolves identity through `getEffectiveTeam()`
+([`src/lib/effective-user.ts`](../src/lib/effective-user.ts)), matching
+`/api/deploy`. An admin (or a tenant admin acting as a child team) can connect,
+refresh, disconnect and install on the customer's behalf, and:
+
+- the server row and the agent are owned by **`effectiveUserId`** — the customer
+  — and land in the customer's **`teamId`**;
+- the Stripe customer, its email, the checkout metadata and the credit wallet
+  are all the customer's;
+- the audit trail records the real admin as **`actorUserId`**, with
+  `meta.onBehalfOf` naming the customer.
+
+The BYOS *pages* resolve the same way, so the wizard and the route it posts to
+always agree on the team. This matters under "act as customer", where the team is
+pinned to the cookie's child team rather than that owner's mutable
+`activeTeamId` — `getUserTeam(effectiveUserId)` would resolve a different team
+than the route writes to.
+
+Note that Checkout still opens against the **customer's** Stripe customer, so an
+admin cannot complete a paid BYOS install without the customer's payment method.
 
 ### Billing path
 
@@ -65,9 +110,10 @@ The defining difference from the managed-VPS path: **no provider VM is allocated
 | Column | Meaning |
 |--------|---------|
 | `deploymentTarget` | Set to `"byos"` — this is how BYOS instances are filtered in the dashboard. |
-| `byosHost` | The user's server hostname/IP. |
-| `byosPort` | SSH port (default `22`, validated `1–65535`). |
-| `byosUser` | SSH user (default `root`). |
+| `byosServerId` | FK to the connected `ByosServer` this agent runs on. The link of record: `agentCount`, the idle-server cap and the disconnect guard all read it. |
+| `byosHost` | The user's server hostname/IP. Denormalized from the server row. |
+| `byosPort` | SSH port. Denormalized from the server row. |
+| `byosUser` | SSH user. Denormalized from the server row. |
 | `byosLlmMode` | `"managed_credits"` or `"own_key"`. |
 | `byosOwnApiKeyEnc` | The user's own API key, encrypted via `encryptSecret()` — only set when `byosLlmMode === "own_key"`. |
 
@@ -76,14 +122,13 @@ The defining difference from the managed-VPS path: **no provider VM is allocated
 ```
 POST /api/byos/deploy
 ```
-Auth: user session. Body:
+Auth: user session, resolved through `getEffectiveTeam()` (see
+[Impersonation](#impersonation)). Body:
 
 ```jsonc
 {
   "name": "my-agent",
-  "byosHost": "1.2.3.4",
-  "byosPort": 22,              // optional, default 22
-  "byosUser": "root",         // optional, default "root"
+  "byosServerId": "clx...",   // a server this team has already connected
   "billingInterval": "month", // or "year"
   "llmMode": "managed_credits", // or "own_key"
   "ownApiKey": "sk-...",      // required iff llmMode === "own_key"
@@ -91,6 +136,13 @@ Auth: user session. Body:
 }
 ```
 Returns `{ instanceId, checkoutUrl }` when Stripe is configured (redirect the user to `checkoutUrl`), or `{ instanceId }` in dev mode.
+
+**The host is not a parameter.** Connect the server first (`POST /api/byos/servers`), then install onto it by id. The connection — host, port, SSH user — is read off the `ByosServer` row, so an agent can only ever land on a machine this team has connected and we have proven SSH access to. Passing a host here is rejected with `Missing required fields (name, byosServerId)`.
+
+| Status | Meaning |
+|--------|---------|
+| `404` | The `byosServerId` isn't connected to the caller's team. |
+| `409` | The server's last probe found it unreachable — refresh it and retry. |
 
 ### Required environment
 
