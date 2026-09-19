@@ -144,8 +144,24 @@ export type BootstrapRenderArgs = {
   gatewayPort: number
   cfOriginCertPem?: string
   cfOriginKeyPem?: string
-  /** When true, the runtime appends its sidecar install steps (Docker + image pull). */
+  /** When true, the runtime appends its sidecar install steps (pip + venv). */
   webuiEnabled?: boolean
+  /**
+   * Whether to pre-bake the browser-tool system dependencies (Google Chrome,
+   * ~142MB, plus `agent-browser` on Hermes).
+   *
+   * Defaults to TRUE when omitted, which preserves the long-standing
+   * behaviour: every box got Chrome whether or not anything used it. That is
+   * right for a warm-pool bake (our VM, our time, and the claim must be fast)
+   * and wrong for BYOS, where it is the customer's bandwidth and it lands in
+   * the middle of the window they are watching.
+   *
+   * Tools are opt-in — `agent-tools.ts` has no `defaultEnabled` — so pass
+   * false whenever no enabled tool sets `requiresChromium`. Enabling the tool
+   * later still works: `installToolDependencies()` installs the same set on
+   * demand.
+   */
+  browserDeps?: boolean
   /**
    * The port sshd actually listens on. Defaults to 22. BYOS servers may use
    * anything — and the firewall step opens THIS port, not a hardcoded 22.

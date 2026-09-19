@@ -192,14 +192,51 @@ curl --retry 5 --retry-delay 3 -1sLf 'https://dl.cloudsmith.io/public/caddy/stab
 curl --retry 5 --retry-delay 3 -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
 
 step "nodejs_repo"
-curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors https://deb.nodesource.com/setup_${nodeMajor}.x | bash -
+export RUNTIME_MIN_NODE=${shellEscape(opts.minNodeVersion)}
+NODE_MAJOR_WANTED=${nodeMajor}
+# Skip the repo add and the nodejs install when the box already runs exactly
+# the Node this runtime asked for. Two reasons:
+#
+#   - Re-runs. A BYOS box re-runs this whole script on every deploy, and once
+#     it is prebaked at connect that is at least twice. Re-adding the
+#     NodeSource repo and reinstalling nodejs each time is pure latency.
+#   - Downgrades. A prebake installs one Node major before the customer has
+#     picked a runtime. Without this guard, a later bootstrap for a runtime
+#     naming a LOWER major would add setup_<lower>.x and let apt drag the box
+#     backwards underneath an already-installed runtime.
+#
+# The major must match EXACTLY rather than merely clearing the floor: a
+# runtime's engines range can exclude a higher major (openclaw accepts 24.x
+# and 26.x but not 25.x), so "anything newer is fine" is not true here.
+node_is_wanted() {
+  command -v node >/dev/null 2>&1 || return 1
+  local cur
+  cur="$(node -v 2>/dev/null | sed 's/^v//')" || return 1
+  [ -n "\${cur}" ] || return 1
+  [ "\${cur%%.*}" = "\${NODE_MAJOR_WANTED}" ] || return 1
+  # Floor check inside the major. sort -V is coreutils, present on every
+  # distro the preflight admits (ubuntu/debian).
+  [ "$(printf '%s\\n%s\\n' "\${RUNTIME_MIN_NODE}" "\${cur}" | sort -V | head -1)" = "\${RUNTIME_MIN_NODE}" ]
+}
 
-step "install_nodejs_caddy"
-apt-get $APT_OPTS install -y nodejs caddy
+if node_is_wanted; then
+  echo "node $(node -v) already satisfies \${RUNTIME_MIN_NODE} (major \${NODE_MAJOR_WANTED}) — skipping NodeSource"
+  # The NodeSource setup script runs its own \`apt-get update\`, and that is
+  # what makes the caddy repo added in the previous step visible to apt. When
+  # we skip the script we must do that update ourselves, or installing caddy
+  # on a box that does not already have it fails with "Unable to locate
+  # package caddy".
+  apt-get $APT_OPTS update -y
+  step "install_nodejs_caddy"
+  apt-get $APT_OPTS install -y caddy
+else
+  curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors https://deb.nodesource.com/setup_${nodeMajor}.x | bash -
+  step "install_nodejs_caddy"
+  apt-get $APT_OPTS install -y nodejs caddy
+fi
 node -v && npm -v
 
 step "verify_node"
-export RUNTIME_MIN_NODE=${shellEscape(opts.minNodeVersion)}
 node <<'VERIFYNODE'
 const min = process.env.RUNTIME_MIN_NODE
 if (!min) {

@@ -136,6 +136,34 @@ describe("buildBootstrapFraming() — Node version contract", () => {
     }
   })
 
+  // Prebake installs a Node major before the customer has picked a runtime,
+  // and a BYOS box re-runs this whole script on every deploy. Both make the
+  // nodejs step something that must be safe to run again.
+  it("skips NodeSource when the box already runs the wanted major", () => {
+    const script = buildBootstrapFraming({ ...opts, minNodeVersion: "24.16.0" }, "")
+    expect(script).toContain("node_is_wanted")
+    expect(script).toContain("NODE_MAJOR_WANTED=24")
+    // Exact-major test, not a floor test: openclaw's engines range accepts
+    // 24.x and 26.x but excludes 25.x, so a newer major is not automatically
+    // acceptable.
+    expect(script).toContain('"\${cur%%.*}" = "\${NODE_MAJOR_WANTED}"')
+  })
+
+  it("still installs caddy when it skips the NodeSource script", () => {
+    const script = buildBootstrapFraming({ ...opts, minNodeVersion: "24.16.0" }, "")
+    // The skip branch installs caddy alone; the install branch takes both.
+    expect(script).toContain("apt-get $APT_OPTS install -y caddy")
+    expect(script).toContain("apt-get $APT_OPTS install -y nodejs caddy")
+    // The NodeSource setup script is what refreshes apt after the caddy repo
+    // is added, so the skip branch has to do that update itself or `install
+    // caddy` cannot resolve the package on a box without it.
+    const skipBranch = script.slice(
+      script.indexOf("if node_is_wanted"),
+      script.indexOf("apt-get $APT_OPTS install -y caddy"),
+    )
+    expect(skipBranch).toContain("apt-get $APT_OPTS update -y")
+  })
+
   it("refuses a minNodeVersion it cannot derive a major from", () => {
     // Failing at render time is the point: a silently wrong Node major is what
     // produced an endless create/fail/destroy loop in production.

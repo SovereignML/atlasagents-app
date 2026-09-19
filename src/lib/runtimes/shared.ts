@@ -396,7 +396,7 @@ ${spec.cliBinary} --version
 step "compile_cache_dir"
 mkdir -p ${shellEscapeForBash(spec.compileCacheDir)}
 chown ${shellEscapeForBash(spec.systemUser)}:${shellEscapeForBash(spec.systemUser)} ${shellEscapeForBash(spec.compileCacheDir)}
-${browserInstallStep()}`
+${args.browserDeps === false ? "" : browserInstallStep()}`
     return buildBootstrapFraming(
       {
         installDir: spec.installDir,

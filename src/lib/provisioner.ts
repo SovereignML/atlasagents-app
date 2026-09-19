@@ -905,6 +905,26 @@ function isVps(instance: Instance): boolean {
  * opposed to the shared Docker cluster. Used by the lifecycle functions to
  * pick systemctl vs. docker.
  */
+/**
+ * Whether this instance's bootstrap should pre-bake the browser-tool system
+ * dependencies (Google Chrome ~142MB, plus `agent-browser` on Hermes).
+ *
+ * Tools are opt-in (`agent-tools.ts` has no `defaultEnabled`), and
+ * `installToolDependencies()` installs exactly the same set on demand when the
+ * tool is switched on later — its own comment says it "mirrors what bootstrap
+ * pre-bakes". So a box whose instance has no chromium-requiring tool has no
+ * reason to download Chrome during the window the customer is watching.
+ *
+ * Deliberately NOT applied to the warm pool: a pooled VM has no instance yet,
+ * bake time is ours rather than a customer's, and a claim must stay fast — so
+ * that path keeps pre-baking unconditionally by omitting the flag.
+ */
+function wantsBrowserDeps(instance: Instance, runtime: RuntimeEngine): boolean {
+  return enabledToolsForRuntime(instance.enabledTools ?? [], runtime.id).some(
+    (t) => t.requiresChromium,
+  )
+}
+
 function usesSystemd(instance: Instance): boolean {
   return instance.deploymentTarget === "vps" || instance.deploymentTarget === "byos"
 }
@@ -1431,6 +1451,7 @@ async function createAndBootVm(
         cfOriginCertPem: opts.cfOriginCertPem,
         cfOriginKeyPem: opts.cfOriginKeyPem,
         webuiEnabled: Boolean(instance.webuiEnabled) && Boolean(runtime.sidecar),
+        browserDeps: wantsBrowserDeps(instance, runtime),
       })
 
   const publicKey = process.env.SSH_FLEET_PUBLIC_KEY
@@ -2642,6 +2663,7 @@ async function provisionByosBot(instance: Instance): Promise<ProvisionResult> {
       cfOriginCertPem,
       cfOriginKeyPem,
       webuiEnabled: Boolean(instance.webuiEnabled) && Boolean(runtime.sidecar),
+      browserDeps: wantsBrowserDeps(instance, runtime),
       // The customer's sshd may be on any port, and the box is not ours to
       // firewall — see BootstrapRenderArgs. Passing the wrong port here, or
       // enabling ufw at all, locks the owner out of their own server.

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
-import { hermesRuntime, HERMES_GATEWAY_PORT } from "./hermes"
+import { hermesRuntime, HERMES_GATEWAY_PORT, HERMES_VPS_MIN_NODE } from "./hermes"
+import { OPENCLAW_VPS_MIN_NODE } from "./openclaw"
 
 /**
  * Regression guards for the Caddyfile renderer. All three cases below were live
@@ -160,5 +161,56 @@ describe("hermesRuntime.sidecar.renderEnv()", () => {
   it("trims whitespace so the id matches what /v1/models reports", () => {
     const env = hermesRuntime.sidecar!.renderEnv({ ...baseArgs, model: "  minimax/minimax-m2.5  " })
     expect(env.DEFAULT_MODELS).toBe("minimax/minimax-m2.5")
+  })
+})
+
+describe("Hermes bootstrap — Node floor and browser dependencies", () => {
+  const render = (over: Record<string, unknown> = {}) =>
+    hermesRuntime.renderBootstrap({
+      gatewayPort: hermesRuntime.gatewayPort,
+      webuiEnabled: true,
+      ...over,
+    })
+
+  // `agent-browser` is installed globally on every Hermes box for the browser
+  // tool and declares `engines.node: >=24.0.0` in every published version.
+  // With the floor at 22.14.0 the bootstrap handed it Node 22 and — because
+  // that install carries no `--engine-strict` — npm merely warned. Matching
+  // OpenClaw's floor also means one Node major serves both runtimes, so a
+  // prebaked box is never dragged between them.
+  it("requires a Node new enough for agent-browser", () => {
+    const major = Number.parseInt(HERMES_VPS_MIN_NODE.split(".")[0] ?? "", 10)
+    expect(major).toBeGreaterThanOrEqual(24)
+  })
+
+  it("asks for the same Node major as OpenClaw", () => {
+    expect(HERMES_VPS_MIN_NODE.split(".")[0]).toBe(
+      OPENCLAW_VPS_MIN_NODE.split(".")[0],
+    )
+  })
+
+  it("omits Chrome and agent-browser when no enabled tool needs them", () => {
+    const script = render({ browserDeps: false })
+    expect(script).not.toContain("google-chrome-stable")
+    expect(script).not.toContain("agent-browser")
+  })
+
+  it("installs both when a tool does need them", () => {
+    const script = render({ browserDeps: true })
+    expect(script).toContain("google-chrome-stable")
+    expect(script).toContain("agent-browser")
+  })
+
+  it("defaults to installing them when the flag is omitted", () => {
+    expect(render()).toContain("google-chrome-stable")
+  })
+
+  // Whatever happens to the browser deps, the runtime install must not move.
+  it("still installs hermes and open-webui either way", () => {
+    for (const script of [render({ browserDeps: false }), render({ browserDeps: true })]) {
+      expect(script).toContain("install_pkgs_parallel")
+      expect(script).toContain("verify_hermes_cli")
+      expect(script).toContain("verify_open_webui_cli")
+    }
   })
 })

@@ -28,8 +28,28 @@ import {
 /** Resolve at call time so `HERMES_VERSION` env can override "latest". */
 export const HERMES_VERSION = () => process.env.HERMES_VERSION || "latest"
 
-/** Hermes spawns Node tooling at runtime (browser, WhatsApp); keep Node 22 floor. */
-export const HERMES_VPS_MIN_NODE = "22.14.0"
+/**
+ * Minimum Node on a Hermes VPS. Hermes itself is Python — this floor exists
+ * for the Node tooling it spawns, and it also selects the NodeSource
+ * distribution the bootstrap installs (see nodeSourceMajor in bootstrap.ts).
+ *
+ * This was 22.14.0, which was wrong on two counts:
+ *
+ *  1. `agent-browser` — installed globally on every Hermes box for the browser
+ *     tool (see buildBrowserDepsSteps) — declares `engines.node: >=24.0.0`, and
+ *     has in EVERY published version. That install runs without
+ *     `--engine-strict`, so npm only warned and put a package on the box that
+ *     its own manifest says cannot run there. The same failure class as the
+ *     openclaw EBADENGINE incident, minus the loud failure.
+ *  2. Prebake installs one Node major before the runtime is chosen. With the
+ *     two runtimes naming different majors, whichever bootstrap ran second
+ *     would drag the box to its own major — OpenClaw's 24 down to 22 here.
+ *
+ * 24.16.0 matches OPENCLAW_VPS_MIN_NODE exactly, so one Node major serves both
+ * runtimes and a box never gets pulled between them. Do not lower it without
+ * re-checking `agent-browser`'s engines.
+ */
+export const HERMES_VPS_MIN_NODE = "24.16.0"
 /** Hermes requires Python 3.11+; Ubuntu 24.04 ships 3.12 so the floor is satisfied. */
 export const HERMES_PYTHON_MIN = "3.11"
 
@@ -205,7 +225,7 @@ npm ls -g agent-browser >/dev/null 2>&1 || npm install -g --no-audit --no-fund a
 `
 }
 
-function buildHermesInstallSteps(): string {
+function buildHermesInstallSteps(browserDeps: boolean): string {
   return `
 RUNTIME_PKG_SPEC=${bashSingleQuote(pipPackageSpec())}
 
@@ -246,7 +266,7 @@ ${bashSingleQuote(HERMES_CLI)} --version
 step "hermes_config_dir"
 install -d -m 0750 -o ${bashSingleQuote(HERMES_SYSTEM_USER)} -g ${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(`${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}`)}
 install -d -m 0750 -o ${bashSingleQuote(HERMES_SYSTEM_USER)} -g ${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(HERMES_WORKSPACE_DIR)}
-${buildBrowserDepsSteps()}`
+${browserDeps ? buildBrowserDepsSteps() : ""}`
 }
 
 /**
@@ -257,7 +277,7 @@ ${buildBrowserDepsSteps()}`
  * and the bootstrap fails if either errors. Used whenever the Open WebUI sidecar is enabled
  * (the default for new Hermes instances).
  */
-function buildHermesPlusWebuiInstallSteps(): string {
+function buildHermesPlusWebuiInstallSteps(browserDeps: boolean): string {
   return `
 RUNTIME_PKG_SPEC=${bashSingleQuote(pipPackageSpec())}
 OPEN_WEBUI_PKG_SPEC=${bashSingleQuote(openWebUiPipSpec())}
@@ -337,7 +357,7 @@ ${bashSingleQuote(OPEN_WEBUI_BIN)} --help >/dev/null
 step "hermes_config_dir"
 install -d -m 0750 -o ${bashSingleQuote(HERMES_SYSTEM_USER)} -g ${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(`${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}`)}
 install -d -m 0750 -o ${bashSingleQuote(HERMES_SYSTEM_USER)} -g ${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(HERMES_WORKSPACE_DIR)}
-${buildBrowserDepsSteps()}`
+${browserDeps ? buildBrowserDepsSteps() : ""}`
 }
 
 /**
@@ -667,9 +687,14 @@ WantedBy=multi-user.target
   renderBootstrap(args: BootstrapRenderArgs): string {
     // Sidecar enabled → install Hermes and Open WebUI with their pip steps overlapped
     // (buildHermesPlusWebuiInstallSteps). Legacy API-only Hermes → Hermes alone.
+    // Chrome is ~142MB and `agent-browser` needs a global npm install; both
+    // are browser-tool-only. Default true preserves the old always-bake
+    // behaviour for callers that have no instance to read tools from (the
+    // warm pool, where bake time is ours and free).
+    const browserDeps = args.browserDeps !== false
     const installSteps = args.webuiEnabled
-      ? buildHermesPlusWebuiInstallSteps()
-      : buildHermesInstallSteps()
+      ? buildHermesPlusWebuiInstallSteps(browserDeps)
+      : buildHermesInstallSteps(browserDeps)
     return buildBootstrapFraming(
       {
         installDir: HERMES_INSTALL_DIR,
