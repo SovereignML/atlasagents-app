@@ -214,3 +214,74 @@ describe("Hermes bootstrap — Node floor and browser dependencies", () => {
     }
   })
 })
+
+describe("Hermes bootstrap — version pinning", () => {
+  it("pins both the runtime and the sidecar when resolved", () => {
+    const script = hermesRuntime.renderBootstrap({
+      gatewayPort: hermesRuntime.gatewayPort,
+      webuiEnabled: true,
+      runtimeVersion: "0.19.0",
+      sidecarVersion: "0.11.3",
+    })
+    expect(script).toContain("hermes-agent==0.19.0")
+    expect(script).toContain("open-webui==0.11.3")
+  })
+
+  // Unpinned must render exactly what it always did: a bare dist name, which
+  // is how "latest" is spelled for pip.
+  it("falls back to an unpinned dist name with no pin", () => {
+    const script = hermesRuntime.renderBootstrap({
+      gatewayPort: hermesRuntime.gatewayPort,
+      webuiEnabled: true,
+    })
+    expect(script).toContain("RUNTIME_PKG_SPEC='hermes-agent'")
+    expect(script).toContain("OPEN_WEBUI_PKG_SPEC='open-webui'")
+  })
+})
+
+describe("Hermes bootstrap — Python install strategy", () => {
+  const render = (webuiEnabled: boolean) =>
+    hermesRuntime.renderBootstrap({
+      gatewayPort: hermesRuntime.gatewayPort,
+      webuiEnabled,
+    })
+
+  // uv is an accelerator, never a new hard dependency: if astral.sh is
+  // unreachable the bootstrap must still complete on pip. Trading a slow
+  // provision for a broken one is not an optimization.
+  it("uses uv when present and falls back to pip when not", () => {
+    const script = render(true)
+    expect(script).toContain("uv pip install")
+    expect(script).toContain("astral.sh/uv/install.sh")
+    expect(script).toContain("falling back to pip")
+    // The fallback branch must still install via the venv's own pip.
+    expect(script).toContain('"$venv/bin/pip" install --upgrade "$spec"')
+  })
+
+  it("keeps the two heavy installs overlapped", () => {
+    const script = render(true)
+    expect(script).toContain("install_pkgs_parallel")
+    expect(script).toContain('wait "$HPID"')
+    expect(script).toContain('wait "$OPID"')
+    // Separate caches so the parallel installs never contend on one.
+    expect(script).toContain("/var/tmp/py-cache-hermes")
+    expect(script).toContain("/var/tmp/py-cache-owui")
+  })
+
+  // open-webui's requires_python is >=3.11,<3.13.0a1. BYOS admits any amd64
+  // Ubuntu/Debian, and Debian 13 / Ubuntu 25.x ship Python 3.13 — which used
+  // to pass the floor-only check and then fail minutes later, mid-install.
+  it("enforces the sidecar's Python ceiling when Open WebUI is installed", () => {
+    expect(render(true)).toContain("sys.version_info[:2] < (3, 13)")
+  })
+
+  it("uses the looser ceiling when only Hermes is installed", () => {
+    expect(render(false)).toContain("sys.version_info[:2] < (3, 14)")
+  })
+
+  it("still enforces the floor", () => {
+    for (const script of [render(true), render(false)]) {
+      expect(script).toContain("(3, 11) <= sys.version_info[:2]")
+    }
+  })
+})

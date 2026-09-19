@@ -370,6 +370,19 @@ export const instances = pgTable(
     // Agent runtime engine for the VPS path: "openclaw" (default) | "hermes".
     // NULL on pre-existing rows; getRuntime() coerces NULL -> "openclaw".
     runtime: text().default("openclaw"),
+    /**
+     * The concrete runtime package version this box was provisioned with, as
+     * resolved and pinned at bootstrap. NULL on every instance provisioned
+     * before pinning existed — those installed whatever `latest` was that day
+     * and there is no way to recover it short of asking the box.
+     *
+     * The platform has never recorded this: the package is installed exactly
+     * once, at bootstrap, and there is no upgrade path. See
+     * src/lib/runtime-versions.ts.
+     */
+    runtimeVersion: text(),
+    /** Same, for the Open WebUI sidecar when `webuiEnabled`. */
+    sidecarVersion: text(),
     // LLM provider override: "openrouter" | "nvidia". NULL → platform default
     // (LLM_DEFAULT_PROVIDER, else "openrouter"). See resolveLlmProvider().
     llmProvider: text(),
@@ -694,6 +707,38 @@ export const byosServers = pgTable(
      * Advisory — it drives the "fits ~N more" line, not a hard limit.
      */
     capacityAgents: integer().default(0).notNull(),
+
+    // --- Connect-time prebake -------------------------------------------
+    // Everything on a BYOS box that does NOT depend on which agent the
+    // customer eventually picks is installed when they connect the server,
+    // in the background, rather than inside the window they sit and watch
+    // after clicking deploy. Same idea as the warm pool's bake-finalize
+    // (see buildBakeFinalizeScript in warm-pool.ts), applied to a machine we
+    // do not own.
+    //
+    // These columns exist because there is no Instance row at connect time,
+    // so logSshStep / logInstanceEvent — which both key on instanceId — have
+    // nowhere to write.
+    /** "none" | "running" | "ready" | "failed" | "skipped" */
+    prebakeStatus: text().default("none").notNull(),
+    prebakeStartedAt: timestamp({ mode: "date", withTimezone: false }),
+    prebakedAt: timestamp({ mode: "date", withTimezone: false }),
+    prebakeError: text(),
+    /**
+     * The versions actually fetched onto the box. The deploy installs THESE,
+     * not `latest` — re-resolving `latest` at deploy would miss the warm cache
+     * and waste the entire prefetch. See src/lib/runtime-versions.ts.
+     */
+    prebakedOpenclawVersion: text(),
+    prebakedHermesVersion: text(),
+    prebakedWebuiVersion: text(),
+    /**
+     * When the operator accepted, on the connect form, that we preinstall
+     * packages on this server. No consent, no prebake — the preflight is
+     * otherwise strictly read-only and unprivileged, and this is the moment
+     * that stops being true.
+     */
+    prebakeConsentAt: timestamp({ mode: "date", withTimezone: false }),
 
     createdAt: now(),
     updatedAt: timestamp({ mode: "date", withTimezone: false })

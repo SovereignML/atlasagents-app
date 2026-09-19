@@ -103,3 +103,28 @@ describe("OpenClaw bootstrap — browser dependencies are opt-in", () => {
     }
   })
 })
+
+describe("OpenClaw bootstrap — version pinning", () => {
+  // The BYOS prebake downloads the package at connect and installs it at
+  // deploy. If the install resolved `latest` a second time, a release landing
+  // in between would turn the warm cache into a miss and the prefetch would
+  // have bought nothing. The pin is what makes "download now, install later"
+  // work at all.
+  it("installs the resolved pin when one is supplied", () => {
+    const script = openclawRuntime.renderBootstrap({
+      gatewayPort: openclawRuntime.gatewayPort,
+      webuiEnabled: false,
+      runtimeVersion: "2026.9.5",
+    })
+    expect(script).toContain("openclaw@2026.9.5")
+    expect(script).not.toContain("openclaw@latest")
+  })
+
+  it("falls back to today's behaviour with no pin", () => {
+    const script = openclawRuntime.renderBootstrap({
+      gatewayPort: openclawRuntime.gatewayPort,
+      webuiEnabled: false,
+    })
+    expect(script).toContain("openclaw@latest")
+  })
+})

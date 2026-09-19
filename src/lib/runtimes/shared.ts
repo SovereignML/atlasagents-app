@@ -11,6 +11,7 @@ import type {
   ToolServiceRoute,
 } from "./types"
 import { buildBootstrapFraming, browserInstallStep } from "./bootstrap"
+import { npmSpec } from "@/lib/runtime-versions"
 
 /* --- Caddy building blocks (shared by both runtime renderers) ------------ */
 
@@ -348,7 +349,9 @@ WantedBy=multi-user.target
   }
 
   function renderBootstrap(args: BootstrapRenderArgs): string {
-    const pkgSpec = `${spec.npmPackage}@${spec.version()}`
+    // A resolved pin wins; otherwise fall back to the env override, else
+    // `latest` — byte-identical to what this rendered before pinning existed.
+    const pkgSpec = npmSpec(spec.npmPackage, args.runtimeVersion ?? spec.version())
     const installSteps = `
 RUNTIME_PKG_SPEC=${shellEscapeForBash(pkgSpec)}
 

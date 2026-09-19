@@ -163,6 +163,18 @@ export type BootstrapRenderArgs = {
    */
   browserDeps?: boolean
   /**
+   * Concrete version of the runtime package to install, overriding the
+   * env/`latest` resolution. Set from a pin resolved and persisted earlier —
+   * for BYOS, at connect, so that what the prebake DOWNLOADED is exactly what
+   * the deploy INSTALLS. Resolving `latest` a second time at deploy would turn
+   * the warm cache into a miss and waste the whole prefetch.
+   *
+   * Omitted → today's behaviour (env override, else `latest`).
+   */
+  runtimeVersion?: string
+  /** Same, for the sidecar package (Open WebUI). */
+  sidecarVersion?: string
+  /**
    * The port sshd actually listens on. Defaults to 22. BYOS servers may use
    * anything — and the firewall step opens THIS port, not a hardcoded 22.
    * Getting it wrong locks us (and the customer) out of their own machine.
@@ -222,7 +234,8 @@ export type SidecarSpec = {
   /** Absolute path of the sidecar's env file (referenced by its systemd unit). */
   envPath: string
   /** Bash install steps injected into the runtime bootstrap (package install, user creation, etc.). */
-  installSteps(): string
+  /** `pin` is a resolved concrete version; omitted falls back to env/`latest`. */
+  installSteps(pin?: string): string
   /** Build the sidecar's env file contents (key/value map). */
   renderEnv(args: SidecarEnvArgs): Record<string, string>
   /** systemd unit that runs the sidecar process. */
