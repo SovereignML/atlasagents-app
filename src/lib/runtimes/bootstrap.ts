@@ -20,11 +20,25 @@ export const BOOTSTRAP_STATUS = "/tmp/bootstrap.status"
 /** Bootstrap stdout/stderr log. `sshPollBootstrap` tails this on failure. */
 export const BOOTSTRAP_LOG = "/var/log/bootstrap.log"
 
+export type SystemAccount = {
+  /** Install / HOME dir, e.g. /opt/openclaw or /opt/hermes. */
+  installDir: string
+  /** Dedicated system user created and owning installDir. */
+  systemUser: string
+}
+
 export type BootstrapFramingOpts = {
   /** Install / HOME dir for the runtime, e.g. /opt/openclaw or /opt/hermes. */
   installDir: string
   /** Dedicated system user created and owning installDir, e.g. "openclaw" or "hermes". */
   systemUser: string
+  /**
+   * Further accounts to create alongside the primary one. Empty for a normal
+   * runtime bootstrap; the BYOS prebake passes every runtime's account,
+   * because at connect time the customer has not picked an engine yet and a
+   * `useradd` costs nothing.
+   */
+  extraAccounts?: SystemAccount[]
   /** Minimum Node version required; verify_node step fails if not satisfied. */
   minNodeVersion: string
   /** Gateway port — baked into the Cloudflare wildcard Caddy snippet. */
@@ -91,6 +105,48 @@ apt-get $APT_OPTS install -y google-chrome-stable fonts-liberation
 `
 }
 
+/**
+ * The runtime-agnostic half of the bootstrap: everything that does NOT depend
+ * on which agent the customer eventually deploys.
+ *
+ * Used by the BYOS connect-time prebake. It is the same framing the real
+ * bootstrap uses — same status file, same log, same failure trap, same
+ * idempotent steps — with every runtime's system account created up front and
+ * a payload of install steps that are worth doing before the choice is made.
+ *
+ * Deliberately no Cloudflare origin-cert snippet: that snippet bakes in a
+ * single `gatewayPort`, and at connect time we do not know which runtime's
+ * port applies. The deploy writes it, which is one small file write.
+ *
+ * This script is safe to run again. The deploy re-runs the full bootstrap
+ * regardless (see plan 007 W8) and relies on every step here no-opping.
+ */
+export function buildPrereqScript(opts: {
+  /** Every runtime's account. The first is the framing's primary. */
+  accounts: [SystemAccount, ...SystemAccount[]]
+  /** The highest floor across the runtimes, so one Node serves all of them. */
+  minNodeVersion: string
+  sshPort?: number
+  manageFirewall?: boolean
+  /** Install steps to run inside the framing, after swap. */
+  payloadSteps?: string
+}): string {
+  const [primary, ...rest] = opts.accounts
+  return buildBootstrapFraming(
+    {
+      installDir: primary.installDir,
+      systemUser: primary.systemUser,
+      extraAccounts: rest,
+      minNodeVersion: opts.minNodeVersion,
+      // Unused without cf cert PEMs, which a prebake never passes.
+      gatewayPort: 0,
+      sshPort: opts.sshPort,
+      manageFirewall: opts.manageFirewall,
+    },
+    opts.payloadSteps ?? "",
+  )
+}
+
 export function buildBootstrapFraming(
   opts: BootstrapFramingOpts,
   runtimeInstallSteps: string,
@@ -107,6 +163,20 @@ export function buildBootstrapFraming(
       "  # firewall ON here could cut off whatever else they run on it. The\n" +
       "  # allow-rules above are still added so the agent is reachable when a\n" +
       "  # firewall is already active."
+
+  // One block per account. With a single account this is byte-for-byte what
+  // the step emitted when it only knew about one.
+  const accountBlocks = [
+    { installDir: opts.installDir, systemUser: opts.systemUser },
+    ...(opts.extraAccounts ?? []),
+  ]
+    .map(
+      (a) =>
+        `id ${shellEscape(a.systemUser)} >/dev/null 2>&1 || useradd --system --home-dir ${shellEscape(a.installDir)} --shell /usr/sbin/nologin ${shellEscape(a.systemUser)}
+mkdir -p ${shellEscape(a.installDir)}
+chown -R ${shellEscape(a.systemUser)}:${shellEscape(a.systemUser)} ${shellEscape(a.installDir)}`,
+    )
+    .join("\n")
 
   let cfBlock = ""
   if (opts.cfOriginCertPem && opts.cfOriginKeyPem) {
@@ -261,9 +331,7 @@ process.exit(0)
 VERIFYNODE
 
 step "create_user"
-id ${shellEscape(opts.systemUser)} >/dev/null 2>&1 || useradd --system --home-dir ${shellEscape(opts.installDir)} --shell /usr/sbin/nologin ${shellEscape(opts.systemUser)}
-mkdir -p ${shellEscape(opts.installDir)}
-chown -R ${shellEscape(opts.systemUser)}:${shellEscape(opts.systemUser)} ${shellEscape(opts.installDir)}
+${accountBlocks}
 
 step "swap"
 # Skip when the box already has swap of any kind (partition, zram, another

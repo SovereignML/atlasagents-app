@@ -403,6 +403,23 @@ ${browserDeps ? buildBrowserDepsSteps() : ""}`
 }
 
 /**
+ * The full Hermes stack (hermes-agent + Open WebUI) as install steps, for the
+ * BYOS connect-time prebake.
+ *
+ * Exported rather than reimplemented so there is exactly one description of
+ * how Hermes gets installed. The prebake runs these before the customer has
+ * picked an engine; if they pick OpenClaw instead, the box simply carries an
+ * unused Hermes venv.
+ */
+export function buildHermesPrebakeSteps(opts: {
+  browserDeps: boolean
+  pin?: string
+  webuiPin?: string
+}): string {
+  return buildHermesPlusWebuiInstallSteps(opts.browserDeps, opts.pin, opts.webuiPin)
+}
+
+/**
  * Open WebUI sidecar — a native Python process (installed via pip into its own
  * venv) fronting Hermes' OpenAI-compatible API. systemd supervises it directly;
  * there is no Docker daemon, no container, no named volume. The venv is
