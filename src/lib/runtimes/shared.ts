@@ -6,6 +6,7 @@ import type {
   BuildEnvArgs,
   RenderCaddyfileArgs,
   RenderConfigArgs,
+  PackageRegistry,
   RuntimeEngine,
   RuntimeId,
   ToolServiceRoute,
@@ -124,6 +125,8 @@ export type RuntimeSpec = {
   id: RuntimeId
   displayName: string
   npmPackage: string
+  /** Which package index `npmPackage` lives in. */
+  registry: PackageRegistry
   version: () => string
   minNode: string
   gatewayPort: number
@@ -419,6 +422,7 @@ ${args.browserDeps === false ? "" : browserInstallStep()}`
     id: spec.id,
     displayName: spec.displayName,
     npmPackage: spec.npmPackage,
+    registry: spec.registry,
     version: spec.version,
     minNode: spec.minNode,
     gatewayPort: spec.gatewayPort,

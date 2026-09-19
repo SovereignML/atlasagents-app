@@ -140,6 +140,9 @@ export type RuntimeWorkspacePaths = {
  * Inputs to `renderBootstrap`. Each runtime owns its own install bash and
  * passes these along to the shared `buildBootstrapFraming` helper.
  */
+/** Where a runtime's or sidecar's package is published. */
+export type PackageRegistry = "npm" | "pypi"
+
 export type BootstrapRenderArgs = {
   gatewayPort: number
   cfOriginCertPem?: string
@@ -236,6 +239,12 @@ export type SidecarSpec = {
   /** Bash install steps injected into the runtime bootstrap (package install, user creation, etc.). */
   /** `pin` is a resolved concrete version; omitted falls back to env/`latest`. */
   installSteps(pin?: string): string
+  /** Package name of the sidecar itself, for version resolution. */
+  packageName: string
+  /** Which index `packageName` lives in. */
+  registry: PackageRegistry
+  /** Configured version — an env override, else `latest`. */
+  version(): string
   /** Build the sidecar's env file contents (key/value map). */
   renderEnv(args: SidecarEnvArgs): Record<string, string>
   /** systemd unit that runs the sidecar process. */
@@ -321,7 +330,14 @@ export interface RuntimeEngine {
   /** Human-facing name shown in the dashboard, e.g. "OpenClaw" / "Hermes". */
   displayName: string
   /** Package identifier (npm for OpenClaw, PyPI for Hermes) — informational. */
+  /**
+   * Package name. Historically called `npmPackage`, but Hermes is a PyPI
+   * distribution — read it together with `registry`, which says where to
+   * actually look the version up.
+   */
   npmPackage: string
+  /** Which index `npmPackage` lives in. */
+  registry: PackageRegistry
   /** Pinned version, resolved lazily from env (OPENCLAW_VERSION / HERMES_VERSION). */
   version: () => string
   /**

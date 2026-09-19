@@ -129,3 +129,14 @@ export async function resolveVersion(
   if (isPinned(configured)) return configured.trim()
   return await lookup()
 }
+
+/** Resolve `latest` against whichever index the package actually lives in. */
+export async function resolveForRegistry(
+  registry: "npm" | "pypi",
+  pkg: string,
+  configured: string,
+): Promise<string | null> {
+  return resolveVersion(configured, () =>
+    registry === "npm" ? resolveNpmLatest(pkg) : resolvePypiLatest(pkg),
+  )
+}

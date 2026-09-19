@@ -16,9 +16,10 @@
  *
  *   - **Shared prerequisites** (apt, Caddy, Node, swap, accounts) — installed.
  *     Identical for both runtimes.
- *   - **The Hermes stack** (hermes-agent + Open WebUI) — installed, and Open
- *     WebUI is pre-booted so its SQLite/alembic/bytecode first-run cost is paid
- *     here. It is the heaviest item on the slow path and Open WebUI is not part
+ *   - **The Hermes stack** (hermes-agent + Open WebUI) — installed, both
+ *     systemd units written and enabled, and Open WebUI actually started once
+ *     (see the `prebake_finalize` step) so its SQLite/alembic/bytecode
+ *     first-run cost is paid here rather than mid-deploy. It is the heaviest item on the slow path and Open WebUI is not part
  *     of the customer's either/or: it is Hermes' sidecar and ships everywhere.
  *   - **OpenClaw** — downloaded into the npm cache only, never installed. It is
  *     the genuine either/or choice, and its 225MB / 11,428-file extract is what
@@ -38,6 +39,7 @@ import {
   buildHermesPrebakeSteps,
 } from "@/lib/runtimes/hermes"
 import { OPENCLAW_VPS_MIN_NODE } from "@/lib/runtimes/openclaw"
+import { buildBakeFinalizeScript } from "@/lib/runtimes/finalize"
 import { npmSpec } from "@/lib/runtime-versions"
 import type { PreflightFacts } from "@/lib/byos-preflight-parse"
 
@@ -181,6 +183,19 @@ export function buildPrebakeScript(opts: PrebakeScriptOpts): string {
       webuiPin: opts.webuiVersion ?? undefined,
     }),
     buildOpenclawCacheStep(opts.openclawVersion),
+    // Install + enable the systemd units and pre-start Open WebUI, so the
+    // deploy only rewrites config and restarts. This is the same script the
+    // warm pool runs after a bake, for the same reason — and it is where the
+    // sidecar's first-boot cost (SQLite schema, alembic migrations, importing
+    // a very large Python tree) actually gets paid. Leaving it out was the
+    // difference between "restart a warm service" and "cold-start Open WebUI
+    // while the customer watches".
+    //
+    // Hermes only: OpenClaw is merely cached here, so writing its unit would
+    // point systemd at a binary that does not exist yet. The deploy writes it.
+    `
+step "prebake_finalize"
+${buildBakeFinalizeScript("hermes", true)}`,
   ].join("\n")
 
   return buildPrereqScript({
@@ -309,6 +324,11 @@ export function prebakeUsability(opts: {
       misses.push(`hermes is ${facts.hermesVersion}, pinned to ${opts.hermesPin}`)
     }
     if (!facts.hasOpenWebui) misses.push("open-webui is not installed")
+    // The prebake writes and enables both units so the deploy only has to
+    // restart. A missing unit means the finalize step did not run (or was
+    // undone), which is exactly the drift this probe exists to catch — it was
+    // being collected and then ignored.
+    if (!facts.hermesUnitInstalled) misses.push("the hermes-gateway unit is not installed")
   }
 
   return { fastPath: misses.length === 0, misses }

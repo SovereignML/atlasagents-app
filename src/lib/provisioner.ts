@@ -46,6 +46,7 @@ import {
 import { ENV_KEY_CHANGED, buildEnvKeyUpsertScript } from "@/lib/runtimes/env-upsert"
 import { getRuntime, type RuntimeEngine, type RuntimeId } from "@/lib/runtimes"
 import { FREE_DEMO_TTL_MS } from "@/configs/plans"
+import { resolveForRegistry } from "@/lib/runtime-versions"
 import { PROVISION_EVENT } from "@/lib/provision-events"
 import { getVmProvider, describeVmError, type VmProvider, type VpsProvider } from "@/lib/vm-provider"
 import {
@@ -919,6 +920,54 @@ function isVps(instance: Instance): boolean {
  * bake time is ours rather than a customer's, and a claim must stay fast — so
  * that path keeps pre-baking unconditionally by omitting the flag.
  */
+/**
+ * Resolve the concrete versions this instance will be provisioned with, and
+ * record them on the row.
+ *
+ * Two things depend on this. A BYOS box downloads its packages when the server
+ * is connected and installs them when an agent is deployed, so re-resolving
+ * `latest` at deploy would miss the warm cache and re-download everything.
+ * And until now nothing anywhere recorded what version a box actually got:
+ * the package is installed once, at bootstrap, with no upgrade path, so an
+ * unrecorded version was unrecoverable short of asking the box.
+ *
+ * Best-effort by design. A registry that is slow or down yields null, the
+ * bootstrap falls back to `latest`, and provisioning proceeds exactly as it
+ * did before pinning existed — a version lookup must never be able to block a
+ * deploy.
+ */
+async function resolveAndRecordVersions(
+  instance: Instance,
+  runtime: RuntimeEngine,
+): Promise<{ runtimeVersion?: string; sidecarVersion?: string }> {
+  const wantsSidecar = Boolean(instance.webuiEnabled) && Boolean(runtime.sidecar)
+  const [runtimeVersion, sidecarVersion] = await Promise.all([
+    resolveForRegistry(runtime.registry, runtime.npmPackage, runtime.version()),
+    wantsSidecar && runtime.sidecar
+      ? resolveForRegistry(
+          runtime.sidecar.registry,
+          runtime.sidecar.packageName,
+          runtime.sidecar.version(),
+        )
+      : Promise.resolve(null),
+  ])
+
+  if (runtimeVersion || sidecarVersion) {
+    await db
+      .update(instances)
+      .set({
+        ...(runtimeVersion ? { runtimeVersion } : {}),
+        ...(sidecarVersion ? { sidecarVersion } : {}),
+      })
+      .where(eq(instances.id, instance.id))
+  }
+
+  return {
+    ...(runtimeVersion ? { runtimeVersion } : {}),
+    ...(sidecarVersion ? { sidecarVersion } : {}),
+  }
+}
+
 function wantsBrowserDeps(instance: Instance, runtime: RuntimeEngine): boolean {
   return enabledToolsForRuntime(instance.enabledTools ?? [], runtime.id).some(
     (t) => t.requiresChromium,
@@ -1444,6 +1493,11 @@ async function createAndBootVm(
     message: `Creating VM (${plan} in ${region})${opts.useGoldenImage ? ` from golden image ${goldenImage}` : " with cloud-init bootstrap"}...`,
   })
 
+  // Resolved only when we are actually rendering a bootstrap — a golden-image
+  // boot installs nothing, so there is no version to pin or to record.
+  const pins = opts.useGoldenImage
+    ? {}
+    : await resolveAndRecordVersions(instance, runtime)
   const bootstrapScript = opts.useGoldenImage
     ? undefined
     : runtime.renderBootstrap({
@@ -1452,6 +1506,7 @@ async function createAndBootVm(
         cfOriginKeyPem: opts.cfOriginKeyPem,
         webuiEnabled: Boolean(instance.webuiEnabled) && Boolean(runtime.sidecar),
         browserDeps: wantsBrowserDeps(instance, runtime),
+        ...pins,
       })
 
   const publicKey = process.env.SSH_FLEET_PUBLIC_KEY
@@ -2658,12 +2713,14 @@ async function provisionByosBot(instance: Instance): Promise<ProvisionResult> {
       stage: currentStage,
       message: PROVISION_EVENT.bootstrapping,
     })
+    const pins = await resolveAndRecordVersions(instance, runtime)
     const bootstrapScript = runtime.renderBootstrap({
       gatewayPort: runtime.gatewayPort,
       cfOriginCertPem,
       cfOriginKeyPem,
       webuiEnabled: Boolean(instance.webuiEnabled) && Boolean(runtime.sidecar),
       browserDeps: wantsBrowserDeps(instance, runtime),
+      ...pins,
       // The customer's sshd may be on any port, and the box is not ours to
       // firewall — see BootstrapRenderArgs. Passing the wrong port here, or
       // enabling ufw at all, locks the owner out of their own server.

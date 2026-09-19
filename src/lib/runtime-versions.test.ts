@@ -8,6 +8,7 @@ import {
   parseNpmLatest,
   parsePypiLatest,
   pypiSpec,
+  resolveForRegistry,
   resolveVersion,
 } from "./runtime-versions"
 
@@ -142,5 +143,14 @@ describe("resolveVersion()", () => {
 
   it("returns null when the registry cannot be reached", async () => {
     expect(await resolveVersion(UNPINNED, async () => null)).toBeNull()
+  })
+})
+
+describe("resolveForRegistry()", () => {
+  // Hermes' engine field is called `npmPackage` but holds a PyPI dist name,
+  // which is why the registry is declared separately rather than inferred.
+  it("does not go to the network for an env-pinned version", async () => {
+    expect(await resolveForRegistry("pypi", "hermes-agent", "0.19.0")).toBe("0.19.0")
+    expect(await resolveForRegistry("npm", "openclaw", "2026.9.4")).toBe("2026.9.4")
   })
 })

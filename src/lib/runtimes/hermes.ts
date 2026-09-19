@@ -430,6 +430,9 @@ export function buildHermesPrebakeSteps(opts: {
  */
 const openWebUiSidecar: SidecarSpec = {
   serviceName: OPEN_WEBUI_SERVICE_NAME,
+  packageName: OPEN_WEBUI_PYPI_DIST,
+  registry: "pypi",
+  version: OPEN_WEBUI_VERSION,
   port: OPEN_WEBUI_PORT,
   healthPath: "/health",
   dataDir: OPEN_WEBUI_DATA_DIR,
@@ -560,6 +563,7 @@ export const hermesRuntime: RuntimeEngine = {
   id: "hermes",
   displayName: "Hermes",
   npmPackage: HERMES_PYPI_DIST,
+  registry: "pypi",
   version: HERMES_VERSION,
   minNode: HERMES_VPS_MIN_NODE,
   gatewayPort: HERMES_GATEWAY_PORT,

@@ -158,6 +158,32 @@ describe("buildPrebakeScript()", () => {
   })
 
   // The snippet bakes in a single gatewayPort and the engine is unknown here.
+  // The regression this guards: the module header and docs/BYOS.md both said
+  // the prebake pre-boots Open WebUI, and for a while the script did not —
+  // which quietly left the sidecar's first-boot cost (SQLite schema, alembic
+  // migrations, importing a very large Python tree) on the deploy path, the
+  // exact cost the prebake exists to remove.
+  it("installs both systemd units and pre-starts Open WebUI", () => {
+    expect(script).toContain("prebake_finalize")
+    expect(script).toContain("/etc/systemd/system/hermes-gateway.service")
+    expect(script).toContain("/etc/systemd/system/open-webui.service")
+    expect(script).toContain("systemctl start 'open-webui'")
+    expect(script).toContain("systemctl enable 'hermes-gateway'")
+  })
+
+  // Warming the CLI is the other half of what makes a claim fast; it can only
+  // run because hermes is genuinely installed here, not merely downloaded.
+  it("warms the Hermes CLI", () => {
+    expect(script).toContain("setup --non-interactive --quick")
+    expect(script).toContain("doctor --fix")
+  })
+
+  // OpenClaw is only cached, so its unit would point systemd at a binary that
+  // does not exist. The deploy writes it.
+  it("does not write an OpenClaw unit it has no binary for", () => {
+    expect(script).not.toContain("openclaw-gateway.service")
+  })
+
   it("writes no Cloudflare origin-cert snippet", () => {
     expect(script).not.toContain("cf_origin_cert")
     expect(script).not.toContain("sovereignclaw.caddy")
@@ -238,6 +264,17 @@ describe("prebakeUsability()", () => {
     expect(r.fastPath).toBe(false)
     expect(r.misses).toContain("caddy is not installed")
     expect(r.misses).toContain("open-webui is not installed")
+  })
+
+  it("notices a missing systemd unit", () => {
+    const r = prebakeUsability({
+      runtime: "hermes",
+      facts: { ...READY, hermesUnitInstalled: false },
+      hermesPin: "0.19.0",
+      minNodeVersion: "24.16.0",
+    })
+    expect(r.fastPath).toBe(false)
+    expect(r.misses.join(" ")).toMatch(/hermes-gateway unit/)
   })
 
   it("notices a Node major that no longer matches", () => {
