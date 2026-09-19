@@ -5,7 +5,7 @@
  *   - status file + log file + failure trap
  *   - apt update + base build deps
  *   - Caddy + Node.js repositories
- *   - Node 22 install + min-version verification
+ *   - Node install (major derived from the runtime's own floor) + verification
  *   - dedicated system user + install dir + swap file
  *   - optional Cloudflare wildcard origin-cert snippet
  *   - ufw firewall

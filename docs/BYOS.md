@@ -55,6 +55,46 @@ The defining difference from the managed-VPS path: **no provider VM is allocated
 - To satisfy the `instances` foreign keys without a real DigitalOcean/Linode plan, the row points at a **sentinel** server config (`byos-managed`) and a **`self-hosted`** region (falling back to the first region if the BYOS seed hasn't run). These are placeholders, not billable compute.
 - `provisionBot()` ([`src/lib/provisioner.ts`](../src/lib/provisioner.ts)) then runs the normal install over SSH against the user's host — same runtime install as a managed instance (see [RUNTIMES.md](RUNTIMES.md)).
 
+### Prebake at connect ([`src/lib/byos-prebake.ts`](../src/lib/byos-prebake.ts))
+
+A BYOS box gets no warm pool and no golden image, so historically every deploy
+built from scratch inside the window the customer sat watching — an estimated
+6–10 minutes for OpenClaw and 10–15 for Hermes + Open WebUI.
+
+Work that does **not** depend on which engine they eventually pick now runs in
+the background as soon as the server is connected:
+
+| | at connect | at deploy |
+|---|---|---|
+| apt, Caddy, Node, swap, both runtimes' accounts | installed | no-ops |
+| `hermes-agent` + Open WebUI | installed, Open WebUI pre-booted | restart only |
+| `openclaw` | **downloaded into the npm cache only** | installed from cache |
+| config, secrets, systemd, health checks, DNS | — | per-instance, always |
+
+OpenClaw is the genuine either/or, and its 225MB / 11,428-file *extract* is what
+makes it expensive, so only the download moves. Open WebUI is not part of that
+choice — it is Hermes' sidecar and ships everywhere — so installing it early is
+what removes the heaviest item from the slow path. The consequence is that a
+Hermes deploy ends up faster than an OpenClaw one.
+
+**Consent is required and is not implied by connecting.** The preflight is
+read-only and unprivileged by design; prebake is the moment that stops being
+true, so it runs only against a recorded `byosServers.prebakeConsentAt`.
+
+**A box already serving the web is skipped, not prebaked.** The preflight
+deliberately does not block on a busy `:443`, an existing Caddyfile, nginx or
+apache — it surfaces them and tells the owner they are their call. Installing
+Caddy in the background moments later would answer that call for them, so those
+servers defer everything to deploy time, where the customer has just asked for
+it. Tight disk skips too (deploying still works, it is just slower).
+
+**`prebakeStatus` is for the UI, never for control flow.** The deploy re-runs
+the full bootstrap regardless and relies on its idempotency; a separate probe
+(`PREBAKE_VERIFY_SCRIPT` + `prebakeUsability()`) reports what is actually on the
+box. A customer can `apt remove caddy` or rebuild the machine behind the same
+IP, and a deploy that trusted a stale flag would produce a broken agent instead
+of a slow one.
+
 ### The platform never owns the machine
 
 `deploymentTarget === "byos"` means the host belongs to the customer, and two

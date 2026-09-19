@@ -324,7 +324,12 @@ export interface RuntimeEngine {
   npmPackage: string
   /** Pinned version, resolved lazily from env (OPENCLAW_VERSION / HERMES_VERSION). */
   version: () => string
-  /** Minimum Node major.minor.patch required (both runtimes use Node 22 at runtime). */
+  /**
+   * Minimum Node major.minor.patch required. Also selects the NodeSource
+   * distribution the bootstrap installs, so the two can never disagree.
+   * Both runtimes name the same floor on purpose — a BYOS box is prebaked
+   * with one Node major before the engine is chosen.
+   */
   minNode: string
   /** Loopback port the gateway binds; Caddy proxies external traffic to it. */
   gatewayPort: number

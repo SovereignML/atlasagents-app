@@ -35,7 +35,9 @@ ufw --force enable
 ## 2. Install dependencies
 
 ```bash
-# Node 22 (NodeSource — aligns with the OpenClaw VPS bootstrap)
+# Node 22 (NodeSource) for the control plane itself. Note this is NOT the
+# Node the agent VPS bootstrap installs — that is derived from each runtime's
+# own floor and is currently 24 (see docs/RUNTIMES.md).
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs postgresql postgresql-client caddy git
 
