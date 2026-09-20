@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest"
-import { buildBootstrapFraming, BOOTSTRAP_STATUS, BOOTSTRAP_LOG } from "./bootstrap"
+import {
+  APT_OPTS_LITERAL,
+  BOOTSTRAP_LOG,
+  BOOTSTRAP_STATUS,
+  browserInstallStep,
+  buildBootstrapFraming,
+  chromeInstallCommands,
+} from "./bootstrap"
 
 const opts = {
   installDir: "/opt/openclaw",
@@ -136,6 +143,34 @@ describe("buildBootstrapFraming() — Node version contract", () => {
     }
   })
 
+  // Prebake installs a Node major before the customer has picked a runtime,
+  // and a BYOS box re-runs this whole script on every deploy. Both make the
+  // nodejs step something that must be safe to run again.
+  it("skips NodeSource when the box already runs the wanted major", () => {
+    const script = buildBootstrapFraming({ ...opts, minNodeVersion: "24.16.0" }, "")
+    expect(script).toContain("node_is_wanted")
+    expect(script).toContain("NODE_MAJOR_WANTED=24")
+    // Exact-major test, not a floor test: openclaw's engines range accepts
+    // 24.x and 26.x but excludes 25.x, so a newer major is not automatically
+    // acceptable.
+    expect(script).toContain('"\${cur%%.*}" = "\${NODE_MAJOR_WANTED}"')
+  })
+
+  it("still installs caddy when it skips the NodeSource script", () => {
+    const script = buildBootstrapFraming({ ...opts, minNodeVersion: "24.16.0" }, "")
+    // The skip branch installs caddy alone; the install branch takes both.
+    expect(script).toContain("apt-get $APT_OPTS install -y caddy")
+    expect(script).toContain("apt-get $APT_OPTS install -y nodejs caddy")
+    // The NodeSource setup script is what refreshes apt after the caddy repo
+    // is added, so the skip branch has to do that update itself or `install
+    // caddy` cannot resolve the package on a box without it.
+    const skipBranch = script.slice(
+      script.indexOf("if node_is_wanted"),
+      script.indexOf("apt-get $APT_OPTS install -y caddy"),
+    )
+    expect(skipBranch).toContain("apt-get $APT_OPTS update -y")
+  })
+
   it("refuses a minNodeVersion it cannot derive a major from", () => {
     // Failing at render time is the point: a silently wrong Node major is what
     // produced an endless create/fail/destroy loop in production.
@@ -143,5 +178,44 @@ describe("buildBootstrapFraming() — Node version contract", () => {
       /Cannot derive a NodeSource major/,
     )
     expect(() => buildBootstrapFraming({ ...opts, minNodeVersion: "" }, "")).toThrow()
+  })
+})
+
+describe("chromeInstallCommands()", () => {
+  // The bug this locks down: provisioner.ts carried a hand-copied "mirror" of
+  // these commands that had drifted to `-o Acquire::Retries=3` alone. It is
+  // the script that runs when someone enables the browser tool on an
+  // already-running box — almost always a BYOS box, i.e. a real server with
+  // unattended-upgrades holding the dpkg lock right after boot, which is the
+  // exact situation DPkg::Lock::Timeout exists for. Without it apt fails
+  // instantly rather than waiting its turn.
+  it("carries the dpkg lock timeout wherever it is used", () => {
+    expect(APT_OPTS_LITERAL).toContain("DPkg::Lock::Timeout=120")
+    expect(chromeInstallCommands(APT_OPTS_LITERAL)).toContain("DPkg::Lock::Timeout=120")
+  })
+
+  it("takes its apt flags from the caller", () => {
+    // Inside the framing that is the shell variable; outside it, the literal.
+    expect(chromeInstallCommands("$APT_OPTS")).toContain("apt-get $APT_OPTS install -y")
+    expect(chromeInstallCommands(APT_OPTS_LITERAL)).toContain(
+      `apt-get ${APT_OPTS_LITERAL} install -y`,
+    )
+  })
+
+  it("is the single source of the commands the bootstrap step emits", () => {
+    expect(browserInstallStep()).toContain(chromeInstallCommands("$APT_OPTS"))
+  })
+
+  it("still installs Chrome rather than snap chromium", () => {
+    const cmds = chromeInstallCommands("$APT_OPTS")
+    expect(cmds).toContain("google-chrome-stable")
+    expect(cmds).toContain("fonts-liberation")
+    expect(cmds).not.toContain("chromium-browser")
+  })
+})
+
+describe("buildBootstrapFraming() — apt options", () => {
+  it("defines APT_OPTS from the shared literal", () => {
+    expect(buildBootstrapFraming(opts, "")).toContain(`APT_OPTS="${APT_OPTS_LITERAL}"`)
   })
 })

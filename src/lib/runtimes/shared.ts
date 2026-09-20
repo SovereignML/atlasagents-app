@@ -6,11 +6,13 @@ import type {
   BuildEnvArgs,
   RenderCaddyfileArgs,
   RenderConfigArgs,
+  PackageRegistry,
   RuntimeEngine,
   RuntimeId,
   ToolServiceRoute,
 } from "./types"
 import { buildBootstrapFraming, browserInstallStep } from "./bootstrap"
+import { npmSpec } from "@/lib/runtime-versions"
 
 /* --- Caddy building blocks (shared by both runtime renderers) ------------ */
 
@@ -123,6 +125,8 @@ export type RuntimeSpec = {
   id: RuntimeId
   displayName: string
   npmPackage: string
+  /** Which package index `npmPackage` lives in. */
+  registry: PackageRegistry
   version: () => string
   minNode: string
   gatewayPort: number
@@ -348,7 +352,9 @@ WantedBy=multi-user.target
   }
 
   function renderBootstrap(args: BootstrapRenderArgs): string {
-    const pkgSpec = `${spec.npmPackage}@${spec.version()}`
+    // A resolved pin wins; otherwise fall back to the env override, else
+    // `latest` — byte-identical to what this rendered before pinning existed.
+    const pkgSpec = npmSpec(spec.npmPackage, args.runtimeVersion ?? spec.version())
     const installSteps = `
 RUNTIME_PKG_SPEC=${shellEscapeForBash(pkgSpec)}
 
@@ -396,7 +402,7 @@ ${spec.cliBinary} --version
 step "compile_cache_dir"
 mkdir -p ${shellEscapeForBash(spec.compileCacheDir)}
 chown ${shellEscapeForBash(spec.systemUser)}:${shellEscapeForBash(spec.systemUser)} ${shellEscapeForBash(spec.compileCacheDir)}
-${browserInstallStep()}`
+${args.browserDeps === false ? "" : browserInstallStep()}`
     return buildBootstrapFraming(
       {
         installDir: spec.installDir,
@@ -416,6 +422,7 @@ ${browserInstallStep()}`
     id: spec.id,
     displayName: spec.displayName,
     npmPackage: spec.npmPackage,
+    registry: spec.registry,
     version: spec.version,
     minNode: spec.minNode,
     gatewayPort: spec.gatewayPort,

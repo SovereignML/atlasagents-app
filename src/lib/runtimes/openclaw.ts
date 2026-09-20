@@ -28,6 +28,7 @@ export const openclawRuntime = createRuntime({
   id: "openclaw",
   displayName: "OpenClaw",
   npmPackage: "openclaw",
+  registry: "npm",
   version: OPENCLAW_VERSION,
   minNode: OPENCLAW_VPS_MIN_NODE,
   gatewayPort: OPENCLAW_GATEWAY_PORT,

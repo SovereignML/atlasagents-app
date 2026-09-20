@@ -140,12 +140,43 @@ export type RuntimeWorkspacePaths = {
  * Inputs to `renderBootstrap`. Each runtime owns its own install bash and
  * passes these along to the shared `buildBootstrapFraming` helper.
  */
+/** Where a runtime's or sidecar's package is published. */
+export type PackageRegistry = "npm" | "pypi"
+
 export type BootstrapRenderArgs = {
   gatewayPort: number
   cfOriginCertPem?: string
   cfOriginKeyPem?: string
-  /** When true, the runtime appends its sidecar install steps (Docker + image pull). */
+  /** When true, the runtime appends its sidecar install steps (pip + venv). */
   webuiEnabled?: boolean
+  /**
+   * Whether to pre-bake the browser-tool system dependencies (Google Chrome,
+   * ~142MB, plus `agent-browser` on Hermes).
+   *
+   * Defaults to TRUE when omitted, which preserves the long-standing
+   * behaviour: every box got Chrome whether or not anything used it. That is
+   * right for a warm-pool bake (our VM, our time, and the claim must be fast)
+   * and wrong for BYOS, where it is the customer's bandwidth and it lands in
+   * the middle of the window they are watching.
+   *
+   * Tools are opt-in — `agent-tools.ts` has no `defaultEnabled` — so pass
+   * false whenever no enabled tool sets `requiresChromium`. Enabling the tool
+   * later still works: `installToolDependencies()` installs the same set on
+   * demand.
+   */
+  browserDeps?: boolean
+  /**
+   * Concrete version of the runtime package to install, overriding the
+   * env/`latest` resolution. Set from a pin resolved and persisted earlier —
+   * for BYOS, at connect, so that what the prebake DOWNLOADED is exactly what
+   * the deploy INSTALLS. Resolving `latest` a second time at deploy would turn
+   * the warm cache into a miss and waste the whole prefetch.
+   *
+   * Omitted → today's behaviour (env override, else `latest`).
+   */
+  runtimeVersion?: string
+  /** Same, for the sidecar package (Open WebUI). */
+  sidecarVersion?: string
   /**
    * The port sshd actually listens on. Defaults to 22. BYOS servers may use
    * anything — and the firewall step opens THIS port, not a hardcoded 22.
@@ -206,7 +237,19 @@ export type SidecarSpec = {
   /** Absolute path of the sidecar's env file (referenced by its systemd unit). */
   envPath: string
   /** Bash install steps injected into the runtime bootstrap (package install, user creation, etc.). */
-  installSteps(): string
+  /**
+   * NOTE: there is deliberately no `installSteps` here. The sidecar is
+   * installed by the runtime's own bootstrap — Hermes overlaps its pip install
+   * with Open WebUI's in one parallel step — and a second, standalone
+   * description of the same install drifted out of date the moment that path
+   * moved to `uv`. One description only.
+   */
+  /** Package name of the sidecar itself, for version resolution. */
+  packageName: string
+  /** Which index `packageName` lives in. */
+  registry: PackageRegistry
+  /** Configured version — an env override, else `latest`. */
+  version(): string
   /** Build the sidecar's env file contents (key/value map). */
   renderEnv(args: SidecarEnvArgs): Record<string, string>
   /** systemd unit that runs the sidecar process. */
@@ -292,10 +335,22 @@ export interface RuntimeEngine {
   /** Human-facing name shown in the dashboard, e.g. "OpenClaw" / "Hermes". */
   displayName: string
   /** Package identifier (npm for OpenClaw, PyPI for Hermes) — informational. */
+  /**
+   * Package name. Historically called `npmPackage`, but Hermes is a PyPI
+   * distribution — read it together with `registry`, which says where to
+   * actually look the version up.
+   */
   npmPackage: string
+  /** Which index `npmPackage` lives in. */
+  registry: PackageRegistry
   /** Pinned version, resolved lazily from env (OPENCLAW_VERSION / HERMES_VERSION). */
   version: () => string
-  /** Minimum Node major.minor.patch required (both runtimes use Node 22 at runtime). */
+  /**
+   * Minimum Node major.minor.patch required. Also selects the NodeSource
+   * distribution the bootstrap installs, so the two can never disagree.
+   * Both runtimes name the same floor on purpose — a BYOS box is prebaked
+   * with one Node major before the engine is chosen.
+   */
   minNode: string
   /** Loopback port the gateway binds; Caddy proxies external traffic to it. */
   gatewayPort: number

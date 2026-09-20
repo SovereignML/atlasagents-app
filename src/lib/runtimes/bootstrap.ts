@@ -5,7 +5,7 @@
  *   - status file + log file + failure trap
  *   - apt update + base build deps
  *   - Caddy + Node.js repositories
- *   - Node 22 install + min-version verification
+ *   - Node install (major derived from the runtime's own floor) + verification
  *   - dedicated system user + install dir + swap file
  *   - optional Cloudflare wildcard origin-cert snippet
  *   - ufw firewall
@@ -20,11 +20,25 @@ export const BOOTSTRAP_STATUS = "/tmp/bootstrap.status"
 /** Bootstrap stdout/stderr log. `sshPollBootstrap` tails this on failure. */
 export const BOOTSTRAP_LOG = "/var/log/bootstrap.log"
 
+export type SystemAccount = {
+  /** Install / HOME dir, e.g. /opt/openclaw or /opt/hermes. */
+  installDir: string
+  /** Dedicated system user created and owning installDir. */
+  systemUser: string
+}
+
 export type BootstrapFramingOpts = {
   /** Install / HOME dir for the runtime, e.g. /opt/openclaw or /opt/hermes. */
   installDir: string
   /** Dedicated system user created and owning installDir, e.g. "openclaw" or "hermes". */
   systemUser: string
+  /**
+   * Further accounts to create alongside the primary one. Empty for a normal
+   * runtime bootstrap; the BYOS prebake passes every runtime's account,
+   * because at connect time the customer has not picked an engine yet and a
+   * `useradd` costs nothing.
+   */
+  extraAccounts?: SystemAccount[]
   /** Minimum Node version required; verify_node step fails if not satisfied. */
   minNodeVersion: string
   /** Gateway port — baked into the Cloudflare wildcard Caddy snippet. */
@@ -80,15 +94,88 @@ function nodeSourceMajor(minNodeVersion: string): number {
  * runtimes. `fonts-liberation` covers common web fonts. Idempotent (apt no-ops
  * when present; the repo/key writes are overwrite-safe).
  */
+/**
+ * The apt options every apt call in a bootstrap should carry.
+ *
+ * `DPkg::Lock::Timeout` is the load-bearing one: a real server (as opposed to
+ * a fresh cloud image) usually has unattended-upgrades running right after
+ * boot, holding /var/lib/dpkg/lock-frontend for minutes. Without it, apt fails
+ * instantly with "could not get lock" instead of waiting its turn.
+ *
+ * Exported because callers OUTSIDE the bootstrap framing — which have no
+ * `$APT_OPTS` shell variable to reference — need the same flags. They used not
+ * to have them: `buildToolDepsScript` in provisioner.ts carried only
+ * `Acquire::Retries`, so enabling the browser tool on an already-running box
+ * (almost always a BYOS box, i.e. exactly the "real server" case above) could
+ * fail instantly on the dpkg lock.
+ */
+export const APT_OPTS_LITERAL =
+  "-o Acquire::Retries=3 -o Acquire::http::Timeout=120 -o DPkg::Lock::Timeout=120"
+
+/**
+ * The Google Chrome install, as bare commands.
+ *
+ * `aptOpts` is the shell text used for apt flags: inside the bootstrap framing
+ * that is the `$APT_OPTS` variable; outside it, the literal above. This exists
+ * so the commands themselves live in ONE place — provisioner.ts used to carry
+ * a hand-copied "self-contained mirror" of them, and the two had already
+ * drifted apart on exactly the flags that matter.
+ */
+export function chromeInstallCommands(aptOpts: string): string {
+  return `install -d -m 0755 /usr/share/keyrings
+curl -fsSL --retry 5 --retry-delay 3 https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
+apt-get ${aptOpts} update -y
+apt-get ${aptOpts} install -y google-chrome-stable fonts-liberation`
+}
+
 export function browserInstallStep(): string {
   return `
 step "install_chrome"
-install -d -m 0755 /usr/share/keyrings
-curl -fsSL --retry 5 --retry-delay 3 https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
-echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
-apt-get $APT_OPTS update -y
-apt-get $APT_OPTS install -y google-chrome-stable fonts-liberation
+${chromeInstallCommands("$APT_OPTS")}
 `
+}
+
+/**
+ * The runtime-agnostic half of the bootstrap: everything that does NOT depend
+ * on which agent the customer eventually deploys.
+ *
+ * Used by the BYOS connect-time prebake. It is the same framing the real
+ * bootstrap uses — same status file, same log, same failure trap, same
+ * idempotent steps — with every runtime's system account created up front and
+ * a payload of install steps that are worth doing before the choice is made.
+ *
+ * Deliberately no Cloudflare origin-cert snippet: that snippet bakes in a
+ * single `gatewayPort`, and at connect time we do not know which runtime's
+ * port applies. The deploy writes it, which is one small file write.
+ *
+ * This script is safe to run again. The deploy re-runs the full bootstrap
+ * regardless (see plan 007 W8) and relies on every step here no-opping.
+ */
+export function buildPrereqScript(opts: {
+  /** Every runtime's account. The first is the framing's primary. */
+  accounts: [SystemAccount, ...SystemAccount[]]
+  /** The highest floor across the runtimes, so one Node serves all of them. */
+  minNodeVersion: string
+  sshPort?: number
+  manageFirewall?: boolean
+  /** Install steps to run inside the framing, after swap. */
+  payloadSteps?: string
+}): string {
+  const [primary, ...rest] = opts.accounts
+  return buildBootstrapFraming(
+    {
+      installDir: primary.installDir,
+      systemUser: primary.systemUser,
+      extraAccounts: rest,
+      minNodeVersion: opts.minNodeVersion,
+      // Unused without cf cert PEMs, which a prebake never passes.
+      gatewayPort: 0,
+      sshPort: opts.sshPort,
+      manageFirewall: opts.manageFirewall,
+    },
+    opts.payloadSteps ?? "",
+  )
 }
 
 export function buildBootstrapFraming(
@@ -107,6 +194,20 @@ export function buildBootstrapFraming(
       "  # firewall ON here could cut off whatever else they run on it. The\n" +
       "  # allow-rules above are still added so the agent is reachable when a\n" +
       "  # firewall is already active."
+
+  // One block per account. With a single account this is byte-for-byte what
+  // the step emitted when it only knew about one.
+  const accountBlocks = [
+    { installDir: opts.installDir, systemUser: opts.systemUser },
+    ...(opts.extraAccounts ?? []),
+  ]
+    .map(
+      (a) =>
+        `id ${shellEscape(a.systemUser)} >/dev/null 2>&1 || useradd --system --home-dir ${shellEscape(a.installDir)} --shell /usr/sbin/nologin ${shellEscape(a.systemUser)}
+mkdir -p ${shellEscape(a.installDir)}
+chown -R ${shellEscape(a.systemUser)}:${shellEscape(a.systemUser)} ${shellEscape(a.installDir)}`,
+    )
+    .join("\n")
 
   let cfBlock = ""
   if (opts.cfOriginCertPem && opts.cfOriginKeyPem) {
@@ -176,7 +277,7 @@ step() { CURRENT_STEP="$1"; echo "=== STEP: $1 ===" ; }
 # has unattended-upgrades running right after boot, holding
 # /var/lib/dpkg/lock-frontend for minutes. Without this every apt call fails
 # instantly with "could not get lock" instead of waiting its turn.
-APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=120 -o DPkg::Lock::Timeout=120"
+APT_OPTS="${APT_OPTS_LITERAL}"
 
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
@@ -192,14 +293,51 @@ curl --retry 5 --retry-delay 3 -1sLf 'https://dl.cloudsmith.io/public/caddy/stab
 curl --retry 5 --retry-delay 3 -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
 
 step "nodejs_repo"
-curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors https://deb.nodesource.com/setup_${nodeMajor}.x | bash -
+export RUNTIME_MIN_NODE=${shellEscape(opts.minNodeVersion)}
+NODE_MAJOR_WANTED=${nodeMajor}
+# Skip the repo add and the nodejs install when the box already runs exactly
+# the Node this runtime asked for. Two reasons:
+#
+#   - Re-runs. A BYOS box re-runs this whole script on every deploy, and once
+#     it is prebaked at connect that is at least twice. Re-adding the
+#     NodeSource repo and reinstalling nodejs each time is pure latency.
+#   - Downgrades. A prebake installs one Node major before the customer has
+#     picked a runtime. Without this guard, a later bootstrap for a runtime
+#     naming a LOWER major would add setup_<lower>.x and let apt drag the box
+#     backwards underneath an already-installed runtime.
+#
+# The major must match EXACTLY rather than merely clearing the floor: a
+# runtime's engines range can exclude a higher major (openclaw accepts 24.x
+# and 26.x but not 25.x), so "anything newer is fine" is not true here.
+node_is_wanted() {
+  command -v node >/dev/null 2>&1 || return 1
+  local cur
+  cur="$(node -v 2>/dev/null | sed 's/^v//')" || return 1
+  [ -n "\${cur}" ] || return 1
+  [ "\${cur%%.*}" = "\${NODE_MAJOR_WANTED}" ] || return 1
+  # Floor check inside the major. sort -V is coreutils, present on every
+  # distro the preflight admits (ubuntu/debian).
+  [ "$(printf '%s\\n%s\\n' "\${RUNTIME_MIN_NODE}" "\${cur}" | sort -V | head -1)" = "\${RUNTIME_MIN_NODE}" ]
+}
 
-step "install_nodejs_caddy"
-apt-get $APT_OPTS install -y nodejs caddy
+if node_is_wanted; then
+  echo "node $(node -v) already satisfies \${RUNTIME_MIN_NODE} (major \${NODE_MAJOR_WANTED}) — skipping NodeSource"
+  # The NodeSource setup script runs its own \`apt-get update\`, and that is
+  # what makes the caddy repo added in the previous step visible to apt. When
+  # we skip the script we must do that update ourselves, or installing caddy
+  # on a box that does not already have it fails with "Unable to locate
+  # package caddy".
+  apt-get $APT_OPTS update -y
+  step "install_nodejs_caddy"
+  apt-get $APT_OPTS install -y caddy
+else
+  curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors https://deb.nodesource.com/setup_${nodeMajor}.x | bash -
+  step "install_nodejs_caddy"
+  apt-get $APT_OPTS install -y nodejs caddy
+fi
 node -v && npm -v
 
 step "verify_node"
-export RUNTIME_MIN_NODE=${shellEscape(opts.minNodeVersion)}
 node <<'VERIFYNODE'
 const min = process.env.RUNTIME_MIN_NODE
 if (!min) {
@@ -224,9 +362,7 @@ process.exit(0)
 VERIFYNODE
 
 step "create_user"
-id ${shellEscape(opts.systemUser)} >/dev/null 2>&1 || useradd --system --home-dir ${shellEscape(opts.installDir)} --shell /usr/sbin/nologin ${shellEscape(opts.systemUser)}
-mkdir -p ${shellEscape(opts.installDir)}
-chown -R ${shellEscape(opts.systemUser)}:${shellEscape(opts.systemUser)} ${shellEscape(opts.installDir)}
+${accountBlocks}
 
 step "swap"
 # Skip when the box already has swap of any kind (partition, zram, another

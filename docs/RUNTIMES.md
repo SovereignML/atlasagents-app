@@ -33,10 +33,37 @@ The `runtime` column on `instances` is `"openclaw" | "hermes"`. A runtime regist
 
 ### Hermes ([`src/lib/runtimes/hermes.ts`](../src/lib/runtimes/hermes.ts))
 
-- **CLI-driven install** (unlike OpenClaw): the init script runs `hermes setup` then `hermes config set` as the hermes system user. Requires Node ≥ `22.14.0` (`HERMES_VPS_MIN_NODE`).
+- **CLI-driven install** (unlike OpenClaw): the init script runs `hermes setup` then `hermes config set` as the hermes system user. Requires Node ≥ `24.16.0` (`HERMES_VPS_MIN_NODE`). Hermes itself is Python; the floor exists for the Node tooling it spawns — `agent-browser`, installed globally for the browser tool, declares `engines.node: >=24.0.0` in every published version. It is deliberately equal to `OPENCLAW_VPS_MIN_NODE` so one Node major serves both engines and a box is never dragged between them.
 - **Gateway** binds loopback `127.0.0.1:8642` (`HERMES_GATEWAY_PORT`). Its `.env` uses an `API_SERVER_*` convention (no prefix): `API_SERVER_ENABLED`, `API_SERVER_KEY` (the bearer/gateway token), `API_SERVER_HOST`, `API_SERVER_PORT`, `API_SERVER_CORS_ORIGINS`.
 - **Open WebUI sidecar** (service `open-webui` on `127.0.0.1:8080`) is installed into its own venv under `/opt/open-webui`. Caddy **dual-routes** on the public host: `/v1/*` → Hermes gateway (bearer-token, CORS-enabled), everything else → Open WebUI (browser, session login). The `webuiEnabled` column flags this; legacy `webuiEnabled=false` instances serve Hermes directly at every path (single-upstream).
 - Versions are env-pinnable: `HERMES_VERSION`, `OPEN_WEBUI_VERSION` (both default `latest`).
+
+### Version pinning ([`src/lib/runtime-versions.ts`](../src/lib/runtime-versions.ts))
+
+Left alone, every runtime installs `latest` at bootstrap. That is fine for a
+cold install and fatal for a prefetch: the BYOS prebake downloads packages when
+a server is **connected** and installs them when an agent is later **deployed**,
+so re-resolving `latest` at deploy would miss the warm cache and re-download
+everything. `resolveNpmLatest()` / `resolvePypiLatest()` turn `latest` into a
+concrete version, which is persisted per server and baked into the bootstrap as
+a literal.
+
+An operator-set env pin still wins over the registry — that is how a bad
+upstream release gets rolled back without a deploy. An unresolved pin degrades
+to `latest`, i.e. exactly the old behaviour, never to a failure.
+
+`instances.runtimeVersion` / `sidecarVersion` record what a box was actually
+provisioned with. Both are NULL for anything provisioned before pinning
+existed: those installed whatever `latest` was that day, and there is no
+upgrade path, so the only way to recover it is to ask the box.
+
+### Python bounds
+
+`hermes-agent` is `>=3.11,<3.14`; `open-webui` is `>=3.11,<3.13.0a1`. The
+bootstrap checks both ends. It used to check only the floor, which is harmless
+on a managed VPS (Ubuntu 24.04 ships 3.12) but not on BYOS, where the preflight
+admits any amd64 Ubuntu or Debian — and Debian 13 / Ubuntu 25.x ship Python
+3.13. Those boxes passed the check and then died minutes later mid-install.
 
 ### Models
 

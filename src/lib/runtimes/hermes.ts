@@ -11,6 +11,7 @@ import type {
   ToolServiceRoute,
 } from "./types"
 import { buildGatewayAllowedOrigins } from "@/lib/instance-gateway-access"
+import { pypiSpec } from "@/lib/runtime-versions"
 import { resolveLlmProvider, nvidiaKeyForSlot } from "@/lib/model-router"
 import { enabledToolsForRuntime } from "@/configs/agent-tools"
 import {
@@ -28,10 +29,57 @@ import {
 /** Resolve at call time so `HERMES_VERSION` env can override "latest". */
 export const HERMES_VERSION = () => process.env.HERMES_VERSION || "latest"
 
-/** Hermes spawns Node tooling at runtime (browser, WhatsApp); keep Node 22 floor. */
-export const HERMES_VPS_MIN_NODE = "22.14.0"
+/**
+ * Minimum Node on a Hermes VPS. Hermes itself is Python — this floor exists
+ * for the Node tooling it spawns, and it also selects the NodeSource
+ * distribution the bootstrap installs (see nodeSourceMajor in bootstrap.ts).
+ *
+ * This was 22.14.0, which was wrong on two counts:
+ *
+ *  1. `agent-browser` — installed globally on every Hermes box for the browser
+ *     tool (see buildBrowserDepsSteps) — declares `engines.node: >=24.0.0`, and
+ *     has in EVERY published version. That install runs without
+ *     `--engine-strict`, so npm only warned and put a package on the box that
+ *     its own manifest says cannot run there. The same failure class as the
+ *     openclaw EBADENGINE incident, minus the loud failure.
+ *  2. Prebake installs one Node major before the runtime is chosen. With the
+ *     two runtimes naming different majors, whichever bootstrap ran second
+ *     would drag the box to its own major — OpenClaw's 24 down to 22 here.
+ *
+ * 24.16.0 matches OPENCLAW_VPS_MIN_NODE exactly, so one Node major serves both
+ * runtimes and a box never gets pulled between them. Do not lower it without
+ * re-checking `agent-browser`'s engines.
+ */
+export const HERMES_VPS_MIN_NODE = "24.16.0"
 /** Hermes requires Python 3.11+; Ubuntu 24.04 ships 3.12 so the floor is satisfied. */
 export const HERMES_PYTHON_MIN = "3.11"
+/**
+ * Exclusive Python ceilings, from the packages' own `requires_python`:
+ * `hermes-agent` is `>=3.11,<3.14`, `open-webui` is `>=3.11,<3.13.0a1`.
+ *
+ * The bootstrap only ever checked the FLOOR. That is harmless on a managed VPS
+ * (Ubuntu 24.04, Python 3.12) but not on BYOS, where the preflight admits any
+ * amd64 Ubuntu or Debian with no release restriction — and Debian 13 and
+ * Ubuntu 25.x ship Python 3.13. Those boxes sailed past verify_python and then
+ * died several minutes later at `install_pkgs_parallel`, after the apt work,
+ * the venvs and most of a 900s timeout had already been spent.
+ */
+export const HERMES_PYTHON_MAX_EXCLUSIVE = "3.14"
+export const OPEN_WEBUI_PYTHON_MAX_EXCLUSIVE = "3.13"
+
+/**
+ * `verify_python` for a given exclusive upper bound. Fails in seconds, with a
+ * message naming the actual version, rather than letting a doomed install run.
+ */
+function buildVerifyPythonStep(maxExclusive: string): string {
+  const [maj, min] = maxExclusive.split(".")
+  return `step "verify_python"
+if ! python3 -c 'import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] < (${maj}, ${min}) else 1)'; then
+  PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+  echo "Requires Python ${HERMES_PYTHON_MIN}+ and older than ${maxExclusive}, found $PY_VER" >&2
+  exit 1
+fi`
+}
 
 /** Hermes' default API server port. */
 export const HERMES_GATEWAY_PORT = 8642
@@ -40,7 +88,6 @@ export const HERMES_SERVICE_NAME = "hermes-gateway"
 const HERMES_INSTALL_DIR = "/opt/hermes"
 const HERMES_VENV = "/opt/hermes/venv"
 const HERMES_CLI = "/opt/hermes/venv/bin/hermes"
-const HERMES_PIP = "/opt/hermes/venv/bin/pip"
 const HERMES_CONFIG_SUBDIR = ".hermes"
 const HERMES_CONFIG_FILE = "config.yaml"
 const HERMES_SYSTEM_USER = "hermes"
@@ -66,24 +113,21 @@ export const OPEN_WEBUI_VERSION = () => process.env.OPEN_WEBUI_VERSION || "lates
 const OPEN_WEBUI_INSTALL_DIR = "/opt/open-webui"
 const OPEN_WEBUI_VENV = "/opt/open-webui/venv"
 const OPEN_WEBUI_BIN = "/opt/open-webui/venv/bin/open-webui"
-const OPEN_WEBUI_PIP = "/opt/open-webui/venv/bin/pip"
 const OPEN_WEBUI_SYSTEM_USER = "open-webui"
 const OPEN_WEBUI_DATA_DIR = "/opt/open-webui/data"
 const OPEN_WEBUI_PYPI_DIST = "open-webui"
 const OPEN_WEBUI_ENV_PATH = `${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}/open-webui.env`
 
-function openWebUiPipSpec(): string {
-  const v = OPEN_WEBUI_VERSION()
-  return v === "latest" ? OPEN_WEBUI_PYPI_DIST : `${OPEN_WEBUI_PYPI_DIST}==${v}`
+function openWebUiPipSpec(pin?: string): string {
+  return pypiSpec(OPEN_WEBUI_PYPI_DIST, pin ?? OPEN_WEBUI_VERSION())
 }
 
 function bashSingleQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
-function pipPackageSpec(): string {
-  const v = HERMES_VERSION()
-  return v === "latest" ? HERMES_PYPI_DIST : `${HERMES_PYPI_DIST}==${v}`
+function pipPackageSpec(pin?: string): string {
+  return pypiSpec(HERMES_PYPI_DIST, pin ?? HERMES_VERSION())
 }
 
 /**
@@ -205,40 +249,84 @@ npm ls -g agent-browser >/dev/null 2>&1 || npm install -g --no-audit --no-fund a
 `
 }
 
-function buildHermesInstallSteps(): string {
+/**
+ * Shared shell prelude for the Python installs: `uv` when it can be had, pip
+ * otherwise.
+ *
+ * The Python path dominates a cold Hermes bootstrap — two venvs and 236
+ * packages, of which Open WebUI's 146MB wheel and its ~116 dependencies are
+ * most of the weight. `uv` resolves and installs that tree several times
+ * faster than pip, and it is a single static binary.
+ *
+ * It is strictly an accelerator. Every function here falls back to pip when
+ * `uv` is missing or its install fails, because astral.sh would otherwise
+ * become a new hard dependency on the critical path of every Hermes
+ * provision — trading a slow bootstrap for a broken one.
+ *
+ * `python3 -m venv --upgrade-deps` in the fallback also removes the separate
+ * `pip install --upgrade pip setuptools wheel` round-trip that used to run
+ * once per venv.
+ */
+function buildPyInstallPrelude(): string {
   return `
-RUNTIME_PKG_SPEC=${bashSingleQuote(pipPackageSpec())}
+step "install_uv"
+# Best-effort. UV_INSTALL_DIR puts it somewhere on root's PATH; a failure here
+# is not fatal, it just means the pip fallback below does the work.
+export UV_INSTALL_DIR=/usr/local/bin
+curl -fsSL --retry 3 --retry-delay 2 https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 || true
+command -v uv >/dev/null 2>&1 && uv --version || echo "uv unavailable — falling back to pip"
 
-step "python_deps"
-apt-get $APT_OPTS install -y python3 python3-venv python3-pip ripgrep ffmpeg
+# venv_create <venv-path>
+venv_create() {
+  local venv="$1"
+  if command -v uv >/dev/null 2>&1 && uv venv "$venv" >/dev/null 2>&1; then
+    return 0
+  fi
+  python3 -m venv --upgrade-deps "$venv"
+}
 
-step "verify_python"
-if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)'; then
-  PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-  echo "Hermes requires Python ${HERMES_PYTHON_MIN}+, found $PY_VER" >&2
-  exit 1
-fi
-
-step "create_hermes_venv"
-mkdir -p ${bashSingleQuote(HERMES_INSTALL_DIR)}
-python3 -m venv ${bashSingleQuote(HERMES_VENV)}
-${bashSingleQuote(HERMES_PIP)} install --upgrade pip setuptools wheel
-chown -R ${bashSingleQuote(HERMES_SYSTEM_USER)}:${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(HERMES_INSTALL_DIR)}
-
-step "install_hermes_pkg"
-install_hermes_pkg() {
-  local max=3 a=1
+# py_install <venv-path> <pkg-spec> <cache-dir>
+# Retries transient failures 3x with backoff, same contract the pip-only
+# version had. Each caller gets its own cache dir so two parallel installs
+# never contend on one.
+py_install() {
+  local venv="$1" spec="$2" cache="$3" max=3 a=1
   while [ "$a" -le "$max" ]; do
-    echo "=== pip install attempt $a/$max ==="
-    if ${bashSingleQuote(HERMES_PIP)} install --upgrade "$RUNTIME_PKG_SPEC"; then
-      return 0
+    echo "=== install attempt $a/$max: $spec ==="
+    if command -v uv >/dev/null 2>&1; then
+      if UV_CACHE_DIR="$cache" uv pip install --python "$venv/bin/python" --upgrade "$spec"; then
+        return 0
+      fi
+    else
+      if PIP_CACHE_DIR="$cache" "$venv/bin/pip" install --upgrade "$spec"; then
+        return 0
+      fi
     fi
     sleep $((5 * a))
     a=$((a + 1))
   done
   return 1
 }
-install_hermes_pkg
+`
+}
+
+function buildHermesInstallSteps(browserDeps: boolean, pin?: string): string {
+  return `
+RUNTIME_PKG_SPEC=${bashSingleQuote(pipPackageSpec(pin))}
+
+step "python_deps"
+apt-get $APT_OPTS install -y python3 python3-venv python3-pip ripgrep ffmpeg
+
+${buildVerifyPythonStep(HERMES_PYTHON_MAX_EXCLUSIVE)}
+
+${buildPyInstallPrelude()}
+step "create_hermes_venv"
+mkdir -p ${bashSingleQuote(HERMES_INSTALL_DIR)}
+venv_create ${bashSingleQuote(HERMES_VENV)}
+chown -R ${bashSingleQuote(HERMES_SYSTEM_USER)}:${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(HERMES_INSTALL_DIR)}
+
+step "install_hermes_pkg"
+py_install ${bashSingleQuote(HERMES_VENV)} "$RUNTIME_PKG_SPEC" /var/tmp/py-cache-hermes
 
 step "verify_hermes_cli"
 ${bashSingleQuote(HERMES_CLI)} --version
@@ -246,7 +334,7 @@ ${bashSingleQuote(HERMES_CLI)} --version
 step "hermes_config_dir"
 install -d -m 0750 -o ${bashSingleQuote(HERMES_SYSTEM_USER)} -g ${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(`${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}`)}
 install -d -m 0750 -o ${bashSingleQuote(HERMES_SYSTEM_USER)} -g ${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(HERMES_WORKSPACE_DIR)}
-${buildBrowserDepsSteps()}`
+${browserDeps ? buildBrowserDepsSteps() : ""}`
 }
 
 /**
@@ -257,25 +345,24 @@ ${buildBrowserDepsSteps()}`
  * and the bootstrap fails if either errors. Used whenever the Open WebUI sidecar is enabled
  * (the default for new Hermes instances).
  */
-function buildHermesPlusWebuiInstallSteps(): string {
+function buildHermesPlusWebuiInstallSteps(
+  browserDeps: boolean,
+  pin?: string,
+  webuiPin?: string,
+): string {
   return `
-RUNTIME_PKG_SPEC=${bashSingleQuote(pipPackageSpec())}
-OPEN_WEBUI_PKG_SPEC=${bashSingleQuote(openWebUiPipSpec())}
+RUNTIME_PKG_SPEC=${bashSingleQuote(pipPackageSpec(pin))}
+OPEN_WEBUI_PKG_SPEC=${bashSingleQuote(openWebUiPipSpec(webuiPin))}
 
 step "python_deps"
 apt-get $APT_OPTS install -y python3 python3-venv python3-pip ripgrep ffmpeg
 
-step "verify_python"
-if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)'; then
-  PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-  echo "Hermes requires Python ${HERMES_PYTHON_MIN}+, found $PY_VER" >&2
-  exit 1
-fi
+${buildVerifyPythonStep(OPEN_WEBUI_PYTHON_MAX_EXCLUSIVE)}
 
+${buildPyInstallPrelude()}
 step "create_hermes_venv"
 mkdir -p ${bashSingleQuote(HERMES_INSTALL_DIR)}
-python3 -m venv ${bashSingleQuote(HERMES_VENV)}
-${bashSingleQuote(HERMES_PIP)} install --upgrade pip setuptools wheel
+venv_create ${bashSingleQuote(HERMES_VENV)}
 chown -R ${bashSingleQuote(HERMES_SYSTEM_USER)}:${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(HERMES_INSTALL_DIR)}
 
 step "open_webui_user"
@@ -286,47 +373,21 @@ install -d -m 0750 -o ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} -g ${bashSingle
 install -d -m 0750 -o ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} -g ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} ${bashSingleQuote(OPEN_WEBUI_DATA_DIR)}
 
 step "open_webui_venv"
-python3 -m venv ${bashSingleQuote(OPEN_WEBUI_VENV)}
-${bashSingleQuote(OPEN_WEBUI_PIP)} install --upgrade pip setuptools wheel
+venv_create ${bashSingleQuote(OPEN_WEBUI_VENV)}
 chown -R ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)}:${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} ${bashSingleQuote(OPEN_WEBUI_INSTALL_DIR)}
 
-install_hermes_pkg() {
-  local max=3 a=1
-  while [ "$a" -le "$max" ]; do
-    echo "=== pip install hermes attempt $a/$max ==="
-    if PIP_CACHE_DIR=/var/tmp/pip-cache-hermes ${bashSingleQuote(HERMES_PIP)} install --upgrade "$RUNTIME_PKG_SPEC"; then
-      return 0
-    fi
-    sleep $((5 * a))
-    a=$((a + 1))
-  done
-  return 1
-}
-install_open_webui_pkg() {
-  local max=3 a=1
-  while [ "$a" -le "$max" ]; do
-    echo "=== pip install open-webui attempt $a/$max ==="
-    if PIP_CACHE_DIR=/var/tmp/pip-cache-owui ${bashSingleQuote(OPEN_WEBUI_PIP)} install --upgrade "$OPEN_WEBUI_PKG_SPEC"; then
-      return 0
-    fi
-    sleep $((5 * a))
-    a=$((a + 1))
-  done
-  return 1
-}
-
 step "install_pkgs_parallel"
-install_hermes_pkg > /var/log/pip-hermes.log 2>&1 &
+py_install ${bashSingleQuote(HERMES_VENV)} "$RUNTIME_PKG_SPEC" /var/tmp/py-cache-hermes > /var/log/py-hermes.log 2>&1 &
 HPID=$!
-install_open_webui_pkg > /var/log/pip-owui.log 2>&1 &
+py_install ${bashSingleQuote(OPEN_WEBUI_VENV)} "$OPEN_WEBUI_PKG_SPEC" /var/tmp/py-cache-owui > /var/log/py-owui.log 2>&1 &
 OPID=$!
 HRC=0; ORC=0
 wait "$HPID" || HRC=$?
 wait "$OPID" || ORC=$?
-echo "--- hermes pip log ---"; tail -n 30 /var/log/pip-hermes.log 2>/dev/null || true
-echo "--- open-webui pip log ---"; tail -n 30 /var/log/pip-owui.log 2>/dev/null || true
-if [ "$HRC" -ne 0 ]; then echo "hermes pip install failed (rc=$HRC)" >&2; exit 1; fi
-if [ "$ORC" -ne 0 ]; then echo "open-webui pip install failed (rc=$ORC)" >&2; exit 1; fi
+echo "--- hermes install log ---"; tail -n 30 /var/log/py-hermes.log 2>/dev/null || true
+echo "--- open-webui install log ---"; tail -n 30 /var/log/py-owui.log 2>/dev/null || true
+if [ "$HRC" -ne 0 ]; then echo "hermes install failed (rc=$HRC)" >&2; exit 1; fi
+if [ "$ORC" -ne 0 ]; then echo "open-webui install failed (rc=$ORC)" >&2; exit 1; fi
 
 step "verify_hermes_cli"
 ${bashSingleQuote(HERMES_CLI)} --version
@@ -337,7 +398,24 @@ ${bashSingleQuote(OPEN_WEBUI_BIN)} --help >/dev/null
 step "hermes_config_dir"
 install -d -m 0750 -o ${bashSingleQuote(HERMES_SYSTEM_USER)} -g ${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(`${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}`)}
 install -d -m 0750 -o ${bashSingleQuote(HERMES_SYSTEM_USER)} -g ${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(HERMES_WORKSPACE_DIR)}
-${buildBrowserDepsSteps()}`
+${browserDeps ? buildBrowserDepsSteps() : ""}`
+}
+
+/**
+ * The full Hermes stack (hermes-agent + Open WebUI) as install steps, for the
+ * BYOS connect-time prebake.
+ *
+ * Exported rather than reimplemented so there is exactly one description of
+ * how Hermes gets installed. The prebake runs these before the customer has
+ * picked an engine; if they pick OpenClaw instead, the box simply carries an
+ * unused Hermes venv.
+ */
+export function buildHermesPrebakeSteps(opts: {
+  browserDeps: boolean
+  pin?: string
+  webuiPin?: string
+}): string {
+  return buildHermesPlusWebuiInstallSteps(opts.browserDeps, opts.pin, opts.webuiPin)
 }
 
 /**
@@ -351,52 +429,15 @@ ${buildBrowserDepsSteps()}`
  */
 const openWebUiSidecar: SidecarSpec = {
   serviceName: OPEN_WEBUI_SERVICE_NAME,
+  packageName: OPEN_WEBUI_PYPI_DIST,
+  registry: "pypi",
+  version: OPEN_WEBUI_VERSION,
   port: OPEN_WEBUI_PORT,
   healthPath: "/health",
   dataDir: OPEN_WEBUI_DATA_DIR,
   envPath: OPEN_WEBUI_ENV_PATH,
   seedAdmin: { signupPath: "/api/v1/auths/signup" },
 
-  /**
-   * Pip-installs `open-webui` into a venv under /opt/open-webui. Runs AFTER
-   * Hermes' install steps, so python3 / python3-venv / python3-pip are already
-   * present. Idempotent: re-running upgrades the package in place.
-   */
-  installSteps(): string {
-    return `
-OPEN_WEBUI_PKG_SPEC=${bashSingleQuote(openWebUiPipSpec())}
-
-step "open_webui_user"
-id ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} >/dev/null 2>&1 || useradd --system --home-dir ${bashSingleQuote(OPEN_WEBUI_INSTALL_DIR)} --shell /usr/sbin/nologin ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)}
-
-step "open_webui_dirs"
-install -d -m 0750 -o ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} -g ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} ${bashSingleQuote(OPEN_WEBUI_INSTALL_DIR)}
-install -d -m 0750 -o ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} -g ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} ${bashSingleQuote(OPEN_WEBUI_DATA_DIR)}
-
-step "open_webui_venv"
-python3 -m venv ${bashSingleQuote(OPEN_WEBUI_VENV)}
-${bashSingleQuote(OPEN_WEBUI_PIP)} install --upgrade pip setuptools wheel
-chown -R ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)}:${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} ${bashSingleQuote(OPEN_WEBUI_INSTALL_DIR)}
-
-step "install_open_webui_pkg"
-install_open_webui_pkg() {
-  local max=3 a=1
-  while [ "$a" -le "$max" ]; do
-    echo "=== pip install open-webui attempt $a/$max ==="
-    if ${bashSingleQuote(OPEN_WEBUI_PIP)} install --upgrade "$OPEN_WEBUI_PKG_SPEC"; then
-      return 0
-    fi
-    sleep $((5 * a))
-    a=$((a + 1))
-  done
-  return 1
-}
-install_open_webui_pkg
-
-step "verify_open_webui_cli"
-${bashSingleQuote(OPEN_WEBUI_BIN)} --help >/dev/null
-`
-  },
 
   /**
    * Open WebUI env. Auth is required (the public URL must not be open); RAG/STT
@@ -481,6 +522,7 @@ export const hermesRuntime: RuntimeEngine = {
   id: "hermes",
   displayName: "Hermes",
   npmPackage: HERMES_PYPI_DIST,
+  registry: "pypi",
   version: HERMES_VERSION,
   minNode: HERMES_VPS_MIN_NODE,
   gatewayPort: HERMES_GATEWAY_PORT,
@@ -667,9 +709,18 @@ WantedBy=multi-user.target
   renderBootstrap(args: BootstrapRenderArgs): string {
     // Sidecar enabled → install Hermes and Open WebUI with their pip steps overlapped
     // (buildHermesPlusWebuiInstallSteps). Legacy API-only Hermes → Hermes alone.
+    // Chrome is ~142MB and `agent-browser` needs a global npm install; both
+    // are browser-tool-only. Default true preserves the old always-bake
+    // behaviour for callers that have no instance to read tools from (the
+    // warm pool, where bake time is ours and free).
+    const browserDeps = args.browserDeps !== false
     const installSteps = args.webuiEnabled
-      ? buildHermesPlusWebuiInstallSteps()
-      : buildHermesInstallSteps()
+      ? buildHermesPlusWebuiInstallSteps(
+          browserDeps,
+          args.runtimeVersion,
+          args.sidecarVersion,
+        )
+      : buildHermesInstallSteps(browserDeps, args.runtimeVersion)
     return buildBootstrapFraming(
       {
         installDir: HERMES_INSTALL_DIR,

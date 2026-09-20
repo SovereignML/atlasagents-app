@@ -64,3 +64,67 @@ describe("OpenClaw VPS Node floor", () => {
     expect(script).toContain("npm cache clean --force")
   })
 })
+
+describe("OpenClaw bootstrap — browser dependencies are opt-in", () => {
+  // Chrome is a 142MB .deb plus its own `apt-get update`, and it used to go on
+  // every box unconditionally. Tools are opt-in (agent-tools.ts has no
+  // `defaultEnabled`), and installToolDependencies() installs the identical
+  // set on demand when the tool is switched on later — so a box with no
+  // chromium tool should never pay for it during provisioning.
+  const render = (browserDeps?: boolean) =>
+    openclawRuntime.renderBootstrap({
+      gatewayPort: openclawRuntime.gatewayPort,
+      webuiEnabled: false,
+      ...(browserDeps === undefined ? {} : { browserDeps }),
+    })
+
+  it("omits Chrome when no enabled tool needs it", () => {
+    const script = render(false)
+    expect(script).not.toContain("google-chrome-stable")
+    expect(script).not.toContain("install_chrome")
+  })
+
+  it("installs Chrome when a tool does need it", () => {
+    const script = render(true)
+    expect(script).toContain("google-chrome-stable")
+    expect(script).toContain("install_chrome")
+  })
+
+  // Omitting the flag must keep the old behaviour: the warm pool renders with
+  // no instance to read tools from, and a pooled VM must stay claim-ready.
+  it("defaults to installing Chrome when the flag is omitted", () => {
+    expect(render()).toContain("google-chrome-stable")
+  })
+
+  it("still installs the runtime itself either way", () => {
+    for (const script of [render(false), render(true)]) {
+      expect(script).toContain("install_runtime")
+      expect(script).toContain("verify_runtime_cli")
+    }
+  })
+})
+
+describe("OpenClaw bootstrap — version pinning", () => {
+  // The BYOS prebake downloads the package at connect and installs it at
+  // deploy. If the install resolved `latest` a second time, a release landing
+  // in between would turn the warm cache into a miss and the prefetch would
+  // have bought nothing. The pin is what makes "download now, install later"
+  // work at all.
+  it("installs the resolved pin when one is supplied", () => {
+    const script = openclawRuntime.renderBootstrap({
+      gatewayPort: openclawRuntime.gatewayPort,
+      webuiEnabled: false,
+      runtimeVersion: "2026.9.5",
+    })
+    expect(script).toContain("openclaw@2026.9.5")
+    expect(script).not.toContain("openclaw@latest")
+  })
+
+  it("falls back to today's behaviour with no pin", () => {
+    const script = openclawRuntime.renderBootstrap({
+      gatewayPort: openclawRuntime.gatewayPort,
+      webuiEnabled: false,
+    })
+    expect(script).toContain("openclaw@latest")
+  })
+})

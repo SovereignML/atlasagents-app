@@ -3,7 +3,7 @@ import type { ToolService, ToolServiceEnvArgs } from "./types"
 /**
  * n8n — a self-hosted workflow-automation server with its own web UI, run as a
  * per-tool companion service (see `ToolService`). Installed via `npm install -g
- * n8n` (every box already ships Node 22 for the runtimes), supervised by systemd
+ * n8n` (every box already ships Node for the runtimes), supervised by systemd
  * as a dedicated `n8n` system user, bound to loopback :5678, and mounted behind
  * Caddy at `/n8n/`. No Docker — same native-process model as the runtimes and the
  * Open WebUI sidecar. The agent controls it by driving the UI with the browser
