@@ -117,9 +117,41 @@ describe("buildPrebakeScript()", () => {
   // OpenClaw is the genuine either/or. Its 225MB / 11,428-file extract is the
   // expensive half and stays at deploy; only the download moves here.
   it("downloads OpenClaw without installing it", () => {
-    expect(script).toContain("npm cache add 'openclaw@2026.9.5'")
+    expect(script).toContain("--package-lock-only")
+    expect(script).toContain("'openclaw@2026.9.5'")
+    expect(script).toContain("npm cache add")
     expect(script).not.toContain("npm install -g")
     expect(script).not.toContain("install_runtime")
+  })
+
+  // Resolving via --package-lock-only and feeding `npm cache add` warms the
+  // full dependency tree for one download and unpacks nothing. Installing into
+  // a throwaway prefix would warm the same tarballs but pay OpenClaw's
+  // 11,428-file extract twice — here and again at deploy.
+  it("warms the dependency tree without extracting anything", () => {
+    expect(script).toContain("package-lock.json")
+    expect(script).not.toContain("--prefix")
+    expect(script).not.toContain("npm ci")
+  })
+
+  // This nearly shipped broken: the heredoc body is JavaScript written inside
+  // a TS template literal, where a single-backslash escape becomes a REAL
+  // newline — a syntax error inside a JS string. node would have failed, the
+  // `|| exit 1` would have swallowed it, and the cache warm would have
+  // silently done nothing.
+  it("emits a syntactically valid lockfile reader", () => {
+    const open = "cat > warm.js <<'WARMJS'\n"
+    const body = script.slice(
+      script.indexOf(open) + open.length,
+      script.indexOf("\nWARMJS"),
+    )
+    expect(body).toContain("package-lock.json")
+    expect(() => new Function(body)).not.toThrow()
+  })
+
+  it("cleans up its scratch directory either way", () => {
+    expect(script).toContain('rm -rf "$OC_WARM"')
+    expect(script).toContain("cache warm failed")
   })
 
   it("never turns the customer's firewall on, and opens their real ssh port", () => {
@@ -147,7 +179,7 @@ describe("buildPrebakeScript()", () => {
       hermesVersion: null,
       webuiVersion: null,
     })
-    expect(unpinned).toContain("npm cache add 'openclaw@latest'")
+    expect(unpinned).toContain("'openclaw@latest'")
     expect(unpinned).toContain("RUNTIME_PKG_SPEC='hermes-agent'")
   })
 

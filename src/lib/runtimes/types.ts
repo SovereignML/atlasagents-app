@@ -237,8 +237,13 @@ export type SidecarSpec = {
   /** Absolute path of the sidecar's env file (referenced by its systemd unit). */
   envPath: string
   /** Bash install steps injected into the runtime bootstrap (package install, user creation, etc.). */
-  /** `pin` is a resolved concrete version; omitted falls back to env/`latest`. */
-  installSteps(pin?: string): string
+  /**
+   * NOTE: there is deliberately no `installSteps` here. The sidecar is
+   * installed by the runtime's own bootstrap — Hermes overlaps its pip install
+   * with Open WebUI's in one parallel step — and a second, standalone
+   * description of the same install drifted out of date the moment that path
+   * moved to `uv`. One description only.
+   */
   /** Package name of the sidecar itself, for version resolution. */
   packageName: string
   /** Which index `packageName` lives in. */

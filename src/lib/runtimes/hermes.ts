@@ -113,7 +113,6 @@ export const OPEN_WEBUI_VERSION = () => process.env.OPEN_WEBUI_VERSION || "lates
 const OPEN_WEBUI_INSTALL_DIR = "/opt/open-webui"
 const OPEN_WEBUI_VENV = "/opt/open-webui/venv"
 const OPEN_WEBUI_BIN = "/opt/open-webui/venv/bin/open-webui"
-const OPEN_WEBUI_PIP = "/opt/open-webui/venv/bin/pip"
 const OPEN_WEBUI_SYSTEM_USER = "open-webui"
 const OPEN_WEBUI_DATA_DIR = "/opt/open-webui/data"
 const OPEN_WEBUI_PYPI_DIST = "open-webui"
@@ -439,46 +438,6 @@ const openWebUiSidecar: SidecarSpec = {
   envPath: OPEN_WEBUI_ENV_PATH,
   seedAdmin: { signupPath: "/api/v1/auths/signup" },
 
-  /**
-   * Pip-installs `open-webui` into a venv under /opt/open-webui. Runs AFTER
-   * Hermes' install steps, so python3 / python3-venv / python3-pip are already
-   * present. Idempotent: re-running upgrades the package in place.
-   */
-  installSteps(pin?: string): string {
-    return `
-OPEN_WEBUI_PKG_SPEC=${bashSingleQuote(openWebUiPipSpec(pin))}
-
-step "open_webui_user"
-id ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} >/dev/null 2>&1 || useradd --system --home-dir ${bashSingleQuote(OPEN_WEBUI_INSTALL_DIR)} --shell /usr/sbin/nologin ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)}
-
-step "open_webui_dirs"
-install -d -m 0750 -o ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} -g ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} ${bashSingleQuote(OPEN_WEBUI_INSTALL_DIR)}
-install -d -m 0750 -o ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} -g ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} ${bashSingleQuote(OPEN_WEBUI_DATA_DIR)}
-
-step "open_webui_venv"
-python3 -m venv ${bashSingleQuote(OPEN_WEBUI_VENV)}
-${bashSingleQuote(OPEN_WEBUI_PIP)} install --upgrade pip setuptools wheel
-chown -R ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)}:${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} ${bashSingleQuote(OPEN_WEBUI_INSTALL_DIR)}
-
-step "install_open_webui_pkg"
-install_open_webui_pkg() {
-  local max=3 a=1
-  while [ "$a" -le "$max" ]; do
-    echo "=== pip install open-webui attempt $a/$max ==="
-    if ${bashSingleQuote(OPEN_WEBUI_PIP)} install --upgrade "$OPEN_WEBUI_PKG_SPEC"; then
-      return 0
-    fi
-    sleep $((5 * a))
-    a=$((a + 1))
-  done
-  return 1
-}
-install_open_webui_pkg
-
-step "verify_open_webui_cli"
-${bashSingleQuote(OPEN_WEBUI_BIN)} --help >/dev/null
-`
-  },
 
   /**
    * Open WebUI env. Auth is required (the public URL must not be open); RAG/STT

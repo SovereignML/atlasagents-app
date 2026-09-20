@@ -94,14 +94,45 @@ function nodeSourceMajor(minNodeVersion: string): number {
  * runtimes. `fonts-liberation` covers common web fonts. Idempotent (apt no-ops
  * when present; the repo/key writes are overwrite-safe).
  */
+/**
+ * The apt options every apt call in a bootstrap should carry.
+ *
+ * `DPkg::Lock::Timeout` is the load-bearing one: a real server (as opposed to
+ * a fresh cloud image) usually has unattended-upgrades running right after
+ * boot, holding /var/lib/dpkg/lock-frontend for minutes. Without it, apt fails
+ * instantly with "could not get lock" instead of waiting its turn.
+ *
+ * Exported because callers OUTSIDE the bootstrap framing — which have no
+ * `$APT_OPTS` shell variable to reference — need the same flags. They used not
+ * to have them: `buildToolDepsScript` in provisioner.ts carried only
+ * `Acquire::Retries`, so enabling the browser tool on an already-running box
+ * (almost always a BYOS box, i.e. exactly the "real server" case above) could
+ * fail instantly on the dpkg lock.
+ */
+export const APT_OPTS_LITERAL =
+  "-o Acquire::Retries=3 -o Acquire::http::Timeout=120 -o DPkg::Lock::Timeout=120"
+
+/**
+ * The Google Chrome install, as bare commands.
+ *
+ * `aptOpts` is the shell text used for apt flags: inside the bootstrap framing
+ * that is the `$APT_OPTS` variable; outside it, the literal above. This exists
+ * so the commands themselves live in ONE place — provisioner.ts used to carry
+ * a hand-copied "self-contained mirror" of them, and the two had already
+ * drifted apart on exactly the flags that matter.
+ */
+export function chromeInstallCommands(aptOpts: string): string {
+  return `install -d -m 0755 /usr/share/keyrings
+curl -fsSL --retry 5 --retry-delay 3 https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
+apt-get ${aptOpts} update -y
+apt-get ${aptOpts} install -y google-chrome-stable fonts-liberation`
+}
+
 export function browserInstallStep(): string {
   return `
 step "install_chrome"
-install -d -m 0755 /usr/share/keyrings
-curl -fsSL --retry 5 --retry-delay 3 https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
-echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
-apt-get $APT_OPTS update -y
-apt-get $APT_OPTS install -y google-chrome-stable fonts-liberation
+${chromeInstallCommands("$APT_OPTS")}
 `
 }
 
@@ -246,7 +277,7 @@ step() { CURRENT_STEP="$1"; echo "=== STEP: $1 ===" ; }
 # has unattended-upgrades running right after boot, holding
 # /var/lib/dpkg/lock-frontend for minutes. Without this every apt call fails
 # instantly with "could not get lock" instead of waiting its turn.
-APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=120 -o DPkg::Lock::Timeout=120"
+APT_OPTS="${APT_OPTS_LITERAL}"
 
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a

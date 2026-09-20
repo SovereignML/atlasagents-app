@@ -46,7 +46,8 @@ import {
 import { ENV_KEY_CHANGED, buildEnvKeyUpsertScript } from "@/lib/runtimes/env-upsert"
 import { getRuntime, type RuntimeEngine, type RuntimeId } from "@/lib/runtimes"
 import { FREE_DEMO_TTL_MS } from "@/configs/plans"
-import { resolveForRegistry } from "@/lib/runtime-versions"
+import { isSafeVersion, resolveForRegistry } from "@/lib/runtime-versions"
+import { APT_OPTS_LITERAL, chromeInstallCommands } from "@/lib/runtimes/bootstrap"
 import { PROVISION_EVENT } from "@/lib/provision-events"
 import { getVmProvider, describeVmError, type VmProvider, type VpsProvider } from "@/lib/vm-provider"
 import {
@@ -2000,6 +2001,38 @@ async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
  * The caller mints/resolves `openRouterApiKey` (so BYOS can inject the
  * customer's own key) and owns failure handling — this function only throws.
  */
+/**
+ * Read the runtime version that is ACTUALLY on the box and record it.
+ *
+ * `resolveAndRecordVersions` records what we *intended* to install, which is
+ * enough for a cold install but wrong in two cases: a warm-pool VM was
+ * bootstrapped at bake time, long before this instance existed, so nothing
+ * ever resolved a version for it; and an intended pin can silently fail to be
+ * what landed. Reading `--version` off the box covers both, and the warm pool
+ * is the primary managed path — without this, `instances.runtimeVersion` would
+ * be NULL for most instances and the column would not answer the question it
+ * was added for.
+ *
+ * Fire-and-forget by design. This is bookkeeping: it must never delay a deploy
+ * (the warm-pool claim path is held to ~25s) and must never fail one.
+ */
+async function recordObservedRuntimeVersion(
+  instance: Instance,
+  target: SshTarget,
+  runtime: RuntimeEngine,
+): Promise<void> {
+  const res = await sshRun(target, `${runtime.cliBinary} --version 2>/dev/null | head -1`)
+  // Runtimes print their version in varying shapes ("openclaw/2026.9.5",
+  // "hermes, version 0.19.0"); take the first dotted numeric run.
+  const observed = res.stdout.match(/[0-9]+(?:\.[0-9]+)+/)?.[0]
+  if (!observed || !isSafeVersion(observed)) return
+  if (observed === instance.runtimeVersion) return
+  await db
+    .update(instances)
+    .set({ runtimeVersion: observed })
+    .where(eq(instances.id, instance.id))
+}
+
 async function configureRuntimeOverSsh(
   instance: Instance,
   target: SshTarget,
@@ -2513,6 +2546,11 @@ async function configureRuntimeOverSsh(
       /* observability only — deploy already committed */
     })
   }
+
+  // Bookkeeping, deliberately off the critical path — see the helper.
+  void recordObservedRuntimeVersion(instance, target, runtime).catch(() => {
+    /* a version we failed to read is not a reason to fail a deploy */
+  })
 
   return {
     ipAddress,
@@ -3287,8 +3325,9 @@ export async function deleteBot(instance: Instance): Promise<DeleteResult> {
  * needs installing (→ caller skips the SSH round-trip).
  *
  * - `requiresChromium` → Google Chrome stable (a real .deb; snap chromium can't
- *   launch from a systemd service). Self-contained mirror of bootstrap's
- *   `browserInstallStep()` (which relies on framing-local vars unavailable here).
+ *   launch from a systemd service). Shares `chromeInstallCommands()` with the
+ *   bootstrap, passing the apt flags as a literal because the framing's
+ *   `$APT_OPTS` variable does not exist in this standalone script.
  * - `requiresNpmGlobal[runtime]` → `npm install -g <pkg>` (guarded, idempotent).
  *
  * Mirrors what bootstrap pre-bakes (browserInstallStep / agent-browser), so a
@@ -3297,13 +3336,13 @@ export async function deleteBot(instance: Instance): Promise<DeleteResult> {
 function buildToolDepsScript(tools: AgentTool[], runtimeId: RuntimeId): string {
   const steps: string[] = []
   if (tools.some((t) => t.requiresChromium)) {
+    // Shared with the bootstrap rather than hand-copied. The copy that used to
+    // live here carried only `Acquire::Retries` — no `DPkg::Lock::Timeout` —
+    // so enabling the browser tool on an already-running box could fail
+    // instantly on the dpkg lock held by unattended-upgrades. That is the
+    // BYOS case almost by definition: a real server, not a fresh image.
     steps.push(
-      `echo "=== install_chrome ==="
-install -d -m 0755 /usr/share/keyrings
-curl -fsSL --retry 5 --retry-delay 3 https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
-echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
-apt-get -o Acquire::Retries=3 update -y
-apt-get -o Acquire::Retries=3 install -y google-chrome-stable fonts-liberation`,
+      `echo "=== install_chrome ==="\n${chromeInstallCommands(APT_OPTS_LITERAL)}`,
     )
   }
   const npmGlobals = Array.from(

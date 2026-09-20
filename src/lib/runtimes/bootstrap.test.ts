@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest"
-import { buildBootstrapFraming, BOOTSTRAP_STATUS, BOOTSTRAP_LOG } from "./bootstrap"
+import {
+  APT_OPTS_LITERAL,
+  BOOTSTRAP_LOG,
+  BOOTSTRAP_STATUS,
+  browserInstallStep,
+  buildBootstrapFraming,
+  chromeInstallCommands,
+} from "./bootstrap"
 
 const opts = {
   installDir: "/opt/openclaw",
@@ -171,5 +178,44 @@ describe("buildBootstrapFraming() — Node version contract", () => {
       /Cannot derive a NodeSource major/,
     )
     expect(() => buildBootstrapFraming({ ...opts, minNodeVersion: "" }, "")).toThrow()
+  })
+})
+
+describe("chromeInstallCommands()", () => {
+  // The bug this locks down: provisioner.ts carried a hand-copied "mirror" of
+  // these commands that had drifted to `-o Acquire::Retries=3` alone. It is
+  // the script that runs when someone enables the browser tool on an
+  // already-running box — almost always a BYOS box, i.e. a real server with
+  // unattended-upgrades holding the dpkg lock right after boot, which is the
+  // exact situation DPkg::Lock::Timeout exists for. Without it apt fails
+  // instantly rather than waiting its turn.
+  it("carries the dpkg lock timeout wherever it is used", () => {
+    expect(APT_OPTS_LITERAL).toContain("DPkg::Lock::Timeout=120")
+    expect(chromeInstallCommands(APT_OPTS_LITERAL)).toContain("DPkg::Lock::Timeout=120")
+  })
+
+  it("takes its apt flags from the caller", () => {
+    // Inside the framing that is the shell variable; outside it, the literal.
+    expect(chromeInstallCommands("$APT_OPTS")).toContain("apt-get $APT_OPTS install -y")
+    expect(chromeInstallCommands(APT_OPTS_LITERAL)).toContain(
+      `apt-get ${APT_OPTS_LITERAL} install -y`,
+    )
+  })
+
+  it("is the single source of the commands the bootstrap step emits", () => {
+    expect(browserInstallStep()).toContain(chromeInstallCommands("$APT_OPTS"))
+  })
+
+  it("still installs Chrome rather than snap chromium", () => {
+    const cmds = chromeInstallCommands("$APT_OPTS")
+    expect(cmds).toContain("google-chrome-stable")
+    expect(cmds).toContain("fonts-liberation")
+    expect(cmds).not.toContain("chromium-browser")
+  })
+})
+
+describe("buildBootstrapFraming() — apt options", () => {
+  it("defines APT_OPTS from the shared literal", () => {
+    expect(buildBootstrapFraming(opts, "")).toContain(`APT_OPTS="${APT_OPTS_LITERAL}"`)
   })
 })

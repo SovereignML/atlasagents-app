@@ -132,21 +132,63 @@ export function prebakeDecision(opts: {
 }
 
 /**
- * Warm the npm cache with OpenClaw's tarball without installing it.
+ * Warm the npm cache with OpenClaw's whole dependency tree, without installing
+ * it and without unpacking anything.
  *
- * `npm cache add` fetches the package into the local cache and stops there —
- * no global prefix is touched, no postinstall runs, no 11,428 files are
- * extracted. That extract is the expensive half and it stays at deploy; what
- * this removes is the 225MB download.
+ * Three steps, none of which extract a file:
+ *   1. `npm install --package-lock-only` resolves the full tree from registry
+ *      metadata alone — no tarballs, no node_modules.
+ *   2. The lockfile is read for every resolved `name@version`.
+ *   3. `npm cache add` pulls each tarball into the shared npm cache and stops
+ *      there.
  *
- * Deliberately NOT `npm install` into a throwaway prefix: that would warm the
- * dependency tarballs too, but only by paying the extract cost twice.
+ * The obvious alternative — installing into a throwaway prefix — would warm
+ * the same tarballs but pay OpenClaw's 11,428-file extract twice: once here
+ * and again at deploy. This gets the same cache for one download and no
+ * extract. The extract itself stays at deploy and is irreducible without
+ * actually installing the package, which is the one thing the prebake is not
+ * allowed to do for OpenClaw.
+ *
+ * Entirely best-effort. Every failure path leaves the cache as it was and the
+ * deploy simply downloads, exactly as it does today.
  */
 function buildOpenclawCacheStep(pin: string | null): string {
+  const spec = shellEscape(npmSpec("openclaw", pin))
   return `
 step "cache_openclaw"
-# Download only — deliberately not an install. See buildOpenclawCacheStep.
-npm cache add ${shellEscape(npmSpec("openclaw", pin))} || echo "openclaw cache warm failed — deploy will download it instead"
+# Download only — deliberately never installed here. See buildOpenclawCacheStep.
+OC_WARM=/var/tmp/openclaw-warm
+rm -rf "$OC_WARM" && mkdir -p "$OC_WARM"
+if (
+  cd "$OC_WARM" || exit 1
+  npm init -y >/dev/null 2>&1 || exit 1
+  # Resolve the tree from metadata alone: no tarballs, no node_modules.
+  npm install --package-lock-only --no-audit --no-fund ${spec} >/dev/null 2>&1 || exit 1
+  cat > warm.js <<'WARMJS'
+const lock = require("./package-lock.json")
+const out = new Set()
+for (const [path, meta] of Object.entries(lock.packages || {})) {
+  if (!path || !meta || !meta.version) continue
+  const name = meta.name || path.split("node_modules/").pop()
+  if (!name) continue
+  out.add(name + "@" + meta.version)
+}
+process.stdout.write([...out].join("\\n") + "\\n")
+WARMJS
+  node warm.js > specs.txt 2>/dev/null || exit 1
+  # Pull every tarball into the cache. Batched, because one npm invocation per
+  # package would dominate the runtime; a failing batch is retried singly so a
+  # single bad spec cannot cost us the whole tree.
+  while read -r batch; do
+    npm cache add $batch >/dev/null 2>&1 || for one in $batch; do npm cache add "$one" >/dev/null 2>&1 || true; done
+  done < <(xargs -n 20 < specs.txt)
+  echo "warmed $(wc -l < specs.txt) package specs into the npm cache"
+); then
+  :
+else
+  echo "openclaw cache warm failed — the deploy will download it instead"
+fi
+rm -rf "$OC_WARM"
 `
 }
 
