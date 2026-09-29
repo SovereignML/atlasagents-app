@@ -54,7 +54,7 @@ export const BRANDING = {
   twitter: "https://x.com/AtlasAgents_Dev",
   linkedin: "https://linkedin.com/company/sovereignml", // {{TODO: Atlas Agents page}}
   telegram: "#", // {{TODO: real Telegram invite URL}}
-  demoUrl: "https://tidycal.com/sovereignml/demo", // {{TODO: Atlas Agents booking link}}
+  demoUrl: "https://tidycal.com/atlasagents/demo",
   positioning: {
     headline: "Others give you tools. Atlas Agents gives you agents that work.",
     bullets: [
