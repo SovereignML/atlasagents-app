@@ -45,7 +45,10 @@ const resolveBranding = cache(async (): Promise<ResolvedBranding> => {
 export async function generateMetadata(): Promise<Metadata> {
   const branding = await resolveBranding()
   return {
-    title: { default: branding.brandName, template: `%s · ${branding.brandName}` },
+    // `absolute`, not `default`: a nested layout's default still gets the root
+    // layout's `%s | Atlas Agents` template applied, which rendered the tab as
+    // "Atlas Agents | Atlas Agents" (and "<Tenant> | Atlas Agents" on white-label).
+    title: { absolute: branding.brandName, template: `%s · ${branding.brandName}` },
     ...(branding.faviconUrl ? { icons: { icon: branding.faviconUrl } } : {}),
   }
 }
