@@ -51,7 +51,7 @@ export const BRANDING = {
   privacyEmail: "privacy@atlasagents.dev",
   legalEmail: "legal@atlasagents.dev",
   github: "https://github.com/sovereignml", // {{TODO: Atlas Agents GitHub org}}
-  twitter: "https://twitter.com/sovereignml", // {{TODO: Atlas Agents handle}}
+  twitter: "https://x.com/AtlasAgents_Dev",
   linkedin: "https://linkedin.com/company/sovereignml", // {{TODO: Atlas Agents page}}
   telegram: "#", // {{TODO: real Telegram invite URL}}
   demoUrl: "https://tidycal.com/sovereignml/demo", // {{TODO: Atlas Agents booking link}}
