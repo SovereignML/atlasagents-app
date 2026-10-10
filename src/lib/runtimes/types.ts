@@ -1,11 +1,13 @@
 import type { InferSelectModel } from "drizzle-orm"
 import type { instances } from "@/db"
 import type { LlmProvider } from "@/lib/model-router"
+import type { RUNTIME_IDS } from "./ids"
+import type { RuntimeCaps } from "./labels"
 
 type Instance = InferSelectModel<typeof instances>
 
 /** Selectable agent runtime engines for the VPS (dedicated-VM) path. */
-export type RuntimeId = "openclaw" | "hermes"
+export type RuntimeId = (typeof RUNTIME_IDS)[number]
 
 /** Inputs to the gateway config renderer (runtime-agnostic; format may be JSON or YAML). */
 export type RenderConfigArgs = {
@@ -334,6 +336,12 @@ export interface RuntimeEngine {
   id: RuntimeId
   /** Human-facing name shown in the dashboard, e.g. "OpenClaw" / "Hermes". */
   displayName: string
+  /**
+   * What this engine can do — the same client-safe row as `RUNTIME_CAPS[id]`.
+   * Branch on these, not on `id`, unless the code is genuinely about one
+   * engine's own CLI (e.g. `hermes doctor`).
+   */
+  caps: RuntimeCaps
   /** Package identifier (npm for OpenClaw, PyPI for Hermes) — informational. */
   /**
    * Package name. Historically called `npmPackage`, but Hermes is a PyPI

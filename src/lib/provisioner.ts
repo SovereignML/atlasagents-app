@@ -338,10 +338,10 @@ async function resolveRuntimeLlmConfig(
   if (creds.isOwnKey && !isOpenRouterProvider(creds.providerId)) {
     // Defensive: OpenClaw's package cannot target a non-OpenRouter endpoint.
     // The API layer already blocks this combination; fail loudly if it slips through.
-    if (runtime.id !== "hermes") {
+    if (!runtime.caps.supportsCustomBaseUrl) {
       throw new Error(
         `Provider "${creds.providerId}" requires the Hermes runtime; ` +
-          `OpenClaw only supports OpenRouter.`,
+          `${runtime.displayName} only supports OpenRouter.`,
       )
     }
     const model = instance.modelSlug?.trim()
@@ -2112,7 +2112,7 @@ async function configureRuntimeOverSsh(
   // dormant openclawAdmin* columns. Note: every new Hermes row now arrives
   // with webuiEnabled=true (Open WebUI is mandatory for Hermes), so the
   // !webuiEnabled branch only applies to legacy rows.
-  const needsAdmin = runtime.id !== "hermes" || webuiEnabled
+  const needsAdmin = runtime.caps.nativeAdminLogin || webuiEnabled
   const adminEmail = needsAdmin
     ? (instance.openclawAdminEmail ??
       `admin+${instance.id.slice(0, 8)}@${runtime.id}.local`)
@@ -2420,7 +2420,7 @@ async function configureRuntimeOverSsh(
     // model accepted) before we point Open WebUI at it. Hard gate — a failure here means the
     // gateway is up but the agent can't talk to a model, so fail the deploy.
     // Warm-pool deploys move this OFF the critical path (run async after commit).
-    if (runtime.id === "hermes" && !fromWarmPool) {
+    if (runtime.caps.exposesOpenAiApi && !fromWarmPool) {
       const modelsStep = await sshRunScriptLogged(
         target,
         buildApiModelsCheckScript({ envPath: runtime.paths.envPath, port: runtime.gatewayPort }),
@@ -2577,7 +2577,7 @@ async function runWarmPoolPostChecks(opts: {
 }): Promise<void> {
   const { instanceId, target, runtime, webuiEnabled, adminEmail, adminPassword } = opts
 
-  if (runtime.id === "hermes") {
+  if (runtime.caps.exposesOpenAiApi) {
     try {
       const modelsStep = await sshRunScriptLogged(
         target,
@@ -3720,7 +3720,7 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
 
     // Hermes has no admin login (bearer-token only). OpenClaw keeps the
     // email/password it minted at first provision.
-    const hasAdminLogin = runtime.id !== "hermes"
+    const hasAdminLogin = runtime.caps.nativeAdminLogin
     const adminEmail = hasAdminLogin
       ? (instance.openclawAdminEmail ??
         `admin+${instance.id.slice(0, 8)}@${runtime.id}.local`)

@@ -7,6 +7,8 @@
 //
 // Pure data + arithmetic: no DB, no network.
 
+import { runtimeCaps } from "@/lib/runtimes/labels"
+
 export type RuntimeFootprint = {
   /** Catalog key: runtime id, plus "-webui" when the sidecar is included. */
   key: string
@@ -38,7 +40,7 @@ export const HOST_RESERVE = { vcpu: 1, ramMb: 1024, diskGb: 5 }
 export const DEFAULT_FOOTPRINT_KEY = "openclaw"
 
 export function footprintKey(runtime: string, webuiEnabled = false): string {
-  return runtime === "hermes" && webuiEnabled ? "hermes-webui" : runtime
+  return runtimeCaps(runtime).hasSidecar && webuiEnabled ? `${runtime}-webui` : runtime
 }
 
 export function getFootprint(key: string): RuntimeFootprint | undefined {

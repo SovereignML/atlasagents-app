@@ -25,6 +25,21 @@ You can switch an existing agent's runtime later from its settings (this re-prov
 
 The `runtime` column on `instances` is `"openclaw" | "hermes"`. A runtime registry ([`src/lib/runtimes/index.ts`](../src/lib/runtimes/index.ts)) maps each id to a `RuntimeEngine` implementation; `getRuntime()` falls back to the default (`DEFAULT_RUNTIME_ID = "openclaw"`) for legacy rows that predate the column. Each engine implements the same surface — `buildEnv()`, `renderConfig()`, `renderCaddyfile()`, `renderInitScript()`, plus `paths`/`serviceName` — so the provisioner is runtime-agnostic.
 
+### Capabilities, not ids
+
+The list of ids lives in one place, `RUNTIME_IDS` ([`src/lib/runtimes/ids.ts`](../src/lib/runtimes/ids.ts)). The `RuntimeId` type and the agent-config zod enum are both derived from it. What each engine *can do* lives in `RUNTIME_CAPS` ([`src/lib/runtimes/labels.ts`](../src/lib/runtimes/labels.ts)), which is client-safe and also exposed on each engine as `engine.caps`. Read it with `runtimeCaps(id)`, which falls back to OpenClaw for NULL or unknown ids, the same way `getRuntime()` does.
+
+| Cap | OpenClaw | Hermes | Drives |
+|-----|----------|--------|--------|
+| `minRamGb` | 0 (no floor; the BYOS plan reports 0 GB) | 2 | wizard plan gate, `createInstanceFromAgentFields` |
+| `exposesOpenAiApi` | no | yes | `/v1/models` deploy gate, "Gateway API Key" card ordering |
+| `nativeAdminLogin` | yes | no | whether admin credentials are minted without a sidecar; `NO_ADMIN_FOR_HERMES` |
+| `supportsCustomBaseUrl` | no | yes | which runtimes accept a non-OpenRouter BYO key |
+| `hasSidecar` | no | yes | `webuiEnabled` on new rows, `-webui` footprint key |
+| `minContext` | — | 64k | `selectableModelsForRuntime` |
+
+Branch on a cap, not on `runtime === "hermes"`. The only remaining id checks are genuinely about one engine: `hermes doctor` diagnostics, the Linode golden image (OpenClaw), and the free tier's per-runtime slots. A runtime that pins its own per-tier model registers it in `RUNTIME_MODEL_LADDERS` ([`src/lib/model-router.ts`](../src/lib/model-router.ts)).
+
 ### OpenClaw ([`src/lib/runtimes/openclaw.ts`](../src/lib/runtimes/openclaw.ts))
 
 - Service `openclaw`, system user `openclaw`.

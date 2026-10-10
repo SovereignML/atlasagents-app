@@ -1,4 +1,5 @@
 import type { BudgetTier } from "@/lib/agent-config"
+import type { RuntimeId } from "@/lib/runtimes/types"
 
 /** Selectable LLM providers. OpenRouter is the default; NVIDIA is the fallback. */
 export type LlmProvider = "openrouter" | "nvidia"
@@ -230,6 +231,14 @@ export function hermesModel(tier: BudgetTier): string {
 }
 
 /**
+ * Runtimes that pin their own per-tier default instead of `routeModel(tier)`
+ * (whose `:free` fallbacks Hermes cannot run). Absent ⇒ the routed model.
+ */
+const RUNTIME_MODEL_LADDERS: Partial<Record<RuntimeId, (tier: BudgetTier) => string>> = {
+  hermes: hermesModel,
+}
+
+/**
  * OpenRouter slug shape: `<author>/<slug>`, with an optional `~` (latest) prefix and an
  * optional `:variant` suffix (e.g. `~anthropic/claude-sonnet-latest`, `deepseek/deepseek-chat`,
  * `google/gemini-flash-1.5:free`). Used to fail a Hermes provision *before* `systemctl start`
@@ -268,7 +277,10 @@ export function effectiveModel(args: {
 }): string {
   const override = args.modelSlug?.trim()
   if (args.llmProvider === "openrouter" && override) return override
-  return args.runtimeId === "hermes" && args.llmProvider === "openrouter"
-    ? hermesModel(args.tier)
+  const ownLadder = Object.hasOwn(RUNTIME_MODEL_LADDERS, args.runtimeId)
+    ? RUNTIME_MODEL_LADDERS[args.runtimeId as RuntimeId]
+    : undefined
+  return ownLadder && args.llmProvider === "openrouter"
+    ? ownLadder(args.tier)
     : args.routedModel
 }

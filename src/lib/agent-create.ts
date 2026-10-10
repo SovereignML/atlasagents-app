@@ -15,6 +15,7 @@ import type { AgentConfig } from "@/lib/agent-config"
 import { selectSkills } from "@/configs/skill-map"
 import { generateSoul } from "@/lib/soul"
 import { routeModel } from "@/lib/model-router"
+import { runtimeCaps } from "@/lib/runtimes/labels"
 import { getUserTeam } from "@/lib/team"
 import { isTeamSuspended } from "@/lib/tenant"
 import { getTeamAgentLimit, countTeamAgents } from "@/lib/seats"
@@ -119,16 +120,18 @@ export async function createInstanceFromAgentFields(
     return { ok: false, status: 400, error: "Invalid or unavailable region" }
   }
 
-  // Hermes always ships with the Open WebUI sidecar (mandatory native install),
-  // which needs ≥2GB RAM. The Free demo runs on the shared-4g machine, so it can
-  // host the sidecar — Hermes is allowed on Free (gated by the per-runtime free
-  // limit, see src/lib/free-tier.ts). Any sub-2GB plan still can't run it.
-  if (args.agentConfig?.runtime === "hermes") {
-    if (serverConfig.ramGb < 2) {
+  // Each engine has a RAM floor (`minRamGb`). Hermes always ships with the Open
+  // WebUI sidecar (mandatory native install), which needs ≥2GB RAM. The Free demo
+  // runs on the shared-4g machine, so it can host the sidecar — Hermes is allowed
+  // on Free (gated by the per-runtime free limit, see src/lib/free-tier.ts). Any
+  // sub-2GB plan still can't run it.
+  if (args.agentConfig) {
+    const caps = runtimeCaps(args.agentConfig.runtime)
+    if (serverConfig.ramGb < caps.minRamGb) {
       return {
         ok: false,
         status: 400,
-        error: "Hermes requires a plan with at least 2GB RAM. Choose Builder or higher.",
+        error: `${caps.label} requires a plan with at least ${caps.minRamGb}GB RAM. Choose Builder or higher.`,
       }
     }
   }
@@ -269,6 +272,6 @@ export function buildAgentFields(cfg: AgentConfig | null): {
     // sidecar. OpenClaw never has it. Legacy Hermes rows with the column
     // stored as false keep working API-only (the Caddy renderer still handles
     // them) but new rows always flip this on.
-    webuiEnabled: cfg.runtime === "hermes",
+    webuiEnabled: runtimeCaps(cfg.runtime).hasSidecar,
   }
 }

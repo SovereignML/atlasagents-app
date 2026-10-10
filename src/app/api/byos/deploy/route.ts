@@ -23,6 +23,7 @@ import { getEffectiveTeam } from "@/lib/effective-user"
 import { byosConnectionFields, installBlockedReason } from "@/lib/byos-install"
 import { isTeamSuspended } from "@/lib/tenant"
 import { getTeamAgentLimit, countTeamAgents } from "@/lib/seats"
+import { runtimeCaps } from "@/lib/runtimes/labels"
 import {
   getByoProvider,
   isByoProviderId,
@@ -309,7 +310,7 @@ async function handleByosDeploy(req: NextRequest) {
       // and need an explicit model (no default catalog for a direct provider).
       if (requiresHermes(ownProviderId)) {
         const label = getByoProvider(ownProviderId)?.label ?? ownProviderId
-        if (cfg.runtime !== "hermes") {
+        if (!runtimeCaps(cfg.runtime).supportsCustomBaseUrl) {
           return NextResponse.json(
             { error: `${label} keys require the Hermes runtime` },
             { status: 400 },
@@ -344,7 +345,7 @@ async function handleByosDeploy(req: NextRequest) {
             )
           }
         }
-        if (requiresHermes(fallbackProviderId) && cfg.runtime !== "hermes") {
+        if (requiresHermes(fallbackProviderId) && !runtimeCaps(cfg.runtime).supportsCustomBaseUrl) {
           const label = getByoProvider(fallbackProviderId)?.label ?? fallbackProviderId
           return NextResponse.json(
             { error: `${label} fallback keys require the Hermes runtime` },

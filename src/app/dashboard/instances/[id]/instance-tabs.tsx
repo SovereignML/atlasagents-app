@@ -76,6 +76,7 @@ import { ToolsTab } from "./instance-tools-tab"
 import { SkillsTab } from "./instance-skills-tab"
 import { FilesTab } from "./instance-files-browser"
 import { BRANDING } from "@/configs/branding"
+import { runtimeCaps } from "@/lib/runtimes/labels"
 // Was a hand-maintained copy of this list living in this file, which drifted
 // the moment the real catalog changed — it still offered the retired
 // "Content Agent". Import the source of truth instead.
@@ -1071,12 +1072,12 @@ function ServerAccessCard({ instanceId }: { instanceId: string; ipAddress: strin
 function GatewayTokenCard({
   instanceId,
   runtimeLabel,
-  isHermes,
+  openAiApi,
 }: {
   instanceId: string
   runtimeLabel: string
   /** Hermes surfaces the key as an advanced "Gateway API Key"; OpenWebUI is the primary path. */
-  isHermes?: boolean
+  openAiApi?: boolean
 }) {
   const [token, setToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -1121,9 +1122,9 @@ function GatewayTokenCard({
 
   return (
     <SectionCard
-      title={isHermes ? "Gateway API Key" : "Gateway Token"}
+      title={openAiApi ? "Gateway API Key" : "Gateway Token"}
       description={
-        isHermes
+        openAiApi
           ? "Advanced: for programmatic access to the OpenAI-compatible API at /v1. Most users can just use Open WebUI above."
           : `Use this token to authenticate with the ${runtimeLabel} Control UI and API.`
       }
@@ -1490,14 +1491,15 @@ function OverviewTab({
         <ManagedHostnameCard instance={instance} />
       )}
       {(() => {
-        const isHermes = instance.runtime === "hermes"
+        // Engines with an OpenAI-compatible API (Hermes) lead with the chat UI.
+        const openAiApi = runtimeCaps(instance.runtime).exposesOpenAiApi
         const gatewayCard =
           instance.hasGatewayToken &&
           (instance.deploymentTarget === "vps" || instance.deploymentTarget === "byos") ? (
             <GatewayTokenCard
               instanceId={instance.id}
               runtimeLabel={instance.runtimeLabel}
-              isHermes={isHermes}
+              openAiApi={openAiApi}
             />
           ) : null
         const credentialsCard =
@@ -1509,12 +1511,12 @@ function OverviewTab({
               tlsStatus={instance.tlsStatus}
               ipAddress={instance.ipAddress}
               runtimeLabel={instance.runtimeLabel}
-              webui={isHermes && instance.webuiEnabled}
+              webui={runtimeCaps(instance.runtime).hasSidecar && instance.webuiEnabled}
             />
           ) : null
         // Hermes leads with the Open WebUI login (primary path) and pushes the
         // gateway API key below it; OpenClaw keeps the token-first ordering.
-        return isHermes ? (
+        return openAiApi ? (
           <>
             {credentialsCard}
             {gatewayCard}
