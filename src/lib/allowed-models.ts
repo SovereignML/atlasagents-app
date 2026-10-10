@@ -1,6 +1,7 @@
 import { asc, eq } from "drizzle-orm"
 
 import { db, allowedModels } from "@/db"
+import { HERMES_MIN_CONTEXT, runtimeCaps } from "@/lib/runtimes/labels"
 import {
   ALLOWED_OPENROUTER_MODELS,
   OPENROUTER_BASE_URL,
@@ -21,7 +22,7 @@ export function isAllowedModelKind(value: string): value is AllowedModelKind {
  * below this at startup, so the per-instance Hermes picker only offers models at or
  * above it. Kept here next to the selectable-models filter that enforces it.
  */
-export const HERMES_MIN_CONTEXT = 64_000
+export { HERMES_MIN_CONTEXT }
 
 /**
  * The DB is the runtime source of truth for the account allowlist; the code
@@ -122,8 +123,9 @@ export async function syncModelMetadata(): Promise<{ updated: number }> {
 function isSelectableForRuntime(row: AllowedModelRow, runtimeId: string): boolean {
   if (!row.enabled || row.kind !== "chat") return false
   // Hermes needs a known ≥64k context; OpenClaw has no floor.
-  if (runtimeId === "hermes") {
-    return row.contextLength != null && row.contextLength >= HERMES_MIN_CONTEXT
+  const { minContext } = runtimeCaps(runtimeId)
+  if (minContext != null) {
+    return row.contextLength != null && row.contextLength >= minContext
   }
   return true
 }

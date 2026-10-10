@@ -1,18 +1,91 @@
 import type { RuntimeId } from "./types"
 
 /**
- * Client-safe runtime display labels. The full runtime adapters (and
- * `getRuntime`) transitively import `node:crypto` via `shared.ts`, so they
- * cannot be pulled into client components. This module has no Node imports and
- * is safe in both server and client code. Keep these labels in sync with the
- * adapter `displayName`s in openclaw.ts / hermes.ts.
+ * Client-safe runtime metadata. The full runtime adapters (and `getRuntime`)
+ * transitively import `node:crypto` via `shared.ts`, so they cannot be pulled
+ * into client components. This module has no Node imports and is safe in both
+ * server and client code.
+ *
+ * Code that needs to know what an engine *can do* asks here instead of testing
+ * `runtime === "hermes"`. Each adapter exposes its row as `engine.caps`, and
+ * `labels.test.ts` keeps `label` equal to the adapter's `displayName`.
  */
-export const RUNTIME_LABELS: Record<RuntimeId, string> = {
-  openclaw: "OpenClaw",
-  hermes: "Hermes",
+
+/** Hermes rejects any model with <64k context at startup. */
+export const HERMES_MIN_CONTEXT = 64_000
+
+export type RuntimeCaps = {
+  /** Human-facing name, e.g. "OpenClaw". Equal to the adapter's `displayName`. */
+  label: string
+  /**
+   * Smallest plan (GB RAM) this engine is offered on; 0 = no floor. OpenClaw
+   * must stay 0: the BYOS plan's server config (`byos-managed`) reports 0 GB.
+   */
+  minRamGb: number
+  /**
+   * Serves an OpenAI-compatible API at `/v1` behind the gateway token. The
+   * provisioner gates the deploy on `GET /v1/models`, and the dashboard calls
+   * the token a "Gateway API Key" and leads with the chat UI login.
+   */
+  exposesOpenAiApi: boolean
+  /**
+   * The engine ships its own email/password login (OpenClaw's Control UI).
+   * Engines without one only get admin credentials when a sidecar needs them.
+   */
+  nativeAdminLogin: boolean
+  /**
+   * Can target an arbitrary OpenAI-compatible base URL, so a customer may bring
+   * a non-OpenRouter key (see `requiresHermes` in configs/llm-providers.ts).
+   */
+  supportsCustomBaseUrl: boolean
+  /**
+   * New instances get the chat UI sidecar (Open WebUI). Engines without a
+   * sidecar always store `webuiEnabled=false`.
+   */
+  hasSidecar: boolean
+  /** Minimum model context window the engine accepts, when it has one. */
+  minContext?: number
 }
+
+export const RUNTIME_CAPS: Record<RuntimeId, RuntimeCaps> = {
+  openclaw: {
+    label: "OpenClaw",
+    minRamGb: 0,
+    exposesOpenAiApi: false,
+    nativeAdminLogin: true,
+    supportsCustomBaseUrl: false,
+    hasSidecar: false,
+  },
+  hermes: {
+    label: "Hermes",
+    minRamGb: 2,
+    exposesOpenAiApi: true,
+    nativeAdminLogin: false,
+    supportsCustomBaseUrl: true,
+    hasSidecar: true,
+    minContext: HERMES_MIN_CONTEXT,
+  },
+}
+
+/** Default for NULL / unknown ids — mirrors `getRuntime()`'s fallback. */
+const FALLBACK_RUNTIME_ID: RuntimeId = "openclaw"
+
+/** True when `id` names a known runtime. */
+export function isRuntimeId(id: string | null | undefined): id is RuntimeId {
+  return !!id && Object.prototype.hasOwnProperty.call(RUNTIME_CAPS, id)
+}
+
+/** Capabilities for a runtime id, coercing NULL / unknown to OpenClaw. */
+export function runtimeCaps(id: string | null | undefined): RuntimeCaps {
+  return RUNTIME_CAPS[isRuntimeId(id) ? id : FALLBACK_RUNTIME_ID]
+}
+
+/** Client-safe display labels, derived from `RUNTIME_CAPS`. */
+export const RUNTIME_LABELS = Object.fromEntries(
+  Object.entries(RUNTIME_CAPS).map(([id, caps]) => [id, caps.label]),
+) as Record<RuntimeId, string>
 
 /** Resolve a runtime id to its display label, defaulting to OpenClaw. */
 export function runtimeLabel(id: string | null | undefined): string {
-  return (id && RUNTIME_LABELS[id as RuntimeId]) || "OpenClaw"
+  return runtimeCaps(id).label
 }

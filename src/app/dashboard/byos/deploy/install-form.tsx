@@ -24,6 +24,9 @@ import {
   type ByoProviderId,
 } from "@/configs/llm-providers"
 import { cn } from "@/lib/utils"
+import { RUNTIME_IDS } from "@/lib/runtimes/ids"
+import { RUNTIME_CAPS } from "@/lib/runtimes/labels"
+import type { RuntimeId } from "@/lib/runtimes/types"
 import { BRANDING } from "@/configs/branding"
 
 /** The connected server this agent is being installed onto. */
@@ -43,7 +46,7 @@ export type InstallServer = {
 }
 
 type LlmMode = "managed_credits" | "own_key"
-type Runtime = "openclaw" | "hermes"
+type Runtime = RuntimeId
 
 // The server is already connected and inspected by the time we get here, so
 // there is no "Server" step: the flow is about the agent, not the machine.
@@ -61,10 +64,17 @@ const STEP_LABELS: Record<Step, string> = {
   review: "Review",
 }
 
-const RUNTIME_OPTIONS: { value: Runtime; label: string; hint: string }[] = [
-  { value: "openclaw", label: "OpenClaw", hint: "Default agent runtime" },
-  { value: "hermes", label: "Hermes", hint: "Nous Research Hermes (Python)" },
-]
+const RUNTIME_HINTS: Record<Runtime, string> = {
+  openclaw: "Default agent runtime",
+  hermes: "Nous Research Hermes (Python)",
+}
+
+const RUNTIME_OPTIONS: { value: Runtime; label: string; hint: string }[] = RUNTIME_IDS.map(
+  (id) => ({ value: id, label: RUNTIME_CAPS[id].label, hint: RUNTIME_HINTS[id] }),
+)
+
+/** Footprint key for an engine as BYOS installs it (with its sidecar, if any). */
+const runtimeFootprintKey = (r: Runtime) => footprintKey(r, RUNTIME_CAPS[r].hasSidecar)
 
 const SELECTED_GLOW =
   "aria-pressed:border-ring aria-pressed:ring-1 aria-pressed:ring-ring aria-pressed:bg-ring/15 aria-pressed:hover:bg-ring/20 aria-pressed:text-foreground " +
@@ -122,8 +132,8 @@ export function ByosInstallForm({ server }: { server: InstallServer }) {
     ramTotalMb: server.hwRamTotalMb,
     diskTotalGb: server.hwDiskTotalGb,
   })
-  const fitsRuntime = (r: Runtime) => !probed || capacity[footprintKey(r, r === "hermes")] > 0
-  const selectedFootprint = getFootprint(footprintKey(runtime, runtime === "hermes"))
+  const fitsRuntime = (r: Runtime) => !probed || capacity[runtimeFootprintKey(r)] > 0
+  const selectedFootprint = getFootprint(runtimeFootprintKey(runtime))
 
   // A non-OpenRouter direct key (primary or fallback) only runs on Hermes —
   // OpenClaw's package is hardwired to OpenRouter. When the user picks one, the
@@ -347,16 +357,16 @@ export function ByosInstallForm({ server }: { server: InstallServer }) {
                     if (!v[0]) return
                     // A direct-provider key forces Hermes — ignore attempts to
                     // switch back to OpenClaw.
-                    if (forcesHermes && v[0] !== "hermes") return
+                    if (forcesHermes && !RUNTIME_CAPS[v[0] as Runtime].supportsCustomBaseUrl) return
                     setRuntime(v[0] as Runtime)
                   }}
                   className="grid w-full grid-cols-1 gap-2 md:grid-cols-2"
                   spacing={1}
                 >
                   {RUNTIME_OPTIONS.map((r) => {
-                    const disabled = forcesHermes && r.value !== "hermes"
+                    const disabled = forcesHermes && !RUNTIME_CAPS[r.value].supportsCustomBaseUrl
                     const fits = fitsRuntime(r.value)
-                    const fp = getFootprint(footprintKey(r.value, r.value === "hermes"))
+                    const fp = getFootprint(runtimeFootprintKey(r.value))
                     return (
                       <ToggleGroupItem
                         key={r.value}
