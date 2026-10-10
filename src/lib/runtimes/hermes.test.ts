@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest"
-import { hermesRuntime, HERMES_GATEWAY_PORT, HERMES_VPS_MIN_NODE } from "./hermes"
+import {
+  hermesRuntime,
+  HERMES_GATEWAY_PORT,
+  HERMES_PINNED_VERSION,
+  HERMES_VPS_MIN_NODE,
+  OPEN_WEBUI_PINNED_VERSION,
+} from "./hermes"
 import { OPENCLAW_VPS_MIN_NODE } from "./openclaw"
 
 /**
@@ -227,15 +233,15 @@ describe("Hermes bootstrap — version pinning", () => {
     expect(script).toContain("open-webui==0.11.3")
   })
 
-  // Unpinned must render exactly what it always did: a bare dist name, which
-  // is how "latest" is spelled for pip.
-  it("falls back to an unpinned dist name with no pin", () => {
+  // No resolved pin means the code pins, not a bare dist name (which is how
+  // pip spells "latest").
+  it("falls back to the code pins with no resolved pin", () => {
     const script = hermesRuntime.renderBootstrap({
       gatewayPort: hermesRuntime.gatewayPort,
       webuiEnabled: true,
     })
-    expect(script).toContain("RUNTIME_PKG_SPEC='hermes-agent'")
-    expect(script).toContain("OPEN_WEBUI_PKG_SPEC='open-webui'")
+    expect(script).toContain(`RUNTIME_PKG_SPEC='hermes-agent==${HERMES_PINNED_VERSION}'`)
+    expect(script).toContain(`OPEN_WEBUI_PKG_SPEC='open-webui==${OPEN_WEBUI_PINNED_VERSION}'`)
   })
 })
 

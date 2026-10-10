@@ -16,12 +16,8 @@
  */
 
 import type { db } from "@/db"
-import {
-  sshInstallCaddyfile,
-  sshRun,
-  sshWriteFile,
-  sshVmHasCloudflareOriginCerts,
-} from "@/lib/ssh"
+import { sshInstallCaddyfile, sshRun, sshWriteFile } from "@/lib/ssh"
+import { ensureManagedOriginCert } from "@/lib/agent-origin-cert"
 import { getRuntime } from "@/lib/runtimes"
 import type { SidecarSpec } from "@/lib/runtimes/types"
 import { toolServicesForIds } from "@/configs/agent-tools"
@@ -66,8 +62,10 @@ export async function reconfigureInstanceIngress(
   // single-upstream mode and the chat UI disappears from the public host.
   const webuiEnabled = Boolean(instance.webuiEnabled) && Boolean(runtime.sidecar)
 
-  const useCfOriginTls =
-    Boolean(instance.managedSubdomain) && (await sshVmHasCloudflareOriginCerts(target))
+  // Installs the origin cert for the managed hostname's own zone (the same
+  // helper first provision uses), so a domain change never re-renders the
+  // managed site block with a cert for the wrong zone, or with none.
+  const { useCfOriginTls } = await ensureManagedOriginCert(target, instance.managedSubdomain)
 
   const caddyContent = runtime.renderCaddyfile({
     domain,

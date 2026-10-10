@@ -30,17 +30,39 @@ The `runtime` column on `instances` is `"openclaw" | "hermes"`. A runtime regist
 - Service `openclaw`, system user `openclaw`.
 - Install is config-only: it renders a `.env`/config file; no runtime CLI calls.
 - Auth is an **admin email + password** (`openclawAdminEmail` / `openclawAdminPasswordEnc`).
+- **Proxy trust:** `gateway.trustedProxies` is `["127.0.0.1", "::1"]`. Caddy proxies to `localhost:18789`, which Go dials as IPv6 `::1` first, and every openclaw release we install (2026.8.35 onwards) rejects forwarded headers from an untrusted peer with `proxy_attribution_required`. With only `127.0.0.1` listed, every browser request through the agent URL was a 403 while the loopback health check passed. `scripts/repair-agent-ingress.ts` fixes boxes provisioned before this (the gateway hot-applies it, no restart).
 
 ### Hermes ([`src/lib/runtimes/hermes.ts`](../src/lib/runtimes/hermes.ts))
 
 - **CLI-driven install** (unlike OpenClaw): the init script runs `hermes setup` then `hermes config set` as the hermes system user. Requires Node ≥ `24.16.0` (`HERMES_VPS_MIN_NODE`). Hermes itself is Python; the floor exists for the Node tooling it spawns — `agent-browser`, installed globally for the browser tool, declares `engines.node: >=24.0.0` in every published version. It is deliberately equal to `OPENCLAW_VPS_MIN_NODE` so one Node major serves both engines and a box is never dragged between them.
 - **Gateway** binds loopback `127.0.0.1:8642` (`HERMES_GATEWAY_PORT`). Its `.env` uses an `API_SERVER_*` convention (no prefix): `API_SERVER_ENABLED`, `API_SERVER_KEY` (the bearer/gateway token), `API_SERVER_HOST`, `API_SERVER_PORT`, `API_SERVER_CORS_ORIGINS`.
-- **Open WebUI sidecar** (service `open-webui` on `127.0.0.1:8080`) is installed into its own venv under `/opt/open-webui`. Caddy **dual-routes** on the public host: `/v1/*` → Hermes gateway (bearer-token, CORS-enabled), everything else → Open WebUI (browser, session login). The `webuiEnabled` column flags this; legacy `webuiEnabled=false` instances serve Hermes directly at every path (single-upstream).
-- Versions are env-pinnable: `HERMES_VERSION`, `OPEN_WEBUI_VERSION` (both default `latest`).
+- **Open WebUI sidecar** (service `open-webui` on `127.0.0.1:8080`) is installed into its own venv under `/opt/open-webui`, with **CPU-only torch** from the PyTorch CPU index (as Open WebUI's own image does) — PyPI's Linux torch is the CUDA build, ~3.2 GB of GPU libraries on a box with no GPU. If the PyTorch index is unreachable the install falls back to PyPI. Caddy **dual-routes** on the public host: `/v1/*` → Hermes gateway (bearer-token, CORS-enabled), everything else → Open WebUI (browser, session login). The `webuiEnabled` column flags this; legacy `webuiEnabled=false` instances serve Hermes directly at every path (single-upstream).
+- Versions are pinned in code (`HERMES_PINNED_VERSION`, `OPEN_WEBUI_PINNED_VERSION`) and env-overridable (`HERMES_VERSION`, `OPEN_WEBUI_VERSION`). See *Version pinning* below.
 
 ### Version pinning ([`src/lib/runtime-versions.ts`](../src/lib/runtime-versions.ts))
 
-Left alone, every runtime installs `latest` at bootstrap. That is fine for a
+**Every box installs versions pinned in code, not `latest`:**
+
+| Package | Pin (constant) | Policy |
+|---------|----------------|--------|
+| openclaw | `OPENCLAW_PINNED_VERSION` (`openclaw.ts`) | One release behind npm `latest`. |
+| hermes-agent | `HERMES_PINNED_VERSION` (`hermes.ts`) | Newest release that has soaked (0.19.0 has been latest since 2026-07-20). |
+| open-webui | `OPEN_WEBUI_PINNED_VERSION` (`hermes.ts`) | One release behind PyPI latest. |
+| Caddy | `CADDY_DEFAULT_VERSION` (`bootstrap.ts`) | Installed from the GitHub release `.deb`, SHA-512 pinned. Not 2.11.6 (HTTP/2 proxy crash, SSE cut at 60s). |
+
+Bumping one is a deliberate change: update the constant (and, for Caddy, the
+hash), deploy one agent of each runtime on a test box, then merge. The pins
+are part of the warm pool's key (`warm-pool-key.ts`), so a bump retires the
+pool's old VMs automatically. `OPENCLAW_VERSION` / `HERMES_VERSION` /
+`OPEN_WEBUI_VERSION` / `CADDY_VERSION` override a pin without a code deploy —
+a version to roll back to, or `latest` to track upstream again.
+
+Why pin at all: on 2026-10-09 Caddy's Cloudsmith apt repository started
+answering `402 Payment Required` and every bootstrap failed, because the box
+pulled whatever the upstream served at that moment. Pinned artifacts from a
+release page don't move under us.
+
+Before the pins, every runtime installed `latest` at bootstrap. That is fine for a
 cold install and fatal for a prefetch: the BYOS prebake downloads packages when
 a server is **connected** and installs them when an agent is later **deployed**,
 so re-resolving `latest` at deploy would miss the warm cache and re-download

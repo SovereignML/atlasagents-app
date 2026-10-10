@@ -1,6 +1,18 @@
 import { createRuntime } from "./shared"
 
-export const OPENCLAW_VERSION = () => process.env.OPENCLAW_VERSION || "latest"
+/**
+ * The OpenClaw release new boxes install. Deliberately one release behind
+ * npm's `latest` (2026.9.9 at the time of pinning): openclaw ships every few
+ * days, and a release should reach customers after it has soaked, not the
+ * minute it is published. Bump it on purpose, after a test deploy — see
+ * "Version pinning" in docs/RUNTIMES.md.
+ *
+ * `OPENCLAW_VERSION` still overrides it (a version, or `latest` to track
+ * upstream again), which is how a bad pin is rolled back without a code deploy.
+ */
+export const OPENCLAW_PINNED_VERSION = "2026.9.8"
+
+export const OPENCLAW_VERSION = () => process.env.OPENCLAW_VERSION || OPENCLAW_PINNED_VERSION
 
 /**
  * Minimum Node on VPS. Must satisfy the published package's `engines` field,

@@ -5,13 +5,11 @@ import {
   findRecordByName,
   type CloudflareError,
 } from "./cloudflare"
+import { primaryAgentZone, zoneDnsEnabled, zoneForHostname } from "./agent-zones"
 
-// LEGACY WIRE FORMAT — deliberately NOT renamed in the Atlas Agents
-// rebrand. The managed agent zone is a separate domain from the product
-// domain and is not part of this rebrand — live wildcard DNS plus a
-// Cloudflare origin cert on every provisioned box.
-// See docs/REBRAND-LEGACY-IDENTIFIERS.md.
-const BASE = process.env.CLOUDFLARE_BASE_DOMAIN ?? "sovereignclaw.xyz"
+// The zone(s) agent hostnames live in — new agents in the primary zone,
+// existing ones wherever their stored hostname says — are resolved by
+// agent-zones.ts. See docs/REBRAND-LEGACY-IDENTIFIERS.md.
 
 const ADJECTIVES = [
   "bold","brave","bright","calm","clear","cool","crisp","dark","deep","fair",
@@ -57,7 +55,26 @@ export function generateReadableSubdomain(botName: string): string {
   return `${base}-${pick(ADJECTIVES)}-${pick(NOUNS)}`
 }
 
-export const agentHostname = (subdomain: string): string => `${subdomain}.${BASE}`
+/** A hostname for a NEW agent: always in the primary agent zone. */
+export const agentHostname = (subdomain: string): string =>
+  `${subdomain}.${primaryAgentZone().domain}`
+
+/**
+ * Whether new agents can get a managed hostname at all: a Cloudflare token
+ * plus a zone id for the primary agent zone.
+ */
+export function isAgentDnsEnabled(): boolean {
+  return zoneDnsEnabled(primaryAgentZone())
+}
+
+/**
+ * Whether the record behind an EXISTING hostname can be managed: a token plus
+ * the zone id of the zone that hostname lives in (which, after a zone move,
+ * may not be the primary one).
+ */
+export function isAgentDnsEnabledFor(hostname: string | null | undefined): boolean {
+  return zoneDnsEnabled(hostname ? zoneForHostname(hostname) : primaryAgentZone())
+}
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -72,13 +89,15 @@ export async function createAgentSubdomain(
   const subdomain = botName
     ? generateReadableSubdomain(botName)
     : agentId
-  const name = agentHostname(subdomain)
+  const zone = primaryAgentZone()
+  const name = `${subdomain}.${zone.domain}`
+  const ctx = zone.zoneId ? { zoneId: zone.zoneId } : undefined
   const proxied = opts.proxied ?? true
   const max = 6
   let lastErr: unknown
   for (let attempt = 0; attempt < max; attempt++) {
     try {
-      const rec = await upsertDnsRecord({ name, ip, proxied })
+      const rec = await upsertDnsRecord({ name, ip, proxied }, ctx)
       return { name, recordId: rec.id }
     } catch (e) {
       lastErr = e
@@ -94,19 +113,34 @@ export async function createAgentSubdomain(
   throw lastErr ?? new Error("createAgentSubdomain: exhausted retries")
 }
 
+/**
+ * Delete an agent's managed record. `hostname` (the stored managedSubdomain)
+ * picks the zone: a record id only means something inside the zone that
+ * issued it, and after a zone move an existing agent's record is still in the
+ * old one. Without a hostname this falls back to the primary zone, which is
+ * what it did before zones existed.
+ */
 export async function deleteAgentSubdomain(
   agentId: string,
   recordId?: string | null,
+  hostname?: string | null,
 ): Promise<void> {
+  const zone = hostname ? zoneForHostname(hostname) : primaryAgentZone()
+  if (!zone) {
+    throw new Error(
+      `${hostname} is not in any configured agent zone; its DNS record was left in place.`,
+    )
+  }
+  const ctx = zone.zoneId ? { zoneId: zone.zoneId } : undefined
   if (recordId) {
     try {
-      await deleteDnsRecord(recordId)
+      await deleteDnsRecord(recordId, ctx)
       return
     } catch (e) {
       const cfErr = e as CloudflareError
       if (cfErr.status !== 404) throw e
     }
   }
-  const rec = await findRecordByName(agentHostname(agentId))
-  if (rec) await deleteDnsRecord(rec.id)
+  const rec = await findRecordByName(hostname || `${agentId}.${zone.domain}`, ctx)
+  if (rec) await deleteDnsRecord(rec.id, ctx)
 }

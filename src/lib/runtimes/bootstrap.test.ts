@@ -3,8 +3,12 @@ import {
   APT_OPTS_LITERAL,
   BOOTSTRAP_LOG,
   BOOTSTRAP_STATUS,
+  CADDY_DEFAULT_VERSION,
+  DISABLE_DEAD_APT_SOURCES,
   browserInstallStep,
   buildBootstrapFraming,
+  caddyInstallCommands,
+  caddyVersion,
   chromeInstallCommands,
 } from "./bootstrap"
 
@@ -156,19 +160,37 @@ describe("buildBootstrapFraming() — Node version contract", () => {
     expect(script).toContain('"\${cur%%.*}" = "\${NODE_MAJOR_WANTED}"')
   })
 
-  it("still installs caddy when it skips the NodeSource script", () => {
+  it("installs caddy on both branches, after node, not via an apt repo", () => {
     const script = buildBootstrapFraming({ ...opts, minNodeVersion: "24.16.0" }, "")
-    // The skip branch installs caddy alone; the install branch takes both.
-    expect(script).toContain("apt-get $APT_OPTS install -y caddy")
-    expect(script).toContain("apt-get $APT_OPTS install -y nodejs caddy")
-    // The NodeSource setup script is what refreshes apt after the caddy repo
-    // is added, so the skip branch has to do that update itself or `install
-    // caddy` cannot resolve the package on a box without it.
-    const skipBranch = script.slice(
-      script.indexOf("if node_is_wanted"),
-      script.indexOf("apt-get $APT_OPTS install -y caddy"),
+    // Caddy no longer rides along with nodejs — it has its own step after the
+    // if/else, so the skip branch gets it too.
+    expect(script).not.toContain("install -y nodejs caddy")
+    expect(script.indexOf('step "install_caddy"')).toBeGreaterThan(script.indexOf("if node_is_wanted"))
+    expect(script.indexOf('step "install_caddy"')).toBeGreaterThan(script.lastIndexOf('step "install_nodejs"'))
+  })
+
+  // The incident: NodeSource's setup script hit a failing `apt-get update`,
+  // printed an error and exited 0. The NodeSource repo was never added, apt
+  // installed Ubuntu's nodejs 18 with no npm, and the bootstrap died later on
+  // "npm: command not found" — the cause scrolled away.
+  it("refuses to continue when NodeSource did not register its repo", () => {
+    const script = buildBootstrapFraming({ ...opts, minNodeVersion: "24.16.0" }, "")
+    const installBranch = script.slice(
+      script.indexOf("deb.nodesource.com/setup_24.x"),
+      script.indexOf('step "install_caddy"'),
     )
-    expect(skipBranch).toContain("apt-get $APT_OPTS update -y")
+    expect(installBranch).toContain('grep -rqs "deb.nodesource.com" /etc/apt/sources.list.d/')
+    expect(installBranch.indexOf("grep -rqs")).toBeLessThan(
+      installBranch.indexOf("apt-get $APT_OPTS install -y nodejs"),
+    )
+  })
+
+  it("fails on the wrong Node major or a missing npm, whatever branch ran", () => {
+    const script = buildBootstrapFraming({ ...opts, minNodeVersion: "24.16.0" }, "")
+    const check = script.slice(script.indexOf("NODE_MAJOR_HAVE="), script.indexOf('step "install_caddy"'))
+    expect(check).toContain('"${NODE_MAJOR_HAVE}" != "${NODE_MAJOR_WANTED}"')
+    expect(check).toContain("command -v npm")
+    expect(check).toContain("exit 1")
   })
 
   it("refuses a minNodeVersion it cannot derive a major from", () => {
@@ -217,5 +239,87 @@ describe("chromeInstallCommands()", () => {
 describe("buildBootstrapFraming() — apt options", () => {
   it("defines APT_OPTS from the shared literal", () => {
     expect(buildBootstrapFraming(opts, "")).toContain(`APT_OPTS="${APT_OPTS_LITERAL}"`)
+  })
+})
+
+// Caddy's Cloudsmith apt repo has answered 402 since 2026-10-09, and one dead
+// source fails every `apt-get update` — which failed every bootstrap.
+describe("buildBootstrapFraming() — Caddy without Cloudsmith", () => {
+  const script = buildBootstrapFraming({ ...opts, minNodeVersion: "24.16.0" }, "")
+
+  it("never adds the Cloudsmith repository", () => {
+    expect(script).not.toContain("cloudsmith.io")
+    expect(script).not.toMatch(/tee \/etc\/apt\/sources\.list\.d\/caddy/)
+  })
+
+  it("disables a leftover Cloudsmith source before the first apt-get update", () => {
+    // Every box bootstrapped before the outage still lists it; on a re-run
+    // (BYOS) the very first update would fail.
+    expect(script).toContain(DISABLE_DEAD_APT_SOURCES)
+    expect(script.indexOf(DISABLE_DEAD_APT_SOURCES)).toBeLessThan(
+      script.indexOf("apt-get $APT_OPTS update -y"),
+    )
+    // Renamed, not deleted: on a BYOS server the file may be the customer's.
+    expect(DISABLE_DEAD_APT_SOURCES).toContain('mv -f "$f" "$f.disabled-by-atlas"')
+    expect(DISABLE_DEAD_APT_SOURCES).toContain("/etc/apt/sources.list.d/caddy-stable.list")
+  })
+
+  it("installs the pinned release .deb from GitHub, checksum-verified", () => {
+    expect(script).toContain(`CADDY_VERSION='${CADDY_DEFAULT_VERSION}'`)
+    expect(script).toContain("https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}")
+    expect(script).toContain('sha512sum -c --status -')
+    // The default version carries a pinned hash rather than trusting the
+    // release's own checksums file.
+    expect(script).toMatch(/amd64\) CADDY_SHA512='[0-9a-f]{128}'/)
+  })
+
+  it("falls back to the distro caddy only when GitHub cannot be used", () => {
+    const ifIdx = script.indexOf('if [ -n "${CADDY_SHA512}" ]')
+    const elseIdx = script.indexOf("falling back to the distro package")
+    expect(ifIdx).toBeGreaterThan(-1)
+    expect(elseIdx).toBeGreaterThan(ifIdx)
+    expect(script).toContain("install -y caddy")
+  })
+
+  it("never downgrades a caddy that is already new enough", () => {
+    expect(script).toContain('dpkg --compare-versions "${CUR_CADDY}" ge "${CADDY_VERSION}"')
+  })
+
+  it("keeps an existing Caddyfile instead of stopping on a conffile prompt", () => {
+    expect(caddyInstallCommands("$APT_OPTS")).toContain("--force-confold")
+  })
+
+  it("checks an overridden version against its release checksums file", () => {
+    const cmds = caddyInstallCommands("$APT_OPTS", "2.99.0")
+    expect(cmds).toContain("CADDY_VERSION='2.99.0'")
+    expect(cmds).toContain("amd64) CADDY_SHA512='' ;;")
+    expect(cmds).toContain("_checksums.txt")
+  })
+
+  it("rejects a CADDY_VERSION that is not a plain release number", () => {
+    const prev = process.env.CADDY_VERSION
+    try {
+      process.env.CADDY_VERSION = "2.11.4; rm -rf /"
+      expect(() => caddyVersion()).toThrow(/not a plain release number/)
+      process.env.CADDY_VERSION = "2.11.7"
+      expect(caddyVersion()).toBe("2.11.7")
+      delete process.env.CADDY_VERSION
+      expect(caddyVersion()).toBe(CADDY_DEFAULT_VERSION)
+    } finally {
+      if (prev === undefined) delete process.env.CADDY_VERSION
+      else process.env.CADDY_VERSION = prev
+    }
+  })
+})
+
+describe("buildBootstrapFraming() — no origin-cert material", () => {
+  // The cert used to be written here, i.e. into cloud-init user-data, which
+  // anything on the droplet can read back from the metadata service. It is
+  // now installed over SSH at configure time (agent-origin-cert.ts).
+  it("writes nothing under /etc/caddy/cf", () => {
+    const script = buildBootstrapFraming(opts, "")
+    expect(script).not.toContain("/etc/caddy/cf")
+    expect(script).not.toContain("BEGIN")
+    expect(script).not.toContain("sovereignclaw")
   })
 })

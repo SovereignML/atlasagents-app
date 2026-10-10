@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 
-import { openclawRuntime, OPENCLAW_VPS_MIN_NODE } from "./openclaw"
+import { openclawRuntime, OPENCLAW_PINNED_VERSION, OPENCLAW_VPS_MIN_NODE } from "./openclaw"
 
 /**
  * The published `openclaw` package declares `engines.node` as
@@ -120,11 +120,14 @@ describe("OpenClaw bootstrap — version pinning", () => {
     expect(script).not.toContain("openclaw@latest")
   })
 
-  it("falls back to today's behaviour with no pin", () => {
+  // No resolved pin means the code pin, never `latest`: an upstream release
+  // reaches the fleet when we bump OPENCLAW_PINNED_VERSION, not when it ships.
+  it("falls back to the code pin, not latest, with no resolved pin", () => {
     const script = openclawRuntime.renderBootstrap({
       gatewayPort: openclawRuntime.gatewayPort,
       webuiEnabled: false,
     })
-    expect(script).toContain("openclaw@latest")
+    expect(script).toContain(`openclaw@${OPENCLAW_PINNED_VERSION}`)
+    expect(script).not.toContain("openclaw@latest")
   })
 })

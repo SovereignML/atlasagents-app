@@ -225,21 +225,63 @@ New deployments should set `ADMIN_EMAIL` instead.
 
 ---
 
-## Out of scope entirely: `sovereignclaw.xyz`
+## The managed agent zone `sovereignclaw.xyz`
 
-`src/lib/agent-dns.ts` (`CLOUDFLARE_BASE_DOMAIN` default),
-`src/lib/runtimes/bootstrap.ts`, `src/lib/cloudflare.ts`,
-`scripts/cloudflare-bootstrap.ts`
+`src/lib/agent-zones.ts` (`LEGACY_AGENT_DOMAIN`), `src/lib/agent-dns.ts`,
+`src/lib/agent-origin-cert.ts`, `scripts/cloudflare-bootstrap.ts`
 
-The managed agent zone is a **different domain** from the product domain and was
-never `sovereignml.com`. Every running agent has a `*.sovereignclaw.xyz`
-hostname, a Cloudflare DNS record, and a Caddy snippet on its own box
-referencing it.
+The managed agent zone is a **different domain** from the product domain and
+was never `sovereignml.com`. Every running agent has a `*.sovereignclaw.xyz`
+hostname, a Cloudflare DNS record in that zone, and a Caddy site block for it
+on its own box. Customers have those URLs bookmarked and wired into bots.
 
-Moving it is its own project: a new zone, a new origin certificate, a re-render
-of the Caddy snippet on every provisioned box, and a per-agent DNS cutover with
-the old records left resolving throughout. It is unrelated to the rebrand and
-should not be bundled into one.
+**Status: step 1 of the migration shape has shipped — new agents can move to a
+new zone by configuration alone; existing agents stay where they are.**
+`agent-zones.ts` knows two zones: the *agent zone* (`CLOUDFLARE_AGENT_*`) where
+new agents are created once it is configured, and the *legacy zone* (the old
+`CLOUDFLARE_BASE_DOMAIN` / `CLOUDFLARE_ZONE_ID` / `CLOUDFLARE_ORIGIN_CERT_*`)
+which keeps serving, renewing and deleting what it already holds. Which zone an
+existing agent is in is read off its stored hostname, never off configuration.
+The legacy variables keep their exact meaning because `CLOUDFLARE_ZONE_ID` is
+also the fallback for white-label custom hostnames (`cloudflare-saas.ts`).
+
+The origin certificate is installed over SSH when an agent is configured, for
+the zone its hostname is in (`agent-origin-cert.ts`) — no longer baked into the
+bootstrap, i.e. into cloud-init user-data that any process on the droplet can
+read back from the metadata service. That is also what finally gives warm-pool
+agents a cert: the pool never baked one, so they served `tls internal`, which a
+Full (strict) zone answers with a 526.
+
+### Cutover runbook
+
+1. **Own the domain** and put it on Cloudflare (nameservers on Cloudflare,
+   zone active). `dig +short NS <domain>` must show the Cloudflare pair the
+   account uses (`macy` / `johnathan`), not a registrar's parking servers.
+2. In the new zone: **SSL/TLS → Origin Server → Create Certificate** for
+   `*.<domain>` and `<domain>`, 15 years. Keep the PEM and key.
+3. Give `CLOUDFLARE_API_TOKEN` **DNS:Edit** and **Zone Settings:Edit** on the
+   new zone too (a scoped token only reaches the zones it names).
+4. Set `CLOUDFLARE_AGENT_DOMAIN`, `CLOUDFLARE_AGENT_ZONE_ID`,
+   `CLOUDFLARE_AGENT_ORIGIN_CERT_PEM`, `CLOUDFLARE_AGENT_ORIGIN_CERT_KEY`.
+   **Change nothing else** — the legacy variables still serve every existing
+   agent. Then run `node --env-file=.env --import tsx scripts/check-agent-zones.ts`
+   — read-only, prints which zone new agents will use and anything missing.
+5. Run `node --env-file=.env --import tsx scripts/cloudflare-bootstrap.ts`. It
+   now targets the agent zone: Full (strict), Always Use HTTPS, min TLS 1.2,
+   wildcard fallback record.
+6. Restart the app. New agents get `<name>.<domain>`. Warm-pool keys include
+   the zone, so the pool retires its old-zone VMs and bakes replacements on
+   its own within a few refill passes.
+7. Deploy one OpenClaw and one Hermes agent and load both URLs.
+
+**Rollback:** unset the four `CLOUDFLARE_AGENT_*` variables and restart. Agents
+created in the new zone keep serving, but the app can no longer manage their
+DNS or certs — restore the variables before deleting or reprovisioning them.
+
+**Keep `sovereignclaw.xyz` registered** (currently until 2027-04-26) for as
+long as any agent lives in it. Moving existing agents is not implemented and is
+not recommended: it changes URLs customers depend on, and would need a
+per-agent redirect from the old hostname.
 
 ---
 

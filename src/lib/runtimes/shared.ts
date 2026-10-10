@@ -177,9 +177,17 @@ export function createRuntime(spec: RuntimeSpec): RuntimeEngine {
 
   /**
    * Gateway JSON config. Bind mode `loopback` (Caddy on the same host proxies
-   * all external traffic to 127.0.0.1); trustedProxies is 127.0.0.1 so the
-   * gateway honours headers from Caddy. The OpenRouter key is passed via env
-   * (in .env), not in this config.
+   * all external traffic to it); trustedProxies names BOTH loopback addresses
+   * so the gateway honours the forwarded headers from Caddy. The OpenRouter key
+   * is passed via env (in .env), not in this config.
+   *
+   * Both, not just 127.0.0.1: the Caddyfile proxies to `localhost:<port>`, and
+   * Caddy (Go) dials `localhost` as IPv6 `::1` first while the gateway listens
+   * on both. Every openclaw release we install (2026.8.35 onwards) rejects a
+   * request that carries forwarded headers from an untrusted peer
+   * ("proxy_attribution_required"), so with only 127.0.0.1 listed every
+   * proxied request — i.e. every browser visit to the agent URL — got a 403,
+   * while the loopback-direct health check kept passing.
    *
    * Model refs are `<gateway-provider>/<model-id>`: the segment before the
    * FIRST slash selects the gateway's provider (and thus which API key env var
@@ -204,7 +212,7 @@ export function createRuntime(spec: RuntimeSpec): RuntimeEngine {
         port: spec.gatewayPort,
         bind: "loopback",
         auth: { mode: "token" as const, token: args.gatewayToken },
-        trustedProxies: ["127.0.0.1"],
+        trustedProxies: ["127.0.0.1", "::1"],
         controlUi: {
           allowedOrigins,
           dangerouslyDisableDeviceAuth: true,
@@ -409,8 +417,6 @@ ${args.browserDeps === false ? "" : browserInstallStep()}`
         systemUser: spec.systemUser,
         minNodeVersion: spec.minNode,
         gatewayPort: args.gatewayPort,
-        cfOriginCertPem: args.cfOriginCertPem,
-        cfOriginKeyPem: args.cfOriginKeyPem,
         sshPort: args.sshPort,
         manageFirewall: args.manageFirewall,
       },
