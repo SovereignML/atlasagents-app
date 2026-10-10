@@ -31,7 +31,8 @@ import { getRuntime, type RuntimeId } from "@/lib/runtimes"
 import { buildBakeFinalizeScript } from "@/lib/runtimes/finalize"
 import { getVmProviderBySlug } from "@/lib/providers"
 import { encryptSecret } from "@/lib/crypto-secret"
-import { createAgentSubdomain, deleteAgentSubdomain } from "@/lib/agent-dns"
+import { createAgentSubdomain, deleteAgentSubdomain, isAgentDnsEnabled } from "@/lib/agent-dns"
+import { poolKeyFor } from "./warm-pool-key"
 import {
   sshWaitReady,
   sshRun,
@@ -146,15 +147,10 @@ export function getPoolTargets(): PoolTarget[] {
   ]
 }
 
-export function poolKeyFor(t: {
-  providerSlug: string
-  planCode: string
-  regionCode: string
-  runtime: string
-  webuiEnabled: boolean
-}): string {
-  return `${t.providerSlug}|${t.planCode}|${t.regionCode}|${t.runtime}|${t.webuiEnabled ? 1 : 0}`
-}
+// Pool keys (and the bake identity folded into them) live in the pure
+// ./warm-pool-key so their contract is unit-testable; re-exported here for
+// existing importers.
+export { bakeIdentity, poolKeyFor } from "./warm-pool-key"
 
 /**
  * The warm pool is the primary delivery path, so it is ON by default whenever
@@ -177,11 +173,6 @@ function generateRootPassword(): string {
   let out = ""
   for (let i = 0; i < 24; i++) out += alphabet[bytes[i] % alphabet.length]
   return out
-}
-
-/** Platform-zone Cloudflare DNS is only usable when both creds are present. */
-function cloudflareDnsEnabled(): boolean {
-  return Boolean(process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ZONE_ID)
 }
 
 async function resolveProviderId(slug: string): Promise<string | null> {
@@ -338,7 +329,7 @@ async function advanceWarmVm(row: typeof warmVms.$inferSelect): Promise<{
     // and never fail the promotion over a DNS hiccup (claim then mints its own).
     let managedSubdomain: string | null = row.managedSubdomain ?? null
     let cfRecordId: string | null = row.cfRecordId ?? null
-    if (!managedSubdomain && cloudflareDnsEnabled() && ip) {
+    if (!managedSubdomain && isAgentDnsEnabled() && ip) {
       try {
         const generic = `agent-${crypto.randomBytes(4).toString("hex")}`
         const res = await createAgentSubdomain(generic, ip)
@@ -446,7 +437,8 @@ export async function destroyWarmVm(row: typeof warmVms.$inferSelect): Promise<v
   // row's record now belongs to its instance and is dropped, never destroyed).
   if (row.cfRecordId) {
     try {
-      await deleteAgentSubdomain(row.id, row.cfRecordId)
+      // The hostname picks the zone the record lives in.
+      await deleteAgentSubdomain(row.id, row.cfRecordId, row.managedSubdomain)
     } catch {
       // best-effort — a leaked record just points at a dead IP.
     }

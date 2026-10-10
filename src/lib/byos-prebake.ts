@@ -38,7 +38,7 @@ import {
   HERMES_VPS_MIN_NODE,
   buildHermesPrebakeSteps,
 } from "@/lib/runtimes/hermes"
-import { OPENCLAW_VPS_MIN_NODE } from "@/lib/runtimes/openclaw"
+import { OPENCLAW_VERSION, OPENCLAW_VPS_MIN_NODE } from "@/lib/runtimes/openclaw"
 import { buildBakeFinalizeScript } from "@/lib/runtimes/finalize"
 import { npmSpec } from "@/lib/runtime-versions"
 import type { PreflightFacts } from "@/lib/byos-preflight-parse"
@@ -153,7 +153,9 @@ export function prebakeDecision(opts: {
  * deploy simply downloads, exactly as it does today.
  */
 function buildOpenclawCacheStep(pin: string | null): string {
-  const spec = shellEscape(npmSpec("openclaw", pin))
+  // Unresolved falls back to the same code pin the deploy installs — not to
+  // `latest`, which would warm a cache the deploy then misses.
+  const spec = shellEscape(npmSpec("openclaw", pin ?? OPENCLAW_VERSION()))
   return `
 step "cache_openclaw"
 # Download only — deliberately never installed here. See buildOpenclawCacheStep.
@@ -197,7 +199,7 @@ function shellEscape(value: string): string {
 }
 
 export type PrebakeScriptOpts = {
-  /** Resolved pins. Null means unpinned, which degrades to today's behaviour. */
+  /** Resolved pins. Null falls back to the runtime's code pin, as the deploy does. */
   openclawVersion: string | null
   hermesVersion: string | null
   webuiVersion: string | null

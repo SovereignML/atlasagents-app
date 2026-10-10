@@ -145,8 +145,6 @@ export type PackageRegistry = "npm" | "pypi"
 
 export type BootstrapRenderArgs = {
   gatewayPort: number
-  cfOriginCertPem?: string
-  cfOriginKeyPem?: string
   /** When true, the runtime appends its sidecar install steps (pip + venv). */
   webuiEnabled?: boolean
   /**

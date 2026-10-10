@@ -21,7 +21,6 @@ import {
   resolveElevation,
   sshRun,
   sshRunScriptLogged,
-  sshVmHasCloudflareOriginCerts,
   sshInstallCaddyfile,
   sshInstallUserAuthorizedKeys,
   type SshStepResult,
@@ -30,8 +29,6 @@ import {
   sshSystemctlStop,
   sshWaitReady,
   type SshTarget,
-  normalizePem,
-  isValidPem,
 } from "@/lib/ssh"
 import { decryptSecret, encryptSecret } from "@/lib/crypto-secret"
 import { mintRuntimeKey, revokeRuntimeKey } from "@/lib/openrouter-provisioning"
@@ -47,7 +44,11 @@ import { ENV_KEY_CHANGED, buildEnvKeyUpsertScript } from "@/lib/runtimes/env-ups
 import { getRuntime, type RuntimeEngine, type RuntimeId } from "@/lib/runtimes"
 import { FREE_DEMO_TTL_MS } from "@/configs/plans"
 import { isSafeVersion, resolveForRegistry } from "@/lib/runtime-versions"
-import { APT_OPTS_LITERAL, chromeInstallCommands } from "@/lib/runtimes/bootstrap"
+import {
+  APT_OPTS_LITERAL,
+  DISABLE_DEAD_APT_SOURCES,
+  chromeInstallCommands,
+} from "@/lib/runtimes/bootstrap"
 import { PROVISION_EVENT } from "@/lib/provision-events"
 import { getVmProvider, describeVmError, type VmProvider, type VpsProvider } from "@/lib/vm-provider"
 import {
@@ -57,7 +58,14 @@ import {
 } from "@/lib/providers"
 import { routeDeployment, logRoutingDecision, type Candidate } from "@/lib/vps-router"
 import { MAX_FAILOVER_ATTEMPTS } from "@/configs/routing"
-import { createAgentSubdomain, deleteAgentSubdomain } from "@/lib/agent-dns"
+import {
+  createAgentSubdomain,
+  deleteAgentSubdomain,
+  isAgentDnsEnabled,
+  isAgentDnsEnabledFor,
+} from "@/lib/agent-dns"
+import { ensureManagedOriginCert } from "@/lib/agent-origin-cert"
+import { originCertFor, primaryAgentZone, zoneForHostname } from "@/lib/agent-zones"
 import { deleteDnsRecord, getCloudflareTokenForTeam } from "@/lib/cloudflare"
 import { sshTargetForInstance } from "@/lib/ssh-target"
 import { generateMockIp } from "@/lib/instance"
@@ -1463,8 +1471,6 @@ function providerSupportsCloudInit(provider: VmProvider): boolean {
 }
 
 type AcquireOpts = {
-  cfOriginCertPem?: string
-  cfOriginKeyPem?: string
   setStage: (stage: VpsStage) => Promise<void>
 }
 
@@ -1503,8 +1509,6 @@ async function createAndBootVm(
     ? undefined
     : runtime.renderBootstrap({
         gatewayPort: runtime.gatewayPort,
-        cfOriginCertPem: opts.cfOriginCertPem,
-        cfOriginKeyPem: opts.cfOriginKeyPem,
         webuiEnabled: Boolean(instance.webuiEnabled) && Boolean(runtime.sidecar),
         browserDeps: wantsBrowserDeps(instance, runtime),
         ...pins,
@@ -1793,26 +1797,12 @@ async function acquireBootedVm(
 async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
   const runtime = getRuntime(instance.runtime)
 
-  const cfOriginCertPem = process.env.CLOUDFLARE_ORIGIN_CERT_PEM
-    ? normalizePem(process.env.CLOUDFLARE_ORIGIN_CERT_PEM)
-    : undefined
-  const cfOriginKeyPem = process.env.CLOUDFLARE_ORIGIN_CERT_KEY
-    ? normalizePem(process.env.CLOUDFLARE_ORIGIN_CERT_KEY)
-    : undefined
-
-  if (cfOriginCertPem && !isValidPem(cfOriginCertPem)) {
-    throw new Error(
-      "CLOUDFLARE_ORIGIN_CERT_PEM is set but does not contain valid PEM data (missing -----BEGIN header). " +
-        "Check the env var encoding — multi-line PEM values need real newlines, not literal \\n strings.",
-    )
-  }
-  if (cfOriginKeyPem && !isValidPem(cfOriginKeyPem)) {
-    throw new Error(
-      "CLOUDFLARE_ORIGIN_CERT_KEY is set but does not contain valid PEM data (missing -----BEGIN header). " +
-        "Check the env var encoding — multi-line PEM values need real newlines, not literal \\n strings.",
-    )
-  }
-
+  // The Cloudflare origin cert is no longer read here and baked into the
+  // bootstrap (i.e. into cloud-init user-data, which anything on the droplet
+  // can read back from the metadata service). configureRuntimeOverSsh installs
+  // the one for the hostname's own zone, over SSH — see agent-origin-cert.ts.
+  // Still validated up front, so a malformed PEM fails before we pay for a VM.
+  originCertFor(primaryAgentZone())
   let vmId: string | undefined = instance.vmId ?? undefined
   let ipAddress: string | undefined = instance.ipAddress ?? undefined
   let currentStage: VpsStage = "create_vm"
@@ -1821,8 +1811,6 @@ async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
   try {
     /* --- 1+2. Route → create VM → wait for boot, with failover ------ */
     const acquired = await acquireBootedVm(instance, runtime, {
-      cfOriginCertPem,
-      cfOriginKeyPem,
       setStage: async (s) => {
         currentStage = s
         await setProvisionStage(instance.id, s)
@@ -1851,7 +1839,7 @@ async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
         message: `Reusing warm pool pre-assigned URL: ${managedSubdomainForProvision} → ${ipAddress} (already propagated).`,
       })
     }
-    if (!hasPreAssignedUrl && process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ZONE_ID) {
+    if (!hasPreAssignedUrl && isAgentDnsEnabled()) {
       try {
         const { name, recordId } = await createAgentSubdomain(
           instance.id,
@@ -1938,8 +1926,6 @@ async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
       })
       const bootstrapScript = runtime.renderBootstrap({
         gatewayPort: runtime.gatewayPort,
-        cfOriginCertPem,
-        cfOriginKeyPem,
         webuiEnabled: Boolean(instance.webuiEnabled) && Boolean(runtime.sidecar),
       })
       const bootstrapStep = await sshRunScriptLogged(
@@ -2153,15 +2139,26 @@ async function configureRuntimeOverSsh(
   const envContent = renderEnvFile(env)
   const envB64 = Buffer.from(envContent, "utf8").toString("base64")
 
-  const useCfOriginTls =
-    Boolean(managedSubdomain) && (await sshVmHasCloudflareOriginCerts(target))
+  // Install the origin cert for the zone this hostname is in, on every path —
+  // a warm-pool VM never had one baked in, and a box from before a zone move
+  // holds the old zone's. See agent-origin-cert.ts.
+  const originCert = await ensureManagedOriginCert(target, managedSubdomain)
+  const useCfOriginTls = originCert.useCfOriginTls
+  if (originCert.warning) {
+    await logInstanceEvent({
+      instanceId: instance.id,
+      stage: currentStage,
+      level: "warn",
+      message: originCert.warning,
+    })
+  }
   if (managedSubdomain && !useCfOriginTls) {
     await logInstanceEvent({
       instanceId: instance.id,
       stage: currentStage,
       level: "info",
       message:
-        "Managed hostname has no /etc/caddy/cf origin certificate; Caddy will use `tls internal` (self-signed). Cloudflare SSL must be \"Full\" (not \"Full (strict)\") for this to work. For \"Full (strict)\" provision with CLOUDFLARE_ORIGIN_CERT_PEM and CLOUDFLARE_ORIGIN_CERT_KEY.",
+        `Managed hostname has no origin certificate for ${originCert.zone ?? "its zone"}; Caddy will use \`tls internal\` (self-signed). Cloudflare SSL must be "Full" (not "Full (strict)") for this to work. For "Full (strict)", set that zone's origin cert (CLOUDFLARE_ORIGIN_CERT_* for the legacy zone, CLOUDFLARE_AGENT_ORIGIN_CERT_* for the agent zone).`,
     })
   }
 
@@ -2679,26 +2676,12 @@ async function provisionByosBot(instance: Instance): Promise<ProvisionResult> {
     throw new Error("BYOS instance is missing byosHost — cannot connect")
   }
 
-  // Cloudflare origin cert for the managed subdomain (Full (strict) to the BYOS
-  // origin on :443). Optional — without it Caddy serves `tls internal` and the
-  // platform zone must be in "Full" (not strict) mode. Same contract as the
-  // managed VPS path.
-  const cfOriginCertPem = process.env.CLOUDFLARE_ORIGIN_CERT_PEM
-    ? normalizePem(process.env.CLOUDFLARE_ORIGIN_CERT_PEM)
-    : undefined
-  const cfOriginKeyPem = process.env.CLOUDFLARE_ORIGIN_CERT_KEY
-    ? normalizePem(process.env.CLOUDFLARE_ORIGIN_CERT_KEY)
-    : undefined
-  if (cfOriginCertPem && !isValidPem(cfOriginCertPem)) {
-    throw new Error(
-      "CLOUDFLARE_ORIGIN_CERT_PEM is set but does not contain valid PEM data (missing -----BEGIN header).",
-    )
-  }
-  if (cfOriginKeyPem && !isValidPem(cfOriginKeyPem)) {
-    throw new Error(
-      "CLOUDFLARE_ORIGIN_CERT_KEY is set but does not contain valid PEM data (missing -----BEGIN header).",
-    )
-  }
+  // The Cloudflare origin cert for the managed subdomain is installed by
+  // configureRuntimeOverSsh, for the hostname's own zone — same as the managed
+  // VPS path. Without one Caddy serves `tls internal`, which needs the zone in
+  // "Full" rather than "Full (strict)". Validated up front so a malformed PEM
+  // fails before we touch the customer's server.
+  originCertFor(primaryAgentZone())
   const port = instance.byosPort ?? 22
   const username = instance.byosUser ?? "root"
   // Elevation is decided after connect via `resolveElevation` (id -u / sudo -n),
@@ -2754,8 +2737,6 @@ async function provisionByosBot(instance: Instance): Promise<ProvisionResult> {
     const pins = await resolveAndRecordVersions(instance, runtime)
     const bootstrapScript = runtime.renderBootstrap({
       gatewayPort: runtime.gatewayPort,
-      cfOriginCertPem,
-      cfOriginKeyPem,
       webuiEnabled: Boolean(instance.webuiEnabled) && Boolean(runtime.sidecar),
       browserDeps: wantsBrowserDeps(instance, runtime),
       ...pins,
@@ -2791,12 +2772,12 @@ async function provisionByosBot(instance: Instance): Promise<ProvisionResult> {
       message: PROVISION_EVENT.bootstrapComplete,
     })
 
-    /* --- 2b. Managed subdomain (*.sovereignclaw.xyz) pointing at the BYOS   */
+    /* --- 2b. Managed subdomain (in the primary agent zone) pointing at the  */
     /*         server, so the agent gets a real HTTPS hostname instead of a   */
     /*         bare IP. Best-effort: a DNS failure (or an unresolvable/IPv6   */
     /*         host) logs a warning and provisioning continues IP-only.       */
     let managedSubdomainForProvision: string | null = instance.managedSubdomain ?? null
-    if (process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ZONE_ID) {
+    if (isAgentDnsEnabled()) {
       const dnsIp = await resolveIpv4ForDns(host)
       if (!dnsIp) {
         await logInstanceEvent({
@@ -3066,12 +3047,28 @@ export async function deleteBot(instance: Instance): Promise<DeleteResult> {
   await removeUptimeMonitor(instance.id)
 
   if (
+    instance.managedSubdomain &&
     process.env.CLOUDFLARE_API_TOKEN &&
-    process.env.CLOUDFLARE_ZONE_ID &&
-    (instance.managedSubdomain || instance.cfRecordId)
+    !zoneForHostname(instance.managedSubdomain)
+  ) {
+    // Its zone is no longer configured (e.g. CLOUDFLARE_AGENT_* unset after a
+    // cutover was rolled back). Say so rather than leak the record silently.
+    await logInstanceEvent({
+      instanceId: instance.id,
+      level: "warn",
+      stage: "delete",
+      action: "cf_dns_delete",
+      result: "error",
+      message: `Cloudflare DNS record for ${instance.managedSubdomain} left in place: its agent zone is not configured (CLOUDFLARE_AGENT_* / CLOUDFLARE_ZONE_ID).`,
+    })
+  } else if (
+    (instance.managedSubdomain || instance.cfRecordId) &&
+    isAgentDnsEnabledFor(instance.managedSubdomain)
   ) {
     try {
-      await deleteAgentSubdomain(instance.id, instance.cfRecordId)
+      // The hostname picks the zone: after a zone move this agent's record is
+      // still in whichever zone it was created in.
+      await deleteAgentSubdomain(instance.id, instance.cfRecordId, instance.managedSubdomain)
       await db
         .update(instances)
         .set({ managedSubdomain: null, cfRecordId: null })
@@ -3336,6 +3333,10 @@ export async function deleteBot(instance: Instance): Promise<DeleteResult> {
 function buildToolDepsScript(tools: AgentTool[], runtimeId: RuntimeId): string {
   const steps: string[] = []
   if (tools.some((t) => t.requiresChromium)) {
+    // Every box bootstrapped before 2026-10-09 lists Caddy's Cloudsmith repo,
+    // which now answers 402 — and one dead source fails the whole
+    // `apt-get update` below. See DISABLE_DEAD_APT_SOURCES.
+    steps.push(`echo "=== apt_sources ==="\n${DISABLE_DEAD_APT_SOURCES}`)
     // Shared with the bootstrap rather than hand-copied. The copy that used to
     // live here carried only `Acquire::Retries` — no `DPkg::Lock::Timeout` —
     // so enabling the browser tool on an already-running box could fail
@@ -3859,9 +3860,10 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
     // Caddy runs graceful reload and keeps serving on a bad config.
     const webuiEnabled =
       Boolean(instance.webuiEnabled) && Boolean(runtime.sidecar)
-    const useCfOriginTls =
-      Boolean(instance.managedSubdomain) &&
-      (await sshVmHasCloudflareOriginCerts(target))
+    // Same cert handling as first provision: this is also how a box that was
+    // delivered without one (the warm pool, before this fix) gets upgraded to
+    // Full (strict) the next time anything reprovisions it.
+    const { useCfOriginTls } = await ensureManagedOriginCert(target, instance.managedSubdomain)
     const caddyContent = runtime.renderCaddyfile({
       domain: instance.domain,
       managedSubdomain: instance.managedSubdomain,
@@ -3999,7 +4001,7 @@ export async function retryProvisionBot(instance: Instance): Promise<void> {
   }
   if (instance.cfRecordId || instance.managedSubdomain) {
     try {
-      await deleteAgentSubdomain(instance.id, instance.cfRecordId)
+      await deleteAgentSubdomain(instance.id, instance.cfRecordId, instance.managedSubdomain)
     } catch {
       /* best-effort — the DNS upsert on the next run reconciles this */
     }

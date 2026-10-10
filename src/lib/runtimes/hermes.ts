@@ -26,8 +26,22 @@ import {
  * Docs: https://hermes-agent.nousresearch.com/docs
  */
 
-/** Resolve at call time so `HERMES_VERSION` env can override "latest". */
-export const HERMES_VERSION = () => process.env.HERMES_VERSION || "latest"
+/**
+ * The hermes-agent release new boxes install.
+ *
+ * Not one behind latest, unlike the other pins: 0.19.0 IS the latest release
+ * and has been since 2026-07-20, so every Hermes agent provisioned in the last
+ * three months runs it. Pinning 0.18.2 would make new agents older than the
+ * existing fleet for no stability gain, and our init script (`setup --quick`,
+ * `config check`, `doctor --fix`) has only ever run against 0.19.0. When 0.20
+ * ships, this stays put until it has soaked — see docs/RUNTIMES.md.
+ *
+ * `HERMES_VERSION` overrides it (a version, or `latest`).
+ */
+export const HERMES_PINNED_VERSION = "0.19.0"
+
+/** Resolve at call time so `HERMES_VERSION` env can override the pin. */
+export const HERMES_VERSION = () => process.env.HERMES_VERSION || HERMES_PINNED_VERSION
 
 /**
  * Minimum Node on a Hermes VPS. Hermes itself is Python — this floor exists
@@ -109,7 +123,13 @@ const HERMES_ENV_PATH = `${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}/.env`
  */
 export const OPEN_WEBUI_SERVICE_NAME = "open-webui"
 export const OPEN_WEBUI_PORT = 8080
-export const OPEN_WEBUI_VERSION = () => process.env.OPEN_WEBUI_VERSION || "latest"
+/**
+ * The Open WebUI release new Hermes boxes install: one behind PyPI's latest
+ * (0.11.4 at the time of pinning), which was a large feature release. Bump on
+ * purpose after a test deploy. `OPEN_WEBUI_VERSION` overrides it.
+ */
+export const OPEN_WEBUI_PINNED_VERSION = "0.11.3"
+export const OPEN_WEBUI_VERSION = () => process.env.OPEN_WEBUI_VERSION || OPEN_WEBUI_PINNED_VERSION
 const OPEN_WEBUI_INSTALL_DIR = "/opt/open-webui"
 const OPEN_WEBUI_VENV = "/opt/open-webui/venv"
 const OPEN_WEBUI_BIN = "/opt/open-webui/venv/bin/open-webui"
@@ -117,6 +137,12 @@ const OPEN_WEBUI_SYSTEM_USER = "open-webui"
 const OPEN_WEBUI_DATA_DIR = "/opt/open-webui/data"
 const OPEN_WEBUI_PYPI_DIST = "open-webui"
 const OPEN_WEBUI_ENV_PATH = `${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}/open-webui.env`
+
+/**
+ * PyTorch's CPU-only wheel index. Open WebUI's torch comes from here instead of
+ * PyPI's CUDA build — see `py_install_cpu_torch` in buildPyInstallPrelude.
+ */
+export const TORCH_CPU_INDEX_URL = "https://download.pytorch.org/whl/cpu"
 
 function openWebUiPipSpec(pin?: string): string {
   return pypiSpec(OPEN_WEBUI_PYPI_DIST, pin ?? OPEN_WEBUI_VERSION())
@@ -307,6 +333,22 @@ py_install() {
   done
   return 1
 }
+
+# py_install_cpu_torch <venv-path> <pkg-spec> <cache-dir>
+# Open WebUI pulls in torch (via sentence-transformers), and on Linux PyPI's
+# torch is the CUDA build: ~3.2GB of GPU libraries (cuDNN, cuBLAS, NCCL,
+# triton...) on a box with no GPU, for an Open WebUI that we point at the
+# OpenAI engine for embeddings and speech-to-text anyway. Ask for the CPU build
+# first, the way Open WebUI's own image does; if the PyTorch index cannot be
+# reached, fall back to the default index — the old, much larger install —
+# rather than fail the deploy over a download optimisation.
+py_install_cpu_torch() {
+  if UV_TORCH_BACKEND=cpu PIP_EXTRA_INDEX_URL=${bashSingleQuote(TORCH_CPU_INDEX_URL)} py_install "$@"; then
+    return 0
+  fi
+  echo "=== CPU-only torch install failed — retrying with the default (CUDA) torch ==="
+  py_install "$@"
+}
 `
 }
 
@@ -379,7 +421,7 @@ chown -R ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)}:${bashSingleQuote(OPEN_WEBUI
 step "install_pkgs_parallel"
 py_install ${bashSingleQuote(HERMES_VENV)} "$RUNTIME_PKG_SPEC" /var/tmp/py-cache-hermes > /var/log/py-hermes.log 2>&1 &
 HPID=$!
-py_install ${bashSingleQuote(OPEN_WEBUI_VENV)} "$OPEN_WEBUI_PKG_SPEC" /var/tmp/py-cache-owui > /var/log/py-owui.log 2>&1 &
+py_install_cpu_torch ${bashSingleQuote(OPEN_WEBUI_VENV)} "$OPEN_WEBUI_PKG_SPEC" /var/tmp/py-cache-owui > /var/log/py-owui.log 2>&1 &
 OPID=$!
 HRC=0; ORC=0
 wait "$HPID" || HRC=$?
@@ -727,8 +769,6 @@ WantedBy=multi-user.target
         systemUser: HERMES_SYSTEM_USER,
         minNodeVersion: HERMES_VPS_MIN_NODE,
         gatewayPort: args.gatewayPort,
-        cfOriginCertPem: args.cfOriginCertPem,
-        cfOriginKeyPem: args.cfOriginKeyPem,
         sshPort: args.sshPort,
         manageFirewall: args.manageFirewall,
       },

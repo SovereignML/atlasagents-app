@@ -4,11 +4,14 @@
  * The framing handles everything common across runtimes:
  *   - status file + log file + failure trap
  *   - apt update + base build deps
- *   - Caddy + Node.js repositories
- *   - Node install (major derived from the runtime's own floor) + verification
+ *   - Node.js (NodeSource, major derived from the runtime's own floor) + verification
+ *   - Caddy (pinned release .deb, not an apt repository — see caddyInstallCommands)
  *   - dedicated system user + install dir + swap file
- *   - optional Cloudflare wildcard origin-cert snippet
  *   - ufw firewall
+ *
+ * The Cloudflare origin certificate is NOT installed here any more: it goes on
+ * over SSH when the agent is configured, for the zone its hostname is actually
+ * in (src/lib/agent-origin-cert.ts).
  *
  * Each runtime injects its own install steps (npm install for OpenClaw, pip+venv
  * for Hermes) via `runtimeInstallSteps`. These run after swap is enabled (so
@@ -41,10 +44,8 @@ export type BootstrapFramingOpts = {
   extraAccounts?: SystemAccount[]
   /** Minimum Node version required; verify_node step fails if not satisfied. */
   minNodeVersion: string
-  /** Gateway port — baked into the Cloudflare wildcard Caddy snippet. */
+  /** Gateway port the runtime listens on (loopback; Caddy fronts it). */
   gatewayPort: number
-  cfOriginCertPem?: string
-  cfOriginKeyPem?: string
   /** Port sshd listens on; the firewall opens this rather than a hardcoded 22. */
   sshPort?: number
   /** False on BYOS — add allow-rules but never turn the firewall on. */
@@ -113,6 +114,124 @@ export const APT_OPTS_LITERAL =
   "-o Acquire::Retries=3 -o Acquire::http::Timeout=120 -o DPkg::Lock::Timeout=120"
 
 /**
+ * Apt sources that are known to be dead and must not be left in place.
+ *
+ * Caddy's Cloudsmith repository (dl.cloudsmith.io/public/caddy/stable) has
+ * answered every index request with `402 Payment Required` since 2026-10-09
+ * 05:58 UTC — the project ran through its bandwidth quota
+ * (caddyserver/dist#142). One failing source makes `apt-get update` exit
+ * non-zero, so while that file exists nothing on the box can apt-get anything:
+ * not this bootstrap, not the browser tool's Chrome install, not the customer.
+ *
+ * Every box we bootstrapped before that date carries the file — managed VPSes
+ * and BYOS servers alike — so this runs before the first `apt-get update` of
+ * the bootstrap and of every later apt script we send. It renames rather than
+ * deletes, because on a BYOS server the file may predate us, and apt ignores
+ * any name that does not end in .list or .sources.
+ */
+export const DISABLE_DEAD_APT_SOURCES = `for f in /etc/apt/sources.list.d/caddy-stable.list /etc/apt/sources.list.d/caddy-stable.sources; do
+  if [ -f "$f" ]; then
+    mv -f "$f" "$f.disabled-by-atlas"
+    echo "disabled $f — Caddy's Cloudsmith apt repo answers 402 (caddyserver/dist#142)"
+  fi
+done`
+
+/**
+ * The Caddy release every box gets. Override with CADDY_VERSION.
+ *
+ * Pinned rather than "whatever the repository serves", for the same reason the
+ * runtimes are: an upstream release should reach the fleet when we choose, not
+ * the moment it is published. 2.11.4 rather than one-behind-latest 2.11.6
+ * because 2.11.6 shipped a crash when proxying over HTTP/2 and cut SSE streams
+ * off after 60s — both fixed in 2.11.7 — and every agent streams its chat
+ * through Caddy. 2.11.4 is also what the bulk of the running fleet already
+ * got from the old repository between June and October.
+ */
+export const CADDY_DEFAULT_VERSION = "2.11.4"
+
+/**
+ * SHA-512 of the official release .debs for CADDY_DEFAULT_VERSION, copied from
+ * that release's caddy_<v>_checksums.txt. Pinning the hash here, not just the
+ * version, means a swapped release asset fails verification instead of being
+ * installed as root on every box. An overridden version has no entry and is
+ * checked against its release's published checksums file instead.
+ */
+const CADDY_DEB_SHA512: Record<string, Record<string, string>> = {
+  "2.11.4": {
+    amd64:
+      "1c6f5404f3622e46d401d81f4af59677d46b886229c6694d60fd936b87c72d3bb5d1fcf42b55c8d555769fa75acf434ab618fc7e0df2c79cf8512ee580d38d06",
+    arm64:
+      "c43c62b7b583b31c682b3c3e1a31cf03759fbab01dcb0fc7d7fc3a5ce1bef43403583e26133920634a730a9fe31dae1386af4d3f9f3fc19fcc2c29ebf19de235",
+  },
+}
+
+/** Same character set the runtime pins allow (runtime-versions.ts), since this lands in a shell word. */
+const CADDY_VERSION_RE = /^[0-9]+(\.[0-9]+){1,3}$/
+
+export function caddyVersion(): string {
+  const v = process.env.CADDY_VERSION?.trim()
+  if (!v) return CADDY_DEFAULT_VERSION
+  if (!CADDY_VERSION_RE.test(v)) {
+    throw new Error(`CADDY_VERSION "${v}" is not a plain release number like "${CADDY_DEFAULT_VERSION}".`)
+  }
+  return v
+}
+
+/**
+ * Install Caddy from its own GitHub release instead of an apt repository.
+ *
+ * The bootstrap used to add Caddy's Cloudsmith repo and `apt-get install
+ * caddy`. When that repo started answering 402, the NodeSource setup script's
+ * own `apt-get update` failed, it printed an error but exited 0, the NodeSource
+ * repo was never added, and apt quietly installed Ubuntu's nodejs 18 (no npm)
+ * and Ubuntu's caddy 2.6.2 instead. The bootstrap then died on `npm -v` with
+ * exit 127 — every OpenClaw and Hermes deploy, cold, warm-pool and BYOS.
+ *
+ * The release .deb is the same package the repo served (same unit, same
+ * `caddy` user from its postinst). It is verified against a pinned SHA-512
+ * before install. Only if GitHub cannot be reached does it fall back to the
+ * distro's own caddy (2.6.2 on Ubuntu 24.04 / Debian 12), which every
+ * Caddyfile we render has been validated against; a slightly older proxy
+ * beats a failed deploy.
+ *
+ * Never downgrades: a box that already runs this version or newer (e.g. a
+ * BYOS server that got 2.11.7 from the old repo) keeps it. confold keeps an
+ * existing /etc/caddy/Caddyfile — by then it is ours, and the deploy rewrites
+ * it anyway — rather than stopping on a conffile prompt nobody can answer.
+ */
+export function caddyInstallCommands(aptOpts: string, version: string = caddyVersion()): string {
+  const hashes = CADDY_DEB_SHA512[version] ?? {}
+  return `CADDY_VERSION='${version}'
+CADDY_ARCH="$(dpkg --print-architecture)"
+CUR_CADDY="$(dpkg-query -W -f='\${Version}' caddy 2>/dev/null || true)"
+if [ -n "\${CUR_CADDY}" ] && command -v caddy >/dev/null 2>&1 && dpkg --compare-versions "\${CUR_CADDY}" ge "\${CADDY_VERSION}"; then
+  echo "caddy \${CUR_CADDY} already installed (>= \${CADDY_VERSION}) — keeping it"
+else
+  case "\${CADDY_ARCH}" in
+    amd64) CADDY_SHA512='${hashes.amd64 ?? ""}' ;;
+    arm64) CADDY_SHA512='${hashes.arm64 ?? ""}' ;;
+    *) CADDY_SHA512='' ;;
+  esac
+  CADDY_REL="https://github.com/caddyserver/caddy/releases/download/v\${CADDY_VERSION}"
+  CADDY_DEB_NAME="caddy_\${CADDY_VERSION}_linux_\${CADDY_ARCH}.deb"
+  CADDY_DEB="/tmp/\${CADDY_DEB_NAME}"
+  if [ -z "\${CADDY_SHA512}" ]; then
+    CADDY_SHA512="$(curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors "\${CADDY_REL}/caddy_\${CADDY_VERSION}_checksums.txt" 2>/dev/null | awk -v f="\${CADDY_DEB_NAME}" '$2 == f { print $1 }' || true)"
+  fi
+  if [ -n "\${CADDY_SHA512}" ] \\
+    && curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o "\${CADDY_DEB}" "\${CADDY_REL}/\${CADDY_DEB_NAME}" \\
+    && echo "\${CADDY_SHA512}  \${CADDY_DEB}" | sha512sum -c --status -; then
+    apt-get ${aptOpts} -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y "\${CADDY_DEB}"
+  else
+    echo "WARNING: could not download and verify caddy \${CADDY_VERSION} from GitHub — falling back to the distro package" >&2
+    apt-get ${aptOpts} -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y caddy
+  fi
+  rm -f "\${CADDY_DEB}"
+fi
+caddy version`
+}
+
+/**
  * The Google Chrome install, as bare commands.
  *
  * `aptOpts` is the shell text used for apt flags: inside the bootstrap framing
@@ -145,9 +264,8 @@ ${chromeInstallCommands("$APT_OPTS")}
  * idempotent steps — with every runtime's system account created up front and
  * a payload of install steps that are worth doing before the choice is made.
  *
- * Deliberately no Cloudflare origin-cert snippet: that snippet bakes in a
- * single `gatewayPort`, and at connect time we do not know which runtime's
- * port applies. The deploy writes it, which is one small file write.
+ * No Cloudflare origin cert here (nor in any bootstrap): the deploy installs
+ * the one matching the agent's hostname over SSH.
  *
  * This script is safe to run again. The deploy re-runs the full bootstrap
  * regardless (see plan 007 W8) and relies on every step here no-opping.
@@ -169,7 +287,7 @@ export function buildPrereqScript(opts: {
       systemUser: primary.systemUser,
       extraAccounts: rest,
       minNodeVersion: opts.minNodeVersion,
-      // Unused without cf cert PEMs, which a prebake never passes.
+      // No runtime is chosen yet, so there is no gateway to point at.
       gatewayPort: 0,
       sshPort: opts.sshPort,
       manageFirewall: opts.manageFirewall,
@@ -208,29 +326,6 @@ mkdir -p ${shellEscape(a.installDir)}
 chown -R ${shellEscape(a.systemUser)}:${shellEscape(a.systemUser)} ${shellEscape(a.installDir)}`,
     )
     .join("\n")
-
-  let cfBlock = ""
-  if (opts.cfOriginCertPem && opts.cfOriginKeyPem) {
-    const certB64 = Buffer.from(opts.cfOriginCertPem, "utf8").toString("base64")
-    const keyB64 = Buffer.from(opts.cfOriginKeyPem, "utf8").toString("base64")
-    cfBlock = `
-step "cf_origin_cert"
-install -d -m 0750 -o caddy -g caddy /etc/caddy/cf
-echo '${certB64}' | base64 -d > /etc/caddy/cf/origin.pem
-echo '${keyB64}' | base64 -d > /etc/caddy/cf/origin.key
-chown caddy:caddy /etc/caddy/cf/origin.pem /etc/caddy/cf/origin.key
-chmod 0640 /etc/caddy/cf/origin.pem
-chmod 0600 /etc/caddy/cf/origin.key
-
-install -d -m 0755 /etc/caddy/snippets
-cat > /etc/caddy/snippets/sovereignclaw.caddy <<'CFSNIP'
-*.sovereignclaw.xyz {
-  tls /etc/caddy/cf/origin.pem /etc/caddy/cf/origin.key
-  reverse_proxy 127.0.0.1:${opts.gatewayPort}
-}
-CFSNIP
-`
-  }
 
   return `#!/bin/bash
 set -euo pipefail
@@ -282,15 +377,14 @@ APT_OPTS="${APT_OPTS_LITERAL}"
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
+step "apt_sources"
+${DISABLE_DEAD_APT_SOURCES}
+
 step "apt_update"
 apt-get $APT_OPTS update -y
 
 step "build_deps"
-apt-get $APT_OPTS install -y ca-certificates curl gnupg ufw git debian-keyring debian-archive-keyring apt-transport-https
-
-step "caddy_repo"
-curl --retry 5 --retry-delay 3 -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl --retry 5 --retry-delay 3 -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
+apt-get $APT_OPTS install -y ca-certificates curl gnupg ufw git
 
 step "nodejs_repo"
 export RUNTIME_MIN_NODE=${shellEscape(opts.minNodeVersion)}
@@ -322,20 +416,31 @@ node_is_wanted() {
 
 if node_is_wanted; then
   echo "node $(node -v) already satisfies \${RUNTIME_MIN_NODE} (major \${NODE_MAJOR_WANTED}) — skipping NodeSource"
-  # The NodeSource setup script runs its own \`apt-get update\`, and that is
-  # what makes the caddy repo added in the previous step visible to apt. When
-  # we skip the script we must do that update ourselves, or installing caddy
-  # on a box that does not already have it fails with "Unable to locate
-  # package caddy".
-  apt-get $APT_OPTS update -y
-  step "install_nodejs_caddy"
-  apt-get $APT_OPTS install -y caddy
+  step "install_nodejs"
 else
   curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors https://deb.nodesource.com/setup_${nodeMajor}.x | bash -
-  step "install_nodejs_caddy"
-  apt-get $APT_OPTS install -y nodejs caddy
+  # The NodeSource script reports some failures — a failing \`apt-get update\`
+  # among them — and still exits 0. Unchecked, apt then installs the distro's
+  # nodejs (18, with no npm, on Ubuntu 24.04) and the bootstrap dies much later
+  # on "npm: command not found". Refuse here, where the cause is still on screen.
+  if ! grep -rqs "deb.nodesource.com" /etc/apt/sources.list.d/; then
+    echo "NodeSource did not register its apt repository (see its output above) — refusing to install the distro nodejs" >&2
+    exit 1
+  fi
+  step "install_nodejs"
+  apt-get $APT_OPTS install -y nodejs
+fi
+# Whatever path got us here, the box must now run the major we asked for, with
+# npm. A distro nodejs that slipped through would fail this, not \`npm install\`.
+NODE_MAJOR_HAVE="$(node -v 2>/dev/null | sed 's/^v//; s/\\..*//')"
+if [ "\${NODE_MAJOR_HAVE}" != "\${NODE_MAJOR_WANTED}" ] || ! command -v npm >/dev/null 2>&1; then
+  echo "expected Node \${NODE_MAJOR_WANTED}.x with npm; found node $(node -v 2>/dev/null || echo none), npm $(command -v npm || echo missing)" >&2
+  exit 1
 fi
 node -v && npm -v
+
+step "install_caddy"
+${caddyInstallCommands("$APT_OPTS")}
 
 step "verify_node"
 node <<'VERIFYNODE'
@@ -386,8 +491,6 @@ fi
 
 ${runtimeInstallSteps}
 
-step "caddy_cf_snippets"
-${cfBlock}
 step "firewall"
 # Open the port sshd is ACTUALLY on. This was hardcoded to 22, which on a BYOS
 # server listening elsewhere meant enabling a firewall that blocked SSH — we

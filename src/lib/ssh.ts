@@ -2,6 +2,7 @@ import { NodeSSH } from "node-ssh"
 import { db, instances, eq } from "@/db"
 import { BOOTSTRAP_LOG, BOOTSTRAP_STATUS } from "./runtimes/bootstrap"
 import { buildPipedBashCommand, decideElevation } from "./ssh-elevate"
+import { normalizePem, isValidPem } from "./pem"
 
 export type SshTarget = {
   host: string
@@ -45,22 +46,9 @@ function loadPrivateKey(): string {
   return normalizePem(raw)
 }
 
-/**
- * Normalize PEM-encoded strings from environment variables. Many secret
- * stores / CI systems encode newlines as literal two-character `\n`
- * sequences; PEM parsing requires real newline characters.
- */
-export function normalizePem(raw: string): string {
-  return raw.includes("\\n") ? raw.replace(/\\n/g, "\n") : raw
-}
-
-/**
- * Returns true if `value` looks like it contains at least one PEM block
- * (e.g. `-----BEGIN CERTIFICATE-----`).
- */
-export function isValidPem(value: string): boolean {
-  return /-----BEGIN [A-Z0-9 ]+-----/.test(value)
-}
+// Moved to the dependency-free ./pem so pure modules can use them; re-exported
+// here because existing callers import them from ssh.
+export { normalizePem, isValidPem }
 
 async function connect(target: SshTarget): Promise<NodeSSH> {
   if (target.instanceId) {
@@ -267,8 +255,9 @@ async function execWithTimeout(
   command: string,
   timeoutMs: number | undefined,
   label: string,
+  stdin?: string,
 ): Promise<SshRunResult> {
-  const exec = ssh.execCommand(command).then((r) => ({
+  const exec = ssh.execCommand(command, stdin === undefined ? {} : { stdin }).then((r) => ({
     stdout: r.stdout,
     stderr: r.stderr,
     code: r.code ?? null,
@@ -327,6 +316,56 @@ export async function sshRunScript(
       command,
       opts.timeoutMs ?? DEFAULT_SSH_CMD_TIMEOUT_MS,
       "ssh script",
+    )
+  } finally {
+    ssh.dispose()
+  }
+}
+
+/**
+ * Install a Cloudflare Origin CA certificate + key at the paths every rendered
+ * Caddyfile references for a managed hostname (`/etc/caddy/cf/origin.{pem,key}`),
+ * which is what lets the zone run in Full (strict).
+ *
+ * The PEMs travel on stdin and never in a command line. A command line is
+ * readable by every local user through /proc for as long as it runs, and this
+ * box runs the customer's agent — and whatever the agent runs — as another
+ * user. The script itself (no secrets in it) is the argument instead, which
+ * also keeps stdin free under `sudo -n` on an elevated BYOS target.
+ *
+ * Both files are written to temp names and renamed into place, so a Caddy
+ * reload can never read half a key. Owned by caddy, unreadable to anyone else.
+ */
+export async function sshInstallCloudflareOriginCert(
+  target: SshTarget,
+  certPem: string,
+  keyPem: string,
+): Promise<SshRunResult> {
+  const script = `set -euo pipefail
+IFS= read -r CERT_B64
+IFS= read -r KEY_B64
+install -d -m 0750 -o caddy -g caddy /etc/caddy/cf
+umask 077
+printf '%s' "$CERT_B64" | base64 -d > /etc/caddy/cf/origin.pem.tmp
+printf '%s' "$KEY_B64" | base64 -d > /etc/caddy/cf/origin.key.tmp
+grep -q 'BEGIN' /etc/caddy/cf/origin.pem.tmp
+grep -q 'BEGIN' /etc/caddy/cf/origin.key.tmp
+chown caddy:caddy /etc/caddy/cf/origin.pem.tmp /etc/caddy/cf/origin.key.tmp
+chmod 0640 /etc/caddy/cf/origin.pem.tmp
+chmod 0600 /etc/caddy/cf/origin.key.tmp
+mv -f /etc/caddy/cf/origin.pem.tmp /etc/caddy/cf/origin.pem
+mv -f /etc/caddy/cf/origin.key.tmp /etc/caddy/cf/origin.key
+echo installed`
+  const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64")
+  const command = `${target.elevate ? "sudo -n " : ""}bash -c ${shellEscape(script)}`
+  const ssh = await connectWithRetry(target)
+  try {
+    return await execWithTimeout(
+      ssh,
+      command,
+      DEFAULT_SSH_CMD_TIMEOUT_MS,
+      "ssh install origin cert",
+      `${b64(certPem)}\n${b64(keyPem)}\n`,
     )
   } finally {
     ssh.dispose()

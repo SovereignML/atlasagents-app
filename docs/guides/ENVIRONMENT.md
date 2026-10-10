@@ -184,9 +184,10 @@ Ed25519 keypair used to SSH into provisioned VMs.
 | Variable | Required? | What it does | How to obtain / generate |
 |----------|-----------|--------------|--------------------------|
 | `BOT_RUNTIME_IMAGE` | Optional | Docker image for the bot runtime (built by `.github/workflows/bot-runtime.yml`). | Default `ghcr.io/sovereignml/sovereign-bot-runtime:latest`. |
-| `OPENCLAW_VERSION` | Optional | Pin the OpenClaw runtime tag so VPS bootstrap doesn't pull breaking `latest` changes. | Pin to a tested semver. |
-| `HERMES_VERSION` | Optional | Pin the Hermes runtime tag. | Tested semver. |
-| `OPEN_WEBUI_VERSION` | Optional | Pin the Open WebUI (Hermes chat UI) tag. | Tested semver. |
+| `OPENCLAW_VERSION` | Optional | Override the OpenClaw version new boxes install. Unset = the code pin (`OPENCLAW_PINNED_VERSION`, one behind upstream). `latest` tracks upstream. | A tested version — or leave unset. |
+| `HERMES_VERSION` | Optional | Override the hermes-agent version. Unset = `HERMES_PINNED_VERSION`. | Same. |
+| `OPEN_WEBUI_VERSION` | Optional | Override the Open WebUI (Hermes chat UI) version. Unset = `OPEN_WEBUI_PINNED_VERSION`. | Same. |
+| `CADDY_VERSION` | Optional | Override the Caddy release installed from GitHub (not an apt repo). Unset = `CADDY_DEFAULT_VERSION`. A plain release number, e.g. `2.11.7`. | Same. |
 | `RUNTIME_MIN_NODE` | Optional | Minimum Node version enforced on runtime images. | Code default. |
 
 ## 18a. Bot Factory — Gateway, orchestrator, Telegram dev tunnel
@@ -201,13 +202,17 @@ Ed25519 keypair used to SSH into provisioned VMs.
 
 | Variable | Required? | What it does | How to obtain / generate |
 |----------|-----------|--------------|--------------------------|
-| `CLOUDFLARE_API_TOKEN` | Feature | Automatic proxied `A` records for managed agent hostnames + custom-hostname management. | Cloudflare token with **Zone:DNS:Edit** + **Zone:SSL:Edit** (add SSL/Certificates:Edit for SaaS) on the base zone only. |
-| `CLOUDFLARE_ZONE_ID` | Feature | Zone id for managed DNS. | Cloudflare dashboard → your zone → Overview. |
+| `CLOUDFLARE_API_TOKEN` | Feature | Automatic proxied `A` records for managed agent hostnames + custom-hostname management. | Cloudflare token with **Zone:DNS:Edit** + **Zone:SSL:Edit** (add SSL/Certificates:Edit for SaaS) on **every agent zone** (legacy and new). |
+| `CLOUDFLARE_ZONE_ID` | Feature | Zone id of the **legacy agent zone** (`sovereignclaw.xyz`), which keeps serving every agent created in it after a zone move. Also the fallback for `CLOUDFLARE_SAAS_ZONE_ID` — do not repoint it at a new zone. | Cloudflare dashboard → your zone → Overview. |
 | `CLOUDFLARE_SAAS_ZONE_ID` | Feature | SaaS-enabled zone for white-label custom hostnames. Falls back to `CLOUDFLARE_ZONE_ID`. | Your Cloudflare-for-SaaS zone id. |
-| `CLOUDFLARE_BASE_DOMAIN` | Feature | Base domain agent subdomains hang off. | e.g. `atlasagents.dev`. |
+| `CLOUDFLARE_BASE_DOMAIN` | Feature | Domain of the legacy agent zone. Defaults to `sovereignclaw.xyz`. | Leave unset. |
 | `CLOUDFLARE_FALLBACK_IP` | Optional | Wildcard landing host IP (used by `scripts/cloudflare-bootstrap.ts`). | Your app server IP. |
-| `CLOUDFLARE_ORIGIN_CERT_PEM` | Optional | Origin CA cert (PEM) installed on VMs for end-to-end TLS (enables Cloudflare **Full (strict)**). | Cloudflare → SSL/TLS → Origin Server → Create Certificate. |
+| `CLOUDFLARE_ORIGIN_CERT_PEM` | Optional | Origin CA cert (PEM) for `*.<legacy zone>`, installed over SSH on each box when an agent is configured (enables Cloudflare **Full (strict)**). | Cloudflare → the legacy zone → SSL/TLS → Origin Server → Create Certificate. |
 | `CLOUDFLARE_ORIGIN_CERT_KEY` | Optional | Matching origin CA private key (PEM). | Same as above. |
+| `CLOUDFLARE_AGENT_DOMAIN` | Optional | Domain of the **new agent zone**. With `CLOUDFLARE_AGENT_ZONE_ID` also set, new agents get `<name>.<this domain>`; existing agents keep their hostnames. Unset = no zone move. | A domain you own, on Cloudflare (e.g. `atlasagents.xyz`). |
+| `CLOUDFLARE_AGENT_ZONE_ID` | Optional | Zone id of the new agent zone. Required together with `CLOUDFLARE_AGENT_DOMAIN`. | Cloudflare dashboard → the new zone → Overview. |
+| `CLOUDFLARE_AGENT_ORIGIN_CERT_PEM` | Optional | Origin CA cert for `*.<new agent domain>` (needed for Full (strict) there). | Cloudflare → the **new** zone → SSL/TLS → Origin Server → Create Certificate. |
+| `CLOUDFLARE_AGENT_ORIGIN_CERT_KEY` | Optional | Matching private key. | Same as above. |
 
 ## 20. Cloudflare Turnstile (bot protection)
 

@@ -158,7 +158,7 @@ This is the heavy lifter. It acquires a per-instance advisory lock (Postgres `pg
 **VPS deployment** (dedicated VM with OpenClaw):
 1. **Create VM** — Calls Linode API to spin up a new server (optionally from a golden image)
 2. **Wait for boot** — Polls until the VM has an IP and is running
-3. **DNS** — Creates a Cloudflare A record pointing `{adjective}-{noun}.sovereignclaw.xyz` to the VM IP
+3. **DNS** — Creates a Cloudflare A record pointing `{adjective}-{noun}.<agent zone>` (default `sovereignclaw.xyz`) to the VM IP
 4. **Wait for SSH** — Polls until SSH is reachable
 5. **Bootstrap** — Waits for cloud-init to install dependencies (Node.js, Caddy, OpenClaw)
 6. **Write config** — SSHes in and writes `.env` + `openclaw.json` with credentials, model config, gateway token
@@ -171,7 +171,7 @@ If anything fails, it runs `rollbackProvisioning()` which deletes the VM (with r
 ### 5. The Bot Is Live
 Once running, the bot:
 - Serves an HTTP API (OpenClaw gateway on VPS, or bot-runtime Express server on shared)
-- Gets a managed subdomain like `my-bot-bold-hawk.sovereignclaw.xyz`
+- Gets a managed subdomain like `my-bot-bold-hawk.sovereignclaw.xyz` (in the primary agent zone)
 - Accepts chat messages via `/chat` endpoint or Telegram via `/telegram`
 - Reports usage back to `/api/usage/ingest` which deducts credits
 
@@ -263,12 +263,12 @@ Triggered via the admin API (`/api/admin/reconcile`).
 
 ## DNS and Domains
 
-Every VPS agent gets an auto-generated subdomain like `my-bot-bold-hawk.sovereignclaw.xyz`.
+Every VPS agent gets an auto-generated subdomain like `my-bot-bold-hawk.sovereignclaw.xyz` — in the primary agent zone, which is `sovereignclaw.xyz` until `CLOUDFLARE_AGENT_DOMAIN` moves new agents elsewhere (`src/lib/agent-zones.ts`).
 
 **How it works** (`src/lib/agent-dns.ts`):
 1. `generateReadableSubdomain()` — Creates `{bot-name-slug}-{adjective}-{noun}` from curated word lists
-2. `createAgentSubdomain()` — Calls Cloudflare API to upsert an A record pointing to the VM IP (proxied through Cloudflare)
-3. Caddy on the VM serves HTTPS (either with Cloudflare origin certificates or `tls internal` for self-signed)
+2. `createAgentSubdomain()` — Calls Cloudflare API to upsert an A record pointing to the VM IP (proxied through Cloudflare), in the primary agent zone. Deletes go to whichever zone the stored hostname is in.
+3. `ensureManagedOriginCert()` (`src/lib/agent-origin-cert.ts`) installs the Cloudflare origin certificate for the hostname's zone over SSH, and Caddy serves HTTPS with it (`tls internal`, self-signed, only when that zone has no cert configured)
 
 Users can also bring their own domain — they verify ownership via DNS TXT record (`src/lib/domain-verify.ts`) before the platform provisions the agent.
 

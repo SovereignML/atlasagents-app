@@ -11,9 +11,11 @@ export type CloudflareError = Error & {
 
 /**
  * Per-call Cloudflare context. When omitted, calls fall back to the PLATFORM
- * env credentials (CLOUDFLARE_API_TOKEN / CLOUDFLARE_ZONE_ID) — that path
- * powers the managed `*.sovereignclaw.xyz` subdomains (src/lib/agent-dns.ts).
- * When provided, the user's own token/zone is used (Bring-Your-Own-Cloudflare).
+ * env credentials (CLOUDFLARE_API_TOKEN / CLOUDFLARE_ZONE_ID, the legacy
+ * agent zone). The managed agent subdomains (src/lib/agent-dns.ts) pass the
+ * platform token implicitly and the zone id of the agent zone involved
+ * explicitly (src/lib/agent-zones.ts). When a token is provided, the user's
+ * own token/zone is used (Bring-Your-Own-Cloudflare).
  */
 export type CfCtx = { token?: string; zoneId?: string }
 

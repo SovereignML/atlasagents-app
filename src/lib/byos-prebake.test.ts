@@ -8,8 +8,12 @@ import {
   prebakeMinNode,
   prebakeUsability,
 } from "./byos-prebake"
-import { HERMES_VPS_MIN_NODE } from "./runtimes/hermes"
-import { OPENCLAW_VPS_MIN_NODE } from "./runtimes/openclaw"
+import {
+  HERMES_PINNED_VERSION,
+  HERMES_VPS_MIN_NODE,
+  OPEN_WEBUI_PINNED_VERSION,
+} from "./runtimes/hermes"
+import { OPENCLAW_PINNED_VERSION, OPENCLAW_VPS_MIN_NODE } from "./runtimes/openclaw"
 
 const CLEAN = {
   port443Busy: false,
@@ -170,17 +174,19 @@ describe("buildPrebakeScript()", () => {
     expect(withBrowser).toContain("google-chrome-stable")
   })
 
-  // Without pins the prefetch is pointless — the deploy would re-resolve
-  // `latest`, miss the cache and download everything again — but it must
-  // still produce a working script rather than fail.
-  it("degrades to unpinned specs when nothing is resolved", () => {
+  // Nothing resolved must still warm exactly what the deploy installs: the
+  // runtimes' code pins. Falling back to `latest` here would fetch a version
+  // the deploy never asks for, and the prefetch would buy nothing.
+  it("falls back to the code pins when nothing is resolved", () => {
     const unpinned = buildPrebakeScript({
       openclawVersion: null,
       hermesVersion: null,
       webuiVersion: null,
     })
-    expect(unpinned).toContain("'openclaw@latest'")
-    expect(unpinned).toContain("RUNTIME_PKG_SPEC='hermes-agent'")
+    expect(unpinned).toContain(`'openclaw@${OPENCLAW_PINNED_VERSION}'`)
+    expect(unpinned).toContain(`RUNTIME_PKG_SPEC='hermes-agent==${HERMES_PINNED_VERSION}'`)
+    expect(unpinned).toContain(`OPEN_WEBUI_PKG_SPEC='open-webui==${OPEN_WEBUI_PINNED_VERSION}'`)
+    expect(unpinned).not.toContain("openclaw@latest")
   })
 
   it("reuses the real bootstrap framing, so progress is reported the same way", () => {

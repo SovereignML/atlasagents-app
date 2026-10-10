@@ -3,13 +3,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 const sshInstallCaddyfile = vi.fn()
 const sshRun = vi.fn()
 const sshWriteFile = vi.fn()
-const sshVmHasCloudflareOriginCerts = vi.fn()
+const ensureManagedOriginCert = vi.fn()
 
 vi.mock("@/lib/ssh", () => ({
   sshInstallCaddyfile: (...a: unknown[]) => sshInstallCaddyfile(...a),
   sshRun: (...a: unknown[]) => sshRun(...a),
   sshWriteFile: (...a: unknown[]) => sshWriteFile(...a),
-  sshVmHasCloudflareOriginCerts: (...a: unknown[]) => sshVmHasCloudflareOriginCerts(...a),
+}))
+
+vi.mock("@/lib/agent-origin-cert", () => ({
+  ensureManagedOriginCert: (...a: unknown[]) => ensureManagedOriginCert(...a),
 }))
 
 vi.mock("@/lib/crypto-secret", () => ({
@@ -51,7 +54,7 @@ beforeEach(() => {
   sshInstallCaddyfile.mockResolvedValue(OK)
   sshRun.mockResolvedValue(OK)
   sshWriteFile.mockResolvedValue(OK)
-  sshVmHasCloudflareOriginCerts.mockResolvedValue(false)
+  ensureManagedOriginCert.mockResolvedValue({ useCfOriginTls: false, zone: null })
 })
 
 describe("reconfigureInstanceIngress() — Hermes", () => {
@@ -107,6 +110,21 @@ describe("reconfigureInstanceIngress() — Hermes", () => {
     const caddy = renderedCaddyfile()
     expect(caddy).toContain("bot-bold-fox.sovereignclaw.xyz {")
     expect(caddy).toContain("handle /v1/*")
+  })
+
+  // A domain change re-renders the managed site block too, so it must carry
+  // the origin cert for the hostname's own zone, not whatever the box had.
+  it("serves the managed hostname with the origin cert the helper installed", async () => {
+    ensureManagedOriginCert.mockResolvedValue({ useCfOriginTls: true, zone: "sovereignclaw.xyz" })
+    await reconfigureInstanceIngress(
+      instance({ managedSubdomain: "bot-bold-fox.sovereignclaw.xyz" }),
+      { domain: null, proxied: false },
+    )
+    expect(ensureManagedOriginCert).toHaveBeenCalledWith(
+      expect.anything(),
+      "bot-bold-fox.sovereignclaw.xyz",
+    )
+    expect(renderedCaddyfile()).toContain("tls /etc/caddy/cf/origin.pem /etc/caddy/cf/origin.key")
   })
 
   it("surfaces a Caddy reload failure instead of silently continuing", async () => {

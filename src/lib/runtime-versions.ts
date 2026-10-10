@@ -1,10 +1,15 @@
 /**
  * Resolving a runtime's `latest` into a concrete, pinned version.
  *
- * Why this exists: every runtime package is installed as `latest` at bootstrap
- * (`OPENCLAW_VERSION` / `HERMES_VERSION` / `OPEN_WEBUI_VERSION` all fall back
- * to it, and none of the override keys are set in production). That has two
- * costs:
+ * Every runtime now defaults to a version pinned in code
+ * (`OPENCLAW_PINNED_VERSION`, `HERMES_PINNED_VERSION`,
+ * `OPEN_WEBUI_PINNED_VERSION`), so `resolveVersion` normally returns that pin
+ * without touching the network. The registry lookup below only runs when an
+ * operator opts back into tracking upstream with `*_VERSION=latest`.
+ *
+ * Why this exists: runtime packages used to install as `latest` at bootstrap
+ * (the `*_VERSION` overrides fell back to it, and none were set in
+ * production). That had two costs:
  *
  *  1. **Prefetching is impossible.** The BYOS prebake downloads packages when
  *     the customer connects their server and installs them when they later

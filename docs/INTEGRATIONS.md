@@ -51,7 +51,7 @@ On restore, when `agentConfig` is present the **skills and soul are re-derived**
 
 ## BYO Cloudflare
 
-Let users (agencies, whitelabel customers) put agents on subdomains of **their own** Cloudflare zones, instead of the platform's managed `*.sovereignclaw.xyz` subdomains.
+Let users (agencies, whitelabel customers) put agents on subdomains of **their own** Cloudflare zones, instead of the platform's managed agent-zone subdomains (`*.sovereignclaw.xyz`, or the zone set by `CLOUDFLARE_AGENT_DOMAIN`).
 
 ### What it does (for users)
 

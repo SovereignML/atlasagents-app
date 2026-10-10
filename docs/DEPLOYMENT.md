@@ -403,11 +403,19 @@ npm view openclaw engines      # compare against OPENCLAW_VPS_MIN_NODE
 
 Common causes, in rough order:
 
-- **The runtime package outgrew the box's Node.** As above. The runtime is
-  installed as `<pkg>@latest`, so an upstream release can break every bake with
-  no deploy on our side. Pin `OPENCLAW_VERSION` in `.env` to recover
-  immediately, then raise `minNode` deliberately (which now also selects the
-  Node the bootstrap installs).
+- **A third-party package source went away.** On 2026-10-09 Caddy's Cloudsmith
+  apt repo started answering `402 Payment Required`; one dead apt source fails
+  every `apt-get update`, so every bake failed (the log ended in
+  `npm: command not found` after apt fell back to Ubuntu's nodejs 18). Caddy
+  now comes from its GitHub release and the bootstrap disables that source on
+  reused boxes — but the same shape (an external repo, a release page, PyPI or
+  npm being down) is the first thing to check in a bake log.
+- **The runtime package outgrew the box's Node.** As above. Runtimes are pinned
+  in code now, so an upstream release no longer reaches a bake by itself — but a
+  pin bump can. Set `OPENCLAW_VERSION` (or `HERMES_VERSION` /
+  `OPEN_WEBUI_VERSION`) in `.env` back to the last good version to recover
+  immediately, then raise `minNode` deliberately (which also selects the Node
+  the bootstrap installs).
 - **An OOM during the runtime install** on an undersized `POOL_PLAN_CODE`.
 - **A provider quota** refusing new VMs.
 - **A broken apt repo** — the bootstrap adds the Caddy, NodeSource and Google

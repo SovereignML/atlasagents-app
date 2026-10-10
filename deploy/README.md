@@ -129,14 +129,15 @@ reverse-proxy setup — no special headers required beyond `X-Forwarded-*`.
 
 Provisioning can upsert **proxied DNS** for each instance via the Cloudflare API:
 
-- **`CLOUDFLARE_API_TOKEN`** and **`CLOUDFLARE_ZONE_ID`** — required for automatic `A` records on your zone (e.g. `*.example.com` or per-agent names). That gives you **DNS + TLS at the Cloudflare edge** (visitors hit HTTPS on Cloudflare first).
+- **`CLOUDFLARE_API_TOKEN`** and **`CLOUDFLARE_ZONE_ID`** — required for automatic `A` records in the agent zone (`sovereignclaw.xyz` by default: `<name>.sovereignclaw.xyz`). That gives you **DNS + TLS at the Cloudflare edge** (visitors hit HTTPS on Cloudflare first).
+- **`CLOUDFLARE_AGENT_DOMAIN`** / **`CLOUDFLARE_AGENT_ZONE_ID`** (+ `_ORIGIN_CERT_*`) — optional: move **new** agents to another zone; existing agents keep their hostnames. Runbook: [`docs/REBRAND-LEGACY-IDENTIFIERS.md`](../docs/REBRAND-LEGACY-IDENTIFIERS.md#the-managed-agent-zone-sovereignclawxyz).
 
-**Origin connection** (Cloudflare → your Linode VM) is separate:
+**Origin connection** (Cloudflare → the agent box) is separate:
 
-- **Without** **`CLOUDFLARE_ORIGIN_CERT_PEM`** / **`CLOUDFLARE_ORIGIN_CERT_KEY`**: the VM may serve HTTP on port 80 only behind Caddy; use Cloudflare SSL mode **Flexible** (HTTPS to clients, HTTP to origin), or terminate TLS another way you control.
-- **With** origin cert + key in env: the bootstrap can install them on the VM and Caddy can serve **HTTPS on the managed hostname** toward the origin; you can use **Full (strict)** in Cloudflare.
+- **With** the zone's origin cert + key in env (`CLOUDFLARE_ORIGIN_CERT_*`, or `CLOUDFLARE_AGENT_ORIGIN_CERT_*` for the new zone): the provisioner installs it over SSH on every box when the agent is configured — cold VPS, warm pool and BYOS alike — and Caddy serves **HTTPS on the managed hostname** with it. Use **Full (strict)** in Cloudflare (`scripts/cloudflare-bootstrap.ts` sets it).
+- **Without** it: Caddy serves the managed hostname with `tls internal` (self-signed), which only works with Cloudflare SSL mode **Full** — a Full (strict) zone answers it with a 526.
 
-Pin **`OPENCLAW_VERSION`** in `.env` to a semver you have tested so VPS bootstrap does not pull breaking CLI changes from `latest`.
+Agent boxes install **pinned** versions of OpenClaw, Hermes, Open WebUI and Caddy (constants in `src/lib/runtimes/`, see [`docs/RUNTIMES.md`](../docs/RUNTIMES.md#version-pinning-srclibruntime-versionsts)). `OPENCLAW_VERSION` / `HERMES_VERSION` / `OPEN_WEBUI_VERSION` / `CADDY_VERSION` in `.env` override a pin without a code deploy. Caddy comes from its GitHub release, not the Cloudsmith apt repo, which has answered `402` since 2026-10-09.
 
 ## 9. Google Drive backups (per-agent)
 
