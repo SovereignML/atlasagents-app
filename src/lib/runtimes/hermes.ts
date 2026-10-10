@@ -6,18 +6,24 @@ import type {
   RenderConfigArgs,
   RenderInitScriptArgs,
   RuntimeEngine,
-  SidecarEnvArgs,
   SidecarSpec,
-  ToolServiceRoute,
 } from "./types"
 import { buildGatewayAllowedOrigins } from "@/lib/instance-gateway-access"
 import { pypiSpec } from "@/lib/runtime-versions"
+import {
+  OPEN_WEBUI_BIN,
+  OPEN_WEBUI_PYTHON_MAX_EXCLUSIVE,
+  OPEN_WEBUI_VENV,
+  bashSingleQuote,
+  buildOpenWebUiPrepSteps,
+  buildPyInstallPrelude,
+  buildVerifyPythonStep,
+  makeOpenWebUiSidecar,
+  openWebUiPipSpec,
+} from "./open-webui"
 import { resolveLlmProvider, nvidiaKeyForSlot } from "@/lib/model-router"
 import { enabledToolsForRuntime } from "@/configs/agent-tools"
-import {
-  renderToolServiceHandles,
-  renderToolServiceSiteBody,
-} from "./shared"
+import { renderGatewayCaddyfile } from "./caddy-gateway"
 import { RUNTIME_CAPS } from "./labels"
 
 /**
@@ -80,21 +86,16 @@ export const HERMES_PYTHON_MIN = "3.11"
  * the venvs and most of a 900s timeout had already been spent.
  */
 export const HERMES_PYTHON_MAX_EXCLUSIVE = "3.14"
-export const OPEN_WEBUI_PYTHON_MAX_EXCLUSIVE = "3.13"
 
-/**
- * `verify_python` for a given exclusive upper bound. Fails in seconds, with a
- * message naming the actual version, rather than letting a doomed install run.
- */
-function buildVerifyPythonStep(maxExclusive: string): string {
-  const [maj, min] = maxExclusive.split(".")
-  return `step "verify_python"
-if ! python3 -c 'import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] < (${maj}, ${min}) else 1)'; then
-  PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-  echo "Requires Python ${HERMES_PYTHON_MIN}+ and older than ${maxExclusive}, found $PY_VER" >&2
-  exit 1
-fi`
-}
+// Open WebUI's pins and Python ceiling live with the shared sidecar now.
+export {
+  OPEN_WEBUI_PINNED_VERSION,
+  OPEN_WEBUI_PORT,
+  OPEN_WEBUI_PYTHON_MAX_EXCLUSIVE,
+  OPEN_WEBUI_SERVICE_NAME,
+  OPEN_WEBUI_VERSION,
+  TORCH_CPU_INDEX_URL,
+} from "./open-webui"
 
 /** Hermes' default API server port. */
 export const HERMES_GATEWAY_PORT = 8642
@@ -113,45 +114,7 @@ const HERMES_WORKSPACE_DIR = `${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}/work
 /** Hermes' `~/.hermes/.env` (one level deeper than OpenClaw's `/opt/openclaw/.env`). */
 const HERMES_ENV_PATH = `${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}/.env`
 
-/* --- Open WebUI sidecar -------------------------------------------------- */
-/**
- * Open WebUI runs as a native Python process in front of Hermes' OpenAI-
- * compatible API — installed via `pip install open-webui` into its own venv,
- * supervised by systemd. It binds loopback :8080 (Caddy proxies the public host
- * here); Hermes stays loopback-only on :8642 and is reached internally by Open
- * WebUI. No Docker daemon; the two runtimes share the same supervision model
- * (systemd) and the same packaging style (Python venv).
- */
-export const OPEN_WEBUI_SERVICE_NAME = "open-webui"
-export const OPEN_WEBUI_PORT = 8080
-/**
- * The Open WebUI release new Hermes boxes install: one behind PyPI's latest
- * (0.11.4 at the time of pinning), which was a large feature release. Bump on
- * purpose after a test deploy. `OPEN_WEBUI_VERSION` overrides it.
- */
-export const OPEN_WEBUI_PINNED_VERSION = "0.11.3"
-export const OPEN_WEBUI_VERSION = () => process.env.OPEN_WEBUI_VERSION || OPEN_WEBUI_PINNED_VERSION
-const OPEN_WEBUI_INSTALL_DIR = "/opt/open-webui"
-const OPEN_WEBUI_VENV = "/opt/open-webui/venv"
-const OPEN_WEBUI_BIN = "/opt/open-webui/venv/bin/open-webui"
-const OPEN_WEBUI_SYSTEM_USER = "open-webui"
-const OPEN_WEBUI_DATA_DIR = "/opt/open-webui/data"
-const OPEN_WEBUI_PYPI_DIST = "open-webui"
 const OPEN_WEBUI_ENV_PATH = `${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}/open-webui.env`
-
-/**
- * PyTorch's CPU-only wheel index. Open WebUI's torch comes from here instead of
- * PyPI's CUDA build — see `py_install_cpu_torch` in buildPyInstallPrelude.
- */
-export const TORCH_CPU_INDEX_URL = "https://download.pytorch.org/whl/cpu"
-
-function openWebUiPipSpec(pin?: string): string {
-  return pypiSpec(OPEN_WEBUI_PYPI_DIST, pin ?? OPEN_WEBUI_VERSION())
-}
-
-function bashSingleQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`
-}
 
 function pipPackageSpec(pin?: string): string {
   return pypiSpec(HERMES_PYPI_DIST, pin ?? HERMES_VERSION())
@@ -168,101 +131,6 @@ function yamlString(s: string): string {
 }
 
 /**
- * Build a RE2-safe alternation regex that matches if Origin equals any of the
- * allowed values exactly. Used in the Caddy `header_regexp Origin <pattern>`
- * matcher — Caddy's `header` matcher only accepts one value, so multi-origin
- * matching has to go through `header_regexp`.
- */
-function corsOriginRegex(origins: string[]): string {
-  const escaped = origins.map((o) => o.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&"))
-  return `^(${escaped.join("|")})$`
-}
-
-/**
- * Site-block body for a single-upstream Hermes Caddyfile (legacy: webuiEnabled=false,
- * or any runtime without a sidecar). Matches today's `${corsBlock}  ${upstreamBlock}`
- * splice point — every line is indented 2 spaces relative to the surrounding site block.
- */
-function buildSingleUpstreamBody(
-  allowed: string[],
-  upstreamPort: number,
-  toolServices?: ToolServiceRoute[],
-): string {
-  const cors =
-    allowed.length > 0
-      ? `  @cors_origin header_regexp Origin "${corsOriginRegex(allowed)}"
-  @cors_preflight method OPTIONS
-  header @cors_origin Access-Control-Allow-Origin {http.request.header.Origin}
-  header @cors_origin Access-Control-Allow-Credentials true
-  header @cors_origin Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-  header @cors_origin Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With"
-  header @cors_origin Vary Origin
-  respond @cors_preflight 204
-`
-      : ""
-  // With companion services (e.g. n8n) the bare upstream becomes `handle`
-  // blocks so `/n8n/*` routes ahead of the gateway catch-all; the site-scope
-  // CORS block above still applies globally. Byte-identical when none.
-  if (toolServices && toolServices.length > 0) {
-    return `${cors}  ${renderToolServiceSiteBody(toolServices, upstreamPort, "  ")}`
-  }
-  return `${cors}  reverse_proxy localhost:${upstreamPort} {
-    header_up Host {host}
-    header_up X-Real-IP {remote_host}
-  }`
-}
-
-/**
- * Site-block body that path-routes inside a single host:
- *   `/v1/*` → Hermes gateway (loopback :8642, bearer-token auth)
- *   everything else → Open WebUI sidecar (its own session auth)
- *
- * Used for Hermes-with-WebUI (the default for new Hermes instances). Uses
- * Caddy's `handle` directive — NOT `handle_path` — so `/v1/chat/completions`
- * arrives at Hermes verbatim, not stripped to `/chat/completions`. `handle`
- * blocks are first-match, so order matters: the `/v1/*` block sits above the
- * catch-all.
- *
- * CORS rules live inside the `/v1/*` handler only — Open WebUI manages its
- * own headers and runs same-origin from the browser, so adding cross-origin
- * headers to its handler would break it.
- */
-function buildDualRouteBody(
-  allowed: string[],
-  sidecarPort: number,
-  toolServices?: ToolServiceRoute[],
-): string {
-  const cors =
-    allowed.length > 0
-      ? `    @cors_origin header_regexp Origin "${corsOriginRegex(allowed)}"
-    @cors_preflight method OPTIONS
-    header @cors_origin Access-Control-Allow-Origin {http.request.header.Origin}
-    header @cors_origin Access-Control-Allow-Credentials true
-    header @cors_origin Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-    header @cors_origin Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With"
-    header @cors_origin Vary Origin
-    respond @cors_preflight 204
-`
-      : ""
-  // Companion-service handles (e.g. `/n8n/*`) go FIRST — `handle` is first-match,
-  // so they must sit above `/v1/*` and the catch-all. Empty → no prefix.
-  const toolHandles = renderToolServiceHandles(toolServices, "  ")
-  const toolPrefix = toolHandles ? `  ${toolHandles}\n` : ""
-  return `${toolPrefix}  handle /v1/* {
-${cors}    reverse_proxy localhost:${HERMES_GATEWAY_PORT} {
-      header_up Host {host}
-      header_up X-Real-IP {remote_host}
-    }
-  }
-  handle {
-    reverse_proxy localhost:${sidecarPort} {
-      header_up Host {host}
-      header_up X-Real-IP {remote_host}
-    }
-  }`
-}
-
-/**
  * Browser tool system deps for Hermes: a headless Chromium plus the
  * `agent-browser` npm global the local browser provider drives. Spliced into
  * Hermes' install steps (inside the framing, so `step`/`APT_OPTS`/Node exist).
@@ -273,83 +141,6 @@ function buildBrowserDepsSteps(): string {
   return `${browserInstallStep()}
 step "install_agent_browser"
 npm ls -g agent-browser >/dev/null 2>&1 || npm install -g --no-audit --no-fund agent-browser
-`
-}
-
-/**
- * Shared shell prelude for the Python installs: `uv` when it can be had, pip
- * otherwise.
- *
- * The Python path dominates a cold Hermes bootstrap — two venvs and 236
- * packages, of which Open WebUI's 146MB wheel and its ~116 dependencies are
- * most of the weight. `uv` resolves and installs that tree several times
- * faster than pip, and it is a single static binary.
- *
- * It is strictly an accelerator. Every function here falls back to pip when
- * `uv` is missing or its install fails, because astral.sh would otherwise
- * become a new hard dependency on the critical path of every Hermes
- * provision — trading a slow bootstrap for a broken one.
- *
- * `python3 -m venv --upgrade-deps` in the fallback also removes the separate
- * `pip install --upgrade pip setuptools wheel` round-trip that used to run
- * once per venv.
- */
-function buildPyInstallPrelude(): string {
-  return `
-step "install_uv"
-# Best-effort. UV_INSTALL_DIR puts it somewhere on root's PATH; a failure here
-# is not fatal, it just means the pip fallback below does the work.
-export UV_INSTALL_DIR=/usr/local/bin
-curl -fsSL --retry 3 --retry-delay 2 https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 || true
-command -v uv >/dev/null 2>&1 && uv --version || echo "uv unavailable — falling back to pip"
-
-# venv_create <venv-path>
-venv_create() {
-  local venv="$1"
-  if command -v uv >/dev/null 2>&1 && uv venv "$venv" >/dev/null 2>&1; then
-    return 0
-  fi
-  python3 -m venv --upgrade-deps "$venv"
-}
-
-# py_install <venv-path> <pkg-spec> <cache-dir>
-# Retries transient failures 3x with backoff, same contract the pip-only
-# version had. Each caller gets its own cache dir so two parallel installs
-# never contend on one.
-py_install() {
-  local venv="$1" spec="$2" cache="$3" max=3 a=1
-  while [ "$a" -le "$max" ]; do
-    echo "=== install attempt $a/$max: $spec ==="
-    if command -v uv >/dev/null 2>&1; then
-      if UV_CACHE_DIR="$cache" uv pip install --python "$venv/bin/python" --upgrade "$spec"; then
-        return 0
-      fi
-    else
-      if PIP_CACHE_DIR="$cache" "$venv/bin/pip" install --upgrade "$spec"; then
-        return 0
-      fi
-    fi
-    sleep $((5 * a))
-    a=$((a + 1))
-  done
-  return 1
-}
-
-# py_install_cpu_torch <venv-path> <pkg-spec> <cache-dir>
-# Open WebUI pulls in torch (via sentence-transformers), and on Linux PyPI's
-# torch is the CUDA build: ~3.2GB of GPU libraries (cuDNN, cuBLAS, NCCL,
-# triton...) on a box with no GPU, for an Open WebUI that we point at the
-# OpenAI engine for embeddings and speech-to-text anyway. Ask for the CPU build
-# first, the way Open WebUI's own image does; if the PyTorch index cannot be
-# reached, fall back to the default index — the old, much larger install —
-# rather than fail the deploy over a download optimisation.
-py_install_cpu_torch() {
-  if UV_TORCH_BACKEND=cpu PIP_EXTRA_INDEX_URL=${bashSingleQuote(TORCH_CPU_INDEX_URL)} py_install "$@"; then
-    return 0
-  fi
-  echo "=== CPU-only torch install failed — retrying with the default (CUDA) torch ==="
-  py_install "$@"
-}
 `
 }
 
@@ -408,16 +199,7 @@ mkdir -p ${bashSingleQuote(HERMES_INSTALL_DIR)}
 venv_create ${bashSingleQuote(HERMES_VENV)}
 chown -R ${bashSingleQuote(HERMES_SYSTEM_USER)}:${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(HERMES_INSTALL_DIR)}
 
-step "open_webui_user"
-id ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} >/dev/null 2>&1 || useradd --system --home-dir ${bashSingleQuote(OPEN_WEBUI_INSTALL_DIR)} --shell /usr/sbin/nologin ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)}
-
-step "open_webui_dirs"
-install -d -m 0750 -o ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} -g ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} ${bashSingleQuote(OPEN_WEBUI_INSTALL_DIR)}
-install -d -m 0750 -o ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} -g ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} ${bashSingleQuote(OPEN_WEBUI_DATA_DIR)}
-
-step "open_webui_venv"
-venv_create ${bashSingleQuote(OPEN_WEBUI_VENV)}
-chown -R ${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)}:${bashSingleQuote(OPEN_WEBUI_SYSTEM_USER)} ${bashSingleQuote(OPEN_WEBUI_INSTALL_DIR)}
+${buildOpenWebUiPrepSteps()}
 
 step "install_pkgs_parallel"
 py_install ${bashSingleQuote(HERMES_VENV)} "$RUNTIME_PKG_SPEC" /var/tmp/py-cache-hermes > /var/log/py-hermes.log 2>&1 &
@@ -461,105 +243,11 @@ export function buildHermesPrebakeSteps(opts: {
   return buildHermesPlusWebuiInstallSteps(opts.browserDeps, opts.pin, opts.webuiPin)
 }
 
-/**
- * Open WebUI sidecar — a native Python process (installed via pip into its own
- * venv) fronting Hermes' OpenAI-compatible API. systemd supervises it directly;
- * there is no Docker daemon, no container, no named volume. The venv is
- * isolated from Hermes' venv so Open WebUI's chunky dep tree (chromadb,
- * sentence-transformers, etc.) can't break Hermes' pins. Reaches Hermes on
- * 127.0.0.1:8642 and binds its own UI on 127.0.0.1:8080 (HOST/PORT from the env
- * file); Caddy is the only public ingress.
- */
-const openWebUiSidecar: SidecarSpec = {
-  serviceName: OPEN_WEBUI_SERVICE_NAME,
-  packageName: OPEN_WEBUI_PYPI_DIST,
-  registry: "pypi",
-  version: OPEN_WEBUI_VERSION,
-  port: OPEN_WEBUI_PORT,
-  healthPath: "/health",
-  dataDir: OPEN_WEBUI_DATA_DIR,
+const openWebUiSidecar: SidecarSpec = makeOpenWebUiSidecar({
   envPath: OPEN_WEBUI_ENV_PATH,
-  seedAdmin: { signupPath: "/api/v1/auths/signup" },
-
-
-  /**
-   * Open WebUI env. Auth is required (the public URL must not be open); RAG/STT
-   * use the OpenAI engine to avoid loading local models (~500MB RAM) on small
-   * boxes. Points at Hermes' loopback API with the gateway token as the key.
-   * DATA_DIR holds the SQLite DB + uploads; persisting it is what makes
-   * accounts/chats survive restarts.
-   *
-   * `DEFAULT_MODELS` is load-bearing, not a nicety. We seed the admin account
-   * over the signup endpoint and immediately lock signup, so that account has no
-   * prior model preference; with no instance-wide default a new chat opens with
-   * nothing selected and the FIRST message is sent with no model attached. Pin it
-   * to the same slug `renderInitScript` writes as Hermes' `model.default` so the
-   * two can never drift.
-   */
-  renderEnv(args: SidecarEnvArgs): Record<string, string> {
-    const env: Record<string, string> = {
-      WEBUI_AUTH: "true",
-      WEBUI_SECRET_KEY: args.secretKey,
-      // Open WebUI marks DEFAULT_MODELS (and most admin-level settings) as
-      // ConfigVar: the env value is read on the FIRST launch, persisted into the
-      // SQLite DB, and every later env change is ignored in favour of the stored
-      // value. That silently defeated the fix below on the primary delivery path
-      // — a warm-pool VM boots the sidecar at bake time with a placeholder env
-      // and no model, persists that empty default, and then ignores the real
-      // model written at claim. Reprovision was defeated the same way.
-      //
-      // This flag is itself a normal env var, so it always applies, and it makes
-      // env the single source of truth on every boot. Correct for a
-      // platform-managed box: we generate this file, nobody hand-tunes it. The
-      // documented trade-off is that admin-level changes made inside Open WebUI's
-      // own settings UI no longer survive a restart. Per-user data — accounts,
-      // chats, each user's own model choice — lives in ordinary tables and is
-      // unaffected.
-      ENABLE_PERSISTENT_CONFIG: "false",
-      ENABLE_SIGNUP: args.enableSignup ? "true" : "false",
-      ENABLE_LOGIN_FORM: "true",
-      OPENAI_API_BASE_URL: `http://127.0.0.1:${args.gatewayPort}/v1`,
-      OPENAI_API_KEY: args.gatewayToken,
-      ENABLE_OLLAMA_API: "false",
-      RAG_EMBEDDING_ENGINE: "openai",
-      AUDIO_STT_ENGINE: "openai",
-      DATA_DIR: OPEN_WEBUI_DATA_DIR,
-      HOST: "127.0.0.1",
-      PORT: String(OPEN_WEBUI_PORT),
-    }
-    // Matched against the `id` Hermes returns from /v1/models (an OpenRouter
-    // slug, passed through unchanged). Omitted rather than written empty when a
-    // caller has no model yet (warm-pool bake), so Open WebUI keeps its own
-    // default-resolution behavior instead of parsing a blank entry.
-    if (args.model.trim()) env.DEFAULT_MODELS = args.model.trim()
-    if (args.publicUrl) env.WEBUI_URL = args.publicUrl
-    return env
-  },
-
-  renderSystemdUnit(): string {
-    return `[Unit]
-Description=Open WebUI (Hermes chat UI)
-After=network-online.target ${HERMES_SERVICE_NAME}.service
-Requires=${HERMES_SERVICE_NAME}.service
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=${OPEN_WEBUI_SYSTEM_USER}
-Group=${OPEN_WEBUI_SYSTEM_USER}
-WorkingDirectory=${OPEN_WEBUI_INSTALL_DIR}
-EnvironmentFile=${OPEN_WEBUI_ENV_PATH}
-Environment=HOME=${OPEN_WEBUI_INSTALL_DIR}
-ExecStart=${OPEN_WEBUI_BIN} serve
-Restart=always
-RestartSec=3
-TimeoutStartSec=300
-
-[Install]
-WantedBy=multi-user.target
-`
-  },
-}
+  gatewayServiceName: HERMES_SERVICE_NAME,
+  description: "Open WebUI (Hermes chat UI)",
+})
 
 export const hermesRuntime: RuntimeEngine = {
   id: "hermes",
@@ -646,81 +334,11 @@ model:
 
   /**
    * Caddy reverse-proxy + CORS at the proxy layer (Hermes' YAML has no
-   * allowed-origins field). Matches the OpenClaw renderer's domain-vs-managed
-   * topology so DNS/TLS handling stays identical.
-   *
-   * Two body shapes:
-   *  - **Dual-route** (`upstreamPort` set, i.e. webuiEnabled=true): path-routes
-   *    `/v1/*` to Hermes :8642 and everything else to Open WebUI on
-   *    `upstreamPort`. One public host serves both the chat UI and the
-   *    OpenAI-compatible API for external bots.
-   *  - **Single-upstream** (`upstreamPort` undefined, i.e. legacy
-   *    webuiEnabled=false rows): proxies the whole host to Hermes :8642.
-   *    Kept for back-compat — existing instances don't get surprise re-routed.
+   * allowed-origins field): `/v1/*` to Hermes :8642, everything else to Open
+   * WebUI when the sidecar is on. See renderGatewayCaddyfile.
    */
   renderCaddyfile(args: RenderCaddyfileArgs): string {
-    const allowed = buildGatewayAllowedOrigins({
-      domain: args.domain,
-      managedSubdomain: args.managedSubdomain,
-      ipAddress: null,
-      tlsStatus: null,
-    })
-
-    const body = args.upstreamPort
-      ? buildDualRouteBody(allowed, args.upstreamPort, args.toolServices)
-      : buildSingleUpstreamBody(allowed, HERMES_GATEWAY_PORT, args.toolServices)
-
-    const port80 = `:80 {
-${body}
-}
-`
-
-    const domain = args.domain?.trim()
-    if (domain) {
-      // Behind the user's own Cloudflare proxy (orange-cloud): Cloudflare
-      // terminates TLS at its edge and pulls from the origin over HTTPS without
-      // validating the cert (zone SSL = "Full", not strict), so a self-signed
-      // `tls internal` cert is accepted. ACME cannot work here — the HTTP-01
-      // challenge never reaches the origin — so Let's Encrypt is not an option.
-      // Keep :80 for Cloudflare's origin pull / Always-Use-HTTPS check.
-      if (args.domainUseInternalTls) {
-        return `${domain} {
-  tls internal
-${body}
-}
-
-${port80}`
-      }
-      // Direct (grey-cloud / non-Cloudflare) custom domain: Caddy
-      // auto-provisions Let's Encrypt TLS.
-      return `${domain} {
-${body}
-}
-`
-    }
-
-    const managed = args.managedSubdomain?.trim()
-    if (managed && args.useCfOriginTls) {
-      return `{
-  ocsp_stapling off
-}
-
-${managed} {
-  tls /etc/caddy/cf/origin.pem /etc/caddy/cf/origin.key
-${body}
-}
-
-${port80}`
-    }
-    if (managed) {
-      return `${managed} {
-  tls internal
-${body}
-}
-
-${port80}`
-    }
-    return port80
+    return renderGatewayCaddyfile(args, { gatewayPort: HERMES_GATEWAY_PORT })
   },
 
   renderSystemdUnit(): string {

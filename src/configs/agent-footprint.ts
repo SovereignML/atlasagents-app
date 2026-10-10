@@ -28,6 +28,11 @@ export const AGENT_FOOTPRINTS: RuntimeFootprint[] = [
   { key: "openclaw", label: "OpenClaw", vcpu: 1, ramMb: 1024, diskGb: 3 },
   { key: "hermes", label: "Hermes", vcpu: 1, ramMb: 1536, diskGb: 5 },
   { key: "hermes-webui", label: "Hermes + Open WebUI", vcpu: 2, ramMb: 3072, diskGb: 10 },
+  // Node CLI + its SDK (a second copy of the agent binary) + Open WebUI + ttyd.
+  // Open WebUI dominates, as it does for Hermes; the coding agents also run
+  // tool-heavy turns (builds, tests) in the workspace, hence the extra disk.
+  { key: "claude-code-webui", label: "Claude Code + Open WebUI", vcpu: 2, ramMb: 3072, diskGb: 12 },
+  { key: "codex-webui", label: "Codex + Open WebUI", vcpu: 2, ramMb: 3072, diskGb: 12 },
 ]
 
 /**

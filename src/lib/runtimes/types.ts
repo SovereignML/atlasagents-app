@@ -258,6 +258,23 @@ export type SidecarSpec = {
   seedAdmin: { signupPath: string }
 }
 
+/**
+ * A browser terminal a runtime serves at `/terminal` (Claude Code, Codex): ttyd
+ * on loopback running the engine's own TUI. Caddy routing lives in the
+ * runtime's own `renderCaddyfile`; the provisioner installs and starts the unit
+ * best-effort once the gateway is healthy, so a missing ttyd never fails a
+ * deploy.
+ */
+export type TerminalSpec = {
+  /** systemd unit name (without ".service"), e.g. "claude-code-terminal". */
+  serviceName: string
+  /** Loopback port ttyd binds. */
+  port: number
+  /** HTTP path ttyd answers 200 on (its base path, with a trailing slash). */
+  healthPath: string
+  renderSystemdUnit(): string
+}
+
 /** Inputs to a per-tool service's `.env` builder (e.g. n8n). */
 export type ToolServiceEnvArgs = {
   instance: Instance
@@ -396,4 +413,6 @@ export interface RuntimeEngine {
    * when the instance has `webuiEnabled`.
    */
   sidecar?: SidecarSpec
+  /** Optional browser terminal (see TerminalSpec). Present iff `caps.hasTerminal`. */
+  terminal?: TerminalSpec
 }

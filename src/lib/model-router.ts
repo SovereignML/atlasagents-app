@@ -161,7 +161,10 @@ export type AllowedOpenRouterModel = {
  * the OpenRouter account settings whenever the allowlist changes there.
  */
 export const ALLOWED_OPENROUTER_MODELS: AllowedOpenRouterModel[] = [
+  { slug: "anthropic/claude-haiku-5.5", label: "Claude Haiku 5.5", kind: "chat", tag: "cheap" },
+  { slug: "anthropic/claude-opus-5.5", label: "Claude Opus 5.5", kind: "chat", tag: "quality" },
   { slug: "anthropic/claude-sonnet-4.6", label: "Claude Sonnet 4.6", kind: "chat", tag: "quality" },
+  { slug: "anthropic/claude-sonnet-5.5", label: "Claude Sonnet 5.5", kind: "chat", tag: "allrounder" },
   { slug: "deepseek/deepseek-v4-flash", label: "DeepSeek V4 Flash", kind: "chat", tag: "cheap" },
   { slug: "deepseek/deepseek-v4-pro", label: "DeepSeek V4 Pro", kind: "chat", tag: "allrounder" },
   { slug: "google/gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite", kind: "chat", tag: "cheap" },
@@ -174,6 +177,8 @@ export const ALLOWED_OPENROUTER_MODELS: AllowedOpenRouterModel[] = [
   { slug: "moonshotai/kimi-k2.6", label: "Kimi K2.6", kind: "chat", tag: "quality" },
   { slug: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", label: "Nemotron 3 Nano Omni (free)", kind: "chat", tag: "cheap" },
   { slug: "nvidia/nemotron-3-ultra-550b-a55b:free", label: "Nemotron 3 Ultra (free)", kind: "chat", tag: "quality" },
+  { slug: "openai/gpt-5.1-codex-mini", label: "GPT-5.1 Codex Mini", kind: "chat", tag: "cheap" },
+  { slug: "openai/gpt-5.3-codex", label: "GPT-5.3 Codex", kind: "chat", tag: "allrounder" },
   { slug: "openai/gpt-5.4-mini", label: "GPT-5.4 Mini", kind: "chat", tag: "allrounder" },
   { slug: "openai/gpt-5.4-nano", label: "GPT-5.4 Nano", kind: "chat", tag: "cheap" },
   { slug: "openai/gpt-5.5", label: "GPT-5.5", kind: "chat", tag: "quality" },
@@ -231,11 +236,45 @@ export function hermesModel(tier: BudgetTier): string {
 }
 
 /**
+ * Claude Code speaks the Anthropic Messages API (through OpenRouter's
+ * Anthropic-compatible endpoint), so its ladder is Claude models only.
+ * Slugs + pricing verified live against https://openrouter.ai/api/v1/models on
+ * 2026-10-11. `CLAUDE_CODE_MODEL` env overrides every tier.
+ */
+export const CLAUDE_CODE_MODELS: Record<BudgetTier, string> = {
+  low: "anthropic/claude-haiku-5.5", // 1M ctx — $0.10/$0.50 per M
+  mid: "anthropic/claude-sonnet-5.5", // 1M ctx — $2/$10 per M
+  high: "anthropic/claude-opus-5.5", // 1M ctx — $4/$20 per M
+}
+
+export function claudeCodeModel(tier: BudgetTier): string {
+  return process.env.CLAUDE_CODE_MODEL?.trim() || CLAUDE_CODE_MODELS[tier]
+}
+
+/**
+ * Codex is built around OpenAI's models; the ladder is the codex-tuned line
+ * plus the current flagship. Verified live on 2026-10-11. `CODEX_MODEL` env
+ * overrides every tier.
+ */
+export const CODEX_MODELS: Record<BudgetTier, string> = {
+  low: "openai/gpt-5.1-codex-mini", // 400k ctx — $0.25/$2 per M
+  mid: "openai/gpt-5.3-codex", // 400k ctx — $1.75/$14 per M
+  high: "openai/gpt-5.5", // 1M ctx — $5/$30 per M
+}
+
+export function codexModel(tier: BudgetTier): string {
+  return process.env.CODEX_MODEL?.trim() || CODEX_MODELS[tier]
+}
+
+/**
  * Runtimes that pin their own per-tier default instead of `routeModel(tier)`
- * (whose `:free` fallbacks Hermes cannot run). Absent ⇒ the routed model.
+ * (whose `:free` fallbacks Hermes cannot run, and whose models the CLI engines
+ * cannot drive). Absent ⇒ the routed model.
  */
 const RUNTIME_MODEL_LADDERS: Partial<Record<RuntimeId, (tier: BudgetTier) => string>> = {
   hermes: hermesModel,
+  "claude-code": claudeCodeModel,
+  codex: codexModel,
 }
 
 /**

@@ -19,6 +19,7 @@ import { addPlanCredits } from "@/lib/wallet"
 import { creditGrantSchedule } from "@/lib/plan-period"
 import { getEffectiveTeam } from "@/lib/effective-user"
 import { createInstanceFromAgentFields } from "@/lib/agent-create"
+import { runtimeDeployDenial } from "@/lib/runtime-access"
 import { deploySchema } from "@/lib/validations"
 
 export async function POST(req: NextRequest) {
@@ -84,6 +85,8 @@ async function handleDeploy(req: NextRequest) {
     if (!parsedAgentConfig.ok) {
       return NextResponse.json({ error: `Invalid agentConfig: ${parsedAgentConfig.error}` }, { status: 400 })
     }
+    const denial = runtimeDeployDenial(parsedAgentConfig.data.runtime, session)
+    if (denial) return NextResponse.json({ error: denial }, { status: 403 })
   }
 
   // ── Free tier: per-runtime concurrency + lifetime cap ─────────────
