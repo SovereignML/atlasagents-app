@@ -5,6 +5,7 @@
 import type Stripe from "stripe"
 import {
   db,
+  byosServers,
   instances,
   instanceLogs,
   plans,
@@ -42,6 +43,7 @@ export async function handleCheckoutSessionCompleted(
     planSlug?: string
     interval?: "month" | "year"
     type?: string
+    byosServerId?: string
   }
 
   // ── Wallet top-up checkout ──
@@ -64,6 +66,20 @@ export async function handleCheckoutSessionCompleted(
     return
   }
 
+  // ── BYOS plan for a connected server (no instance involved) ──
+  // Same session claim as the instance path below: the webhook and
+  // checkout-recovery can both deliver this session.
+  if (metadata.type === "byos_plan") {
+    if (!(await claimEvent("stripe_checkout", session.id))) return
+    try {
+      await handleByosPlanCheckout(session, metadata)
+    } catch (err) {
+      await releaseEvent("stripe_checkout", session.id)
+      throw err
+    }
+    return
+  }
+
   // ── Subscription checkout (existing flow) ──
   const instanceId = metadata.instanceId
   if (!instanceId) {
@@ -71,6 +87,24 @@ export async function handleCheckoutSessionCompleted(
     return
   }
 
+  // Two paths deliver a paid session here: the webhook and checkout-recovery
+  // (which asks Stripe directly when the webhook never arrives). Claim the
+  // session itself — not the webhook event id — so they can't both process it.
+  // Released on error so either path can re-attempt.
+  if (!(await claimEvent("stripe_checkout", session.id))) return
+  try {
+    await handlePaidSubscriptionCheckout(session, instanceId, metadata)
+  } catch (err) {
+    await releaseEvent("stripe_checkout", session.id)
+    throw err
+  }
+}
+
+async function handlePaidSubscriptionCheckout(
+  session: Stripe.Checkout.Session,
+  instanceId: string,
+  metadata: { planSlug?: string; interval?: "month" | "year" },
+): Promise<void> {
   const instance = await db.query.instances.findFirst({
     where: eq(instances.id, instanceId),
   })
@@ -112,7 +146,10 @@ export async function handleCheckoutSessionCompleted(
     const fresh = await db.query.instances.findFirst({
       where: eq(instances.id, instanceId),
     })
-    if (fresh) {
+    // Only a `pending` row is waiting on this payment. Anything else is already
+    // being (or was) provisioned — calling provisionBot again would contend the
+    // lock and the catch below would mark a healthy deploy failed.
+    if (fresh?.status === "pending") {
       await provisionBot(fresh)
     }
   } catch (err) {
@@ -147,6 +184,22 @@ export async function handleCheckoutSessionCompleted(
       },
     })
 
+  // Grant the first invoice's plan credits HERE, not only from invoice.paid.
+  // Stripe does not order events: invoice.paid routinely lands before this
+  // handler has created the Subscription row, finds nothing, returns 200 — and
+  // the credits are never granted (the event is claimed, so a resend no-ops).
+  // Running the same handler now, with the row in place, closes that race.
+  // Idempotent: both paths share the `invoice_grant:<invoice.id>` claim.
+  if (stripeSubscriptionId) {
+    const sub = await stripe.subscriptions.retrieve(stripeSubscriptionId, {
+      expand: ["latest_invoice"],
+    })
+    const invoice = sub.latest_invoice
+    if (invoice && typeof invoice !== "string" && invoice.status === "paid") {
+      await handleInvoicePaid(invoice)
+    }
+  }
+
   await db.insert(instanceLogs).values({
     instanceId,
     level: provisionError ? "error" : "info",
@@ -168,13 +221,22 @@ export async function handleCheckoutSessionCompleted(
     },
   })
 
-  // Ad-conversion: report the purchase to Meta/Google. This webhook has NO
-  // browser context, so attribution relies on the click IDs + consent we stored
-  // on the user at signup. Best-effort, gated on marketing consent; no-op when
-  // ads aren't configured.
+  await trackPurchaseConversion(instance.userId, session)
+}
+
+/**
+ * Ad-conversion: report the purchase to Meta/Google. This webhook has NO
+ * browser context, so attribution relies on the click IDs + consent we stored
+ * on the user at signup. Best-effort, gated on marketing consent; no-op when
+ * ads aren't configured.
+ */
+async function trackPurchaseConversion(
+  userId: string,
+  session: Stripe.Checkout.Session,
+): Promise<void> {
   try {
     const buyer = await db.query.users.findFirst({
-      where: eq(users.id, instance.userId),
+      where: eq(users.id, userId),
       columns: {
         email: true,
         fbclid: true,
@@ -200,6 +262,84 @@ export async function handleCheckoutSessionCompleted(
   } catch (err) {
     console.error("[stripe] ad-conversion tracking failed:", err)
   }
+}
+
+// ---------- checkout.session.completed: BYOS plan ----------
+// A plan bought for one connected server. Records the Subscription against the
+// server (byosServerId, no instanceId) — that row is what /api/byos/deploy
+// checks before installing. Nothing is provisioned here: buying a plan and
+// installing an agent are separate steps.
+
+async function handleByosPlanCheckout(
+  session: Stripe.Checkout.Session,
+  metadata: { userId?: string; byosServerId?: string; interval?: "month" | "year" },
+): Promise<void> {
+  const { byosServerId, userId } = metadata
+  if (!byosServerId || !userId) {
+    console.warn(`[stripe] byos_plan checkout ${session.id} missing byosServerId/userId`)
+    return
+  }
+  const plan = await db.query.plans.findFirst({ where: eq(plans.slug, "byos") })
+  if (!plan) {
+    // Throw (not return) so the claim is released and Stripe retries once the
+    // plan row exists — the customer has paid.
+    throw new Error(`[stripe] byos plan row missing for checkout ${session.id}`)
+  }
+  const server = await db.query.byosServers.findFirst({
+    where: eq(byosServers.id, byosServerId),
+    columns: { id: true, label: true },
+  })
+  // The server can be disconnected between checkout and payment. Still record
+  // the subscription (they paid, and Billing must show it so it can be
+  // canceled), just unlinked.
+  if (!server) {
+    console.warn(`[stripe] byos_plan checkout ${session.id}: server ${byosServerId} is gone`)
+  }
+
+  const stripeSubscriptionId =
+    typeof session.subscription === "string"
+      ? session.subscription
+      : session.subscription?.id ?? null
+  if (!stripeSubscriptionId) {
+    throw new Error(`[stripe] byos_plan checkout ${session.id} has no subscription`)
+  }
+
+  // customer.subscription.updated can land before this row exists and finds
+  // nothing, so take the period and cancel flag from Stripe now.
+  const sub = await stripe.subscriptions.retrieve(stripeSubscriptionId)
+  const interval = metadata.interval ?? "month"
+  const values = {
+    status: sub.status,
+    interval,
+    currentPeriodEnd: new Date(sub.current_period_end * 1000),
+    cancelAtPeriodEnd: sub.cancel_at_period_end,
+    byosServerId: server?.id ?? null,
+  }
+  await db
+    .insert(subscriptions)
+    .values({ userId, planId: plan.id, stripeSubscriptionId, ...values })
+    .onConflictDoUpdate({ target: subscriptions.stripeSubscriptionId, set: values })
+
+  console.log(
+    `[stripe] BYOS plan ${stripeSubscriptionId} active for server ${byosServerId} (user ${userId})`,
+  )
+  if (server) {
+    await notify({
+      userId,
+      category: "billing",
+      type: "byos_plan_active",
+      title: `BYOS plan active for ${server.label}`,
+      message: `You can now install agents on ${server.label}.`,
+      url: `/dashboard/byos/deploy?serverId=${server.id}`,
+    })
+  }
+
+  posthogServer.capture({
+    distinctId: userId,
+    event: "subscription_changed",
+    properties: { action: "created", plan: "byos", interval, byosServerId },
+  })
+  await trackPurchaseConversion(userId, session)
 }
 
 // ---------- customer.subscription.updated ----------
@@ -262,6 +402,20 @@ export async function handleSubscriptionDeleted(
       instanceId: local.instanceId,
     },
   })
+
+  // BYOS: an agent runs for as long as its SERVER has a plan. That covers both
+  // a per-server plan ending and a legacy per-agent subscription ending — in
+  // either case the server's agents stop only if nothing else still covers the
+  // server. No wallet fallback: BYOS has no compute to bill the wallet for, so
+  // a wallet balance is not a plan.
+  const byosServerId =
+    local.byosServerId ??
+    (local.instance?.deploymentTarget === "byos" ? local.instance.byosServerId : null)
+  if (byosServerId) {
+    const { stopAgentsOnUncoveredServer } = await import("@/lib/byos-plan")
+    await stopAgentsOnUncoveredServer(byosServerId)
+    return
+  }
 
   if (local.instance && local.instance.status === "running") {
     const { isAboveMinimum } = await import("@/lib/wallet")

@@ -203,6 +203,14 @@ export const subscriptions = pgTable(
     // src/lib/stripe-connect-events.ts.
     connectAccountId: text(),
     teamId: text().references(() => teams.id),
+    // BYOS plan (per server). Set on a subscription bought for a connected
+    // server — that row has NO instanceId: the plan is what lets the team
+    // install agents onto that server, however many. NULL for every other
+    // subscription, including legacy BYOS rows that were bought per agent
+    // (those carry instanceId and still entitle their agent's server; see
+    // src/lib/byos-plan.ts). SET NULL so a hard-deleted server can't take the
+    // billing record with it — disconnect is refused while a plan is live.
+    byosServerId: text().references(() => byosServers.id, { onDelete: "set null" }),
     createdAt: now(),
     updatedAt: timestamp({ mode: "date", withTimezone: false })
       .defaultNow()
@@ -215,6 +223,7 @@ export const subscriptions = pgTable(
     index("Subscription_userId_idx").on(t.userId),
     index("Subscription_status_idx").on(t.status),
     index("Subscription_teamId_idx").on(t.teamId),
+    index("Subscription_byosServerId_idx").on(t.byosServerId),
     // The monthly-grants sweep scans due yearly drips by this column.
     index("Subscription_nextCreditGrantAt_idx").on(t.nextCreditGrantAt),
   ],
@@ -2037,6 +2046,10 @@ export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
   instance: one(instances, {
     fields: [subscriptions.instanceId],
     references: [instances.id],
+  }),
+  byosServer: one(byosServers, {
+    fields: [subscriptions.byosServerId],
+    references: [byosServers.id],
   }),
 }))
 

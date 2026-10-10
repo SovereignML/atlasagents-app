@@ -1,26 +1,21 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
-import { db, eq, and, asc, byosServers, instances, instanceLogs, regions, serverConfigs, users, plans, subscriptions } from "@/db"
-import {
-  stripe,
-  isStripeConfigured,
-  isDevBypassAllowed,
-  STRIPE_NOT_CONFIGURED,
-} from "@/lib/stripe"
+import { db, eq, and, asc, byosServers, instances, instanceLogs, regions, serverConfigs } from "@/db"
 import { logAuditEvent } from "@/lib/audit"
 import { createSlug } from "@/lib/instance"
 import { encryptSecret } from "@/lib/crypto-secret"
-import { planUnitAmountCents } from "@/lib/pricing"
-import { findPlanBySlug, BYOS_SIGNUP_CREDITS } from "@/configs/plans"
+import { BYOS_SIGNUP_CREDITS } from "@/configs/plans"
 import { fundWallet } from "@/lib/openrouter-billing"
-import { BRANDING } from "@/configs/branding"
 import { parseAgentConfig } from "@/lib/agent-config"
 import { buildAgentFields } from "@/lib/agent-create"
 import { provisionBot } from "@/lib/provisioner"
 import { describeVmError } from "@/lib/vm-provider"
 import { assertPublicHost, BlockedHostError } from "@/lib/net-guard"
 import { getEffectiveTeam } from "@/lib/effective-user"
-import { byosConnectionFields, installBlockedReason } from "@/lib/byos-install"
+import { byosConnectionFields, installBlockedReason, planBlockedReason } from "@/lib/byos-install"
+import { findByosPlan } from "@/lib/byos-plan"
+import { recoverByosPlanCheckout } from "@/lib/checkout-recovery"
+import { claimEvent, releaseEvent } from "@/lib/idempotency"
 import { isTeamSuspended } from "@/lib/tenant"
 import { getTeamAgentLimit, countTeamAgents } from "@/lib/seats"
 import {
@@ -64,8 +59,10 @@ async function validateCustomBaseUrl(raw: string | undefined): Promise<string | 
  * had no link back to the server — leaving `agentCount`, the idle-server cap
  * and the disconnect guard all reading zero.
  *
- * No VM is created. Billing is a flat recurring management fee (Stripe
- * subscription); LLM usage is either metered against the credit wallet
+ * No VM is created, and no checkout is opened. Paying for BYOS is a separate
+ * step: a BYOS plan is bought per server (POST /api/byos/servers/[id]/plan),
+ * and this route only checks that the server has one — one plan covers every
+ * agent on its server. LLM usage is either metered against the credit wallet
  * ("managed_credits") or paid via the customer's own key ("own_key", stored
  * encrypted).
  */
@@ -104,7 +101,6 @@ async function handleByosDeploy(req: NextRequest) {
   const {
     name,
     byosServerId,
-    billingInterval = "month",
     llmMode,
     ownApiKey,
     ownProvider,
@@ -120,7 +116,6 @@ async function handleByosDeploy(req: NextRequest) {
     // is read off that row — it is deliberately NOT accepted from the caller,
     // so an agent can only ever land on a server this team has connected.
     byosServerId: string
-    billingInterval?: "month" | "year"
     llmMode: "managed_credits" | "own_key"
     ownApiKey?: string
     // Which provider the own key is for (catalog id). Defaults to "openrouter".
@@ -218,29 +213,22 @@ async function handleByosDeploy(req: NextRequest) {
     )
   }
 
-  // ── Payment gate — BEFORE any DB write ────────────────────────────
-  // BYOS is paid-only (no free tier), so a deploy that can't reach Stripe can
-  // never complete. This check used to live at the very bottom of the route,
-  // *after* the instance INSERT — so every attempt in a Stripe-less
-  // environment stranded a `pending` row. countTeamAgents() counts anything
-  // not "deleted" against the team's agent cap, so a user who retried a few
-  // times stopped getting the 503 and started getting "Agent limit reached"
-  // instead. Fail here, before we touch the database.
-  if (!isStripeConfigured() && !isDevBypassAllowed()) {
-    console.error("[byos/deploy] payments unavailable; refusing before any DB write")
-    return NextResponse.json(
-      {
-        error:
-          "Payments are temporarily unavailable, so we can't connect your server yet. You have not been charged.",
-      },
-      { status: 503 },
-    )
+  // ── Plan gate — BEFORE any DB write ───────────────────────────────
+  // Installing is free; the server must already have a BYOS plan. If it
+  // doesn't, ask Stripe once — the customer may have just paid and the webhook
+  // hasn't landed (checkout-recovery.ts). Refusing before the INSERT matters:
+  // countTeamAgents() counts every non-deleted row against the agent cap, so a
+  // stranded row per attempt would turn this message into "Agent limit reached".
+  let plan = await findByosPlan(byosServer.id)
+  if (!plan && (await recoverByosPlanCheckout(byosServer.id, effectiveUserId))) {
+    plan = await findByosPlan(byosServer.id)
   }
-
-  // ── Resolve plan ──────────────────────────────────────────────────
-  const planConfig = findPlanBySlug("byos")
-  if (!planConfig) {
-    return NextResponse.json({ error: "BYOS plan is not configured" }, { status: 500 })
+  const planBlocked = planBlockedReason(plan)
+  if (planBlocked || !plan) {
+    return NextResponse.json(
+      { error: planBlocked, code: "byos_plan_required" },
+      { status: 402 },
+    )
   }
 
   // ── Resolve the BYOS sentinel server config + region ──────────────
@@ -371,7 +359,8 @@ async function handleByosDeploy(req: NextRequest) {
       regionId: region.id,
       serverConfigId: serverConfig.id,
       storageGb: serverConfig.storageGb,
-      billingInterval,
+      // Informational: the agent itself isn't billed, its server's plan is.
+      billingInterval: plan.interval,
       status: "pending",
       // Shared agent columns (runtime, webuiEnabled, soul, skills, botToken, …)
       // derived identically to the managed path; deploymentTarget is forced to
@@ -421,7 +410,7 @@ async function handleByosDeploy(req: NextRequest) {
       byosServerId: byosServer.id,
       byosHost: byosServer.host,
       llmMode,
-      billingInterval,
+      byosPlanSubscriptionId: plan.subscriptionId,
       ...(llmMode === "own_key"
         ? { ownProvider: ownProviderId, hasFallback: hasFallbackInput }
         : {}),
@@ -433,134 +422,45 @@ async function handleByosDeploy(req: NextRequest) {
     level: "info",
     message: `BYOS instance created on ${byosServer.label} (${byosServer.host}). LLM mode: ${llmMode}${
       llmMode === "own_key" ? ` (provider: ${ownProviderId})` : ""
-    }. Awaiting payment.`,
+    }. Covered by the server's BYOS plan — installing now.`,
   })
 
-  const dbPlan = await db.query.plans.findFirst({
-    where: and(eq(plans.tier, "byos"), eq(plans.isActive, true)),
-  })
-
-  // ── Paid: Stripe Checkout (recurring management fee) ──────────────
-  if (isStripeConfigured()) {
-    const userRow = await db.query.users.findFirst({
-      where: eq(users.id, effectiveUserId),
-      columns: { stripeCustomerId: true, email: true },
-    })
-    let stripeCustomerId = userRow?.stripeCustomerId
-
-    if (!stripeCustomerId) {
-      const customer = await stripe.customers.create({
-        // The OWNER's email, read off the user row — not `session.user.email`,
-        // which under impersonation is the admin's and would stamp staff
-        // contact details onto the customer's billing record.
-        email: userRow?.email ?? undefined,
-        metadata: { userId: effectiveUserId },
-      })
-      stripeCustomerId = customer.id
-      await db
-        .update(users)
-        .set({ stripeCustomerId })
-        .where(eq(users.id, effectiveUserId))
-    }
-
-    const unitAmount = planUnitAmountCents(planConfig, billingInterval)
-
-    const checkoutSession = await stripe.checkout.sessions.create({
-      customer: stripeCustomerId,
-      mode: "subscription",
-      allow_promotion_codes: true,
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: {
-              name: `${BRANDING.name} Bring Your Own Server`,
-              description: `Management panel for your own server · ${
-                llmMode === "own_key" ? "your own API key" : `pay-as-you-go ${BRANDING.name} Credits`
-              }`,
-            },
-            unit_amount: unitAmount,
-            recurring: {
-              interval: billingInterval === "year" ? "year" : "month",
-            },
-          },
-          quantity: 1,
-        },
-      ],
-      metadata: {
-        instanceId: instance.id,
-        userId: effectiveUserId,
-        planSlug: "byos",
-        interval: billingInterval,
-      },
-      success_url: `${BRANDING.appUrl}/dashboard/instances/${instance.id}`,
-      // Back to the wizard for THIS server — the bare path now redirects to the
-      // server list, which would silently discard their choices.
-      cancel_url: `${BRANDING.appUrl}/dashboard/byos/deploy?serverId=${byosServer.id}`,
-    })
-
-    return NextResponse.json({
-      instanceId: instance.id,
-      checkoutUrl: checkoutSession.url,
-    })
-  }
-
-  // Defence in depth: the payment gate above already rejected this case before
-  // the INSERT, so reaching here means Stripe config changed mid-request. Keep
-  // the guard — never SSH-provision a customer's server for free.
-  if (!isDevBypassAllowed()) {
-    return NextResponse.json(STRIPE_NOT_CONFIGURED, { status: 503 })
-  }
-
-  // ── Dev mode: skip Stripe, auto-provision ─────────────────────────
+  // ── Provision (background — it takes minutes) ─────────────────────
   const instanceId = instance.id
-  const userId = effectiveUserId
-
   ;(async () => {
     try {
-      const freshInstance = await db.query.instances.findFirst({
-        where: eq(instances.id, instanceId),
-      })
-      if (freshInstance) {
-        await provisionBot(freshInstance)
-      }
+      const fresh = await db.query.instances.findFirst({ where: eq(instances.id, instanceId) })
+      if (fresh?.status === "pending") await provisionBot(fresh)
     } catch (err) {
-      console.error("[byos/deploy] provisionBot failed (dev path):", await describeVmError(err))
+      console.error(`[byos/deploy] provisionBot failed for ${instanceId}:`, await describeVmError(err))
     }
   })()
 
-  if (dbPlan) {
-    await db.insert(subscriptions).values({
-      userId,
-      planId: dbPlan.id,
-      instanceId,
-      interval: billingInterval,
-      status: "active",
-    })
-  }
-
-  // Mirror the webhook's one-time BYOS signup grant for managed-AI users so the
-  // dev/no-Stripe path matches production behavior.
-  if (llmMode === "managed_credits") {
-    try {
-      await fundWallet(
-        userId,
-        BYOS_SIGNUP_CREDITS,
-        "plan_deposit",
-        "BYOS signup credits",
-        instanceId,
-        { planMode: "add" },
-      )
-    } catch (err) {
-      console.error("[byos/deploy] BYOS signup credit grant failed (dev path):", err)
+  // ── One-time starter credits, once per plan ───────────────────────
+  // Managed-AI agents draw on the wallet, so the first one installed under a
+  // plan seeds it with BYOS_SIGNUP_CREDITS. Keyed on the plan, not the agent,
+  // so installing more agents doesn't mint more credits. Legacy per-agent plans
+  // already received theirs on their first invoice. Best-effort: a failed grant
+  // must not fail an install that is already under way, so it is released for
+  // the next install to retry.
+  if (llmMode === "managed_credits" && !plan.legacy) {
+    const grantKey = plan.subscriptionId
+    if (await claimEvent("byos_signup_grant", grantKey)) {
+      try {
+        await fundWallet(
+          effectiveUserId,
+          BYOS_SIGNUP_CREDITS,
+          "plan_deposit",
+          "BYOS signup credits",
+          instanceId,
+          { planMode: "add" },
+        )
+      } catch (err) {
+        await releaseEvent("byos_signup_grant", grantKey)
+        console.error(`[byos/deploy] BYOS signup credit grant failed for ${instanceId}:`, err)
+      }
     }
   }
-
-  await db.insert(instanceLogs).values({
-    instanceId,
-    level: "info",
-    message: "Dev mode: BYOS instance auto-activated (Stripe not configured).",
-  })
 
   return NextResponse.json({ instanceId })
 }

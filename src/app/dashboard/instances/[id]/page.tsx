@@ -15,6 +15,7 @@ import { isDriveConfigured } from "@/lib/google-drive"
 import { isKumaConfigured } from "@/lib/uptime-kuma"
 import { maybeRunUptimeSync } from "@/lib/uptime-monitoring"
 import { maybeReapDemoInstances } from "@/lib/demo-reaper"
+import { recoverPaidCheckout } from "@/lib/checkout-recovery"
 import { Badge } from "@/components/ui/badge"
 import { DemoCountdown } from "@/components/instances/demo-countdown"
 import {
@@ -88,6 +89,11 @@ export default async function InstanceDetailPage({
   })
 
   if (!instance) notFound()
+
+  // Paid deploy still `pending`: ask Stripe directly in case the webhook never
+  // arrived (this is the Checkout success_url, so it runs on the customer's
+  // return). Background + throttled; never throws. See checkout-recovery.ts.
+  if (instance.status === "pending") void recoverPaidCheckout(instance.id)
 
   // Provider connections are team-shared (keyed by the agent's team).
   const driveConn = await db.query.driveConnections.findFirst({

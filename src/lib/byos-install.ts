@@ -80,3 +80,68 @@ export function platformOwnsHostVm(deploymentTarget: string | null | undefined):
   // on our own infrastructure and must still be provisionable.
   return deploymentTarget?.trim().toLowerCase() !== "byos"
 }
+
+// ── BYOS plan entitlement ────────────────────────────────────────────────
+//
+// Connecting a server is free; installing an agent on it needs a BYOS plan for
+// THAT server. One plan covers any number of agents on its server. These are
+// the pure rules — the lookups live in byos-plan.ts.
+
+/**
+ * Subscription statuses under which a plan still covers its server. `past_due`
+ * is included on purpose: Stripe is retrying the card, and agents keep running
+ * through dunning. Coverage only ends when Stripe ends the subscription
+ * (customer.subscription.deleted), which for a cancel happens at period end.
+ */
+const LIVE_PLAN_STATUSES = new Set(["active", "trialing", "past_due"])
+
+/** Can a NEW agent be installed under a plan in this status? Not while unpaid. */
+const INSTALLABLE_PLAN_STATUSES = new Set(["active", "trialing"])
+
+export function planIsLive(status: string | null | undefined): boolean {
+  return !!status && LIVE_PLAN_STATUSES.has(status)
+}
+
+export function planAllowsInstall(status: string | null | undefined): boolean {
+  return !!status && INSTALLABLE_PLAN_STATUSES.has(status)
+}
+
+/** The statuses `planIsLive` accepts, for building a DB filter. */
+export const LIVE_PLAN_STATUS_LIST = [...LIVE_PLAN_STATUSES]
+
+/**
+ * Why an agent can't be installed on a server with this plan (or none), or
+ * null if it can. Shown verbatim to the customer.
+ */
+export function planBlockedReason(plan: { status: string } | null): string | null {
+  if (!plan) {
+    return "This server needs a BYOS plan before you can install an agent on it."
+  }
+  if (!planAllowsInstall(plan.status)) {
+    return "This server's BYOS plan has an unpaid invoice. Update your payment method in Billing, then try again."
+  }
+  return null
+}
+
+/**
+ * Pick the plan that best describes a server's coverage when several rows
+ * match (a fresh per-server plan beside a legacy per-agent one, or a double
+ * purchase): an installable plan beats a merely-live one; among equals, the
+ * newest wins.
+ */
+export function pickBestPlan<T extends { status: string; createdAt: Date }>(
+  plans: readonly T[],
+): T | null {
+  let best: T | null = null
+  for (const p of plans) {
+    if (!planIsLive(p.status)) continue
+    if (!best) {
+      best = p
+      continue
+    }
+    const pa = planAllowsInstall(p.status)
+    const ba = planAllowsInstall(best.status)
+    if (pa !== ba ? pa : p.createdAt > best.createdAt) best = p
+  }
+  return best
+}
