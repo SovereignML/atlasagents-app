@@ -123,6 +123,7 @@ export default async function BillingPage() {
           columns: { id: true, name: true, status: true },
           with: { serverConfig: { columns: { priceMonthly: true } } },
         },
+        byosServer: { columns: { label: true } },
       },
       orderBy: desc(subscriptions.createdAt),
     }),
@@ -278,6 +279,12 @@ export default async function BillingPage() {
                   className="hover:text-foreground"
                 >
                   {sub.instance.name}
+                </Link>
+              </p>
+            ) : sub.byosServer ? (
+              <p className="text-sm text-muted-foreground">
+                <Link href="/dashboard/byos" className="hover:text-foreground">
+                  Server: {sub.byosServer.label}
                 </Link>
               </p>
             ) : null}

@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Check, Cpu, HardDrive, KeyRound, MemoryStick, Server, Wallet } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -26,7 +25,6 @@ import {
 } from "@/configs/llm-providers"
 import { cn } from "@/lib/utils"
 import { BRANDING } from "@/configs/branding"
-import { formatUsd } from "@/configs/plans"
 
 /** The connected server this agent is being installed onto. */
 export type InstallServer = {
@@ -45,21 +43,22 @@ export type InstallServer = {
 }
 
 type LlmMode = "managed_credits" | "own_key"
-type BillingInterval = "month" | "year"
 type Runtime = "openclaw" | "hermes"
 
 // The server is already connected and inspected by the time we get here, so
 // there is no "Server" step: the flow is about the agent, not the machine.
 // Model access is its own step rather than a tail on the server form — it is a
-// billing decision, and burying it under an SSH form hid it.
-type Step = "agent" | "model" | "project" | "billing"
+// billing decision, and burying it under an SSH form hid it. There is no
+// billing step: the server's BYOS plan already covers the agent (the page
+// won't render this form without one).
+type Step = "agent" | "model" | "project" | "review"
 
-const STEPS: Step[] = ["agent", "model", "project", "billing"]
+const STEPS: Step[] = ["agent", "model", "project", "review"]
 const STEP_LABELS: Record<Step, string> = {
   agent: "Agent",
   model: "Model",
   project: "Project",
-  billing: "Billing",
+  review: "Review",
 }
 
 const RUNTIME_OPTIONS: { value: Runtime; label: string; hint: string }[] = [
@@ -83,15 +82,7 @@ function gb(mb: number | null): string {
   return mb == null ? "—" : `${Math.round((mb / 1024) * 10) / 10} GB`
 }
 
-export function ByosInstallForm({
-  server,
-  priceMonthly,
-  priceYearly,
-}: {
-  server: InstallServer
-  priceMonthly: number
-  priceYearly: number
-}) {
+export function ByosInstallForm({ server }: { server: InstallServer }) {
   const router = useRouter()
 
   const [step, setStep] = useState<Step>("agent")
@@ -116,17 +107,11 @@ export function ByosInstallForm({
   const [name, setName] = useState("")
   const [useCase, setUseCase] = useState<string>("")
 
-  // Billing step
-  const [interval, setInterval] = useState<BillingInterval>("month")
-
   const stepIdx = STEPS.indexOf(step)
   const runtimeLabel = RUNTIME_OPTIONS.find((r) => r.value === runtime)?.label ?? runtime
   const selectedCategory = AGENT_CATEGORIES.find((c) => c.slug === useCase)
   const coreActions = selectedCategory?.examples ? [...selectedCategory.examples] : []
   const slugPreview = deploymentSlug(name)
-
-  const fee = interval === "year" ? priceYearly : priceMonthly
-  const feeSuffix = interval === "year" ? "/yr" : "/mo"
 
   // What we measured on this box, against what each runtime needs. Hermes on
   // BYOS always ships the Open WebUI sidecar (agent-create sets webuiEnabled
@@ -171,7 +156,7 @@ export function ByosInstallForm({
         return ownKeyReady
       case "project":
         return name.trim().length >= 2 && !!useCase
-      case "billing":
+      case "review":
         return true
     }
   })()
@@ -212,7 +197,6 @@ export function ByosInstallForm({
           // The server, not a host: the API reads the connection off the
           // connected row so the agent is linked to the machine it lands on.
           byosServerId: server.id,
-          billingInterval: interval,
           llmMode,
           ownApiKey: llmMode === "own_key" ? ownApiKey.trim() : undefined,
           ownProvider: llmMode === "own_key" ? ownProvider : undefined,
@@ -705,49 +689,16 @@ export function ByosInstallForm({
             </div>
           )}
 
-          {step === "billing" && (
+          {step === "review" && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-lg font-semibold text-foreground">Billing &amp; Review</h2>
+                <h2 className="text-lg font-semibold text-foreground">Review</h2>
                 <p className="text-sm text-muted-foreground">
-                  A flat management fee: deploy, monitor, restart, and configure your
-                  agent. No compute charges (it&apos;s your server).
+                  Covered by {server.label}&apos;s BYOS plan — installing adds nothing to
+                  your bill. No compute charges (it&apos;s your server).
                 </p>
               </div>
 
-              <ToggleGroup
-                value={[interval]}
-                onValueChange={(v) => v[0] && setInterval(v[0] as BillingInterval)}
-                className="grid w-full grid-cols-2 items-stretch gap-4"
-                spacing={1}
-              >
-                {(["month", "year"] as BillingInterval[]).map((iv) => (
-                  <ToggleGroupItem
-                    key={iv}
-                    value={iv}
-                    variant="outline"
-                    className={cn(
-                      "h-full min-h-[7.5rem] flex-col justify-center gap-1 whitespace-normal p-6 text-center",
-                      SELECTED_GLOW
-                    )}
-                  >
-                    <p className="text-lg font-semibold text-foreground">
-                      {iv === "month" ? "Monthly" : "Yearly"}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      {iv === "month" ? "Pay month-to-month" : "Save ~8% (1 month free)"}
-                    </p>
-                    <Badge
-                      className={cn(
-                        "mt-2 bg-emerald-500/20 text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-300",
-                        iv !== "year" && "invisible"
-                      )}
-                    >
-                      Best Value
-                    </Badge>
-                  </ToggleGroupItem>
-                ))}
-              </ToggleGroup>
 
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <Card size="sm">
@@ -797,7 +748,7 @@ export function ByosInstallForm({
                         </>
                       ) : (
                         <>
-                          <Wallet className="size-3.5" /> 100 starter credits included
+                          <Wallet className="size-3.5" /> Metered from your wallet
                         </>
                       )}
                     </p>
@@ -818,35 +769,12 @@ export function ByosInstallForm({
                 </Card>
               </div>
 
-              <Card className="border-ring bg-ring/5">
-                <CardContent className="space-y-3">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Management fee</span>
-                    <span className="text-foreground">
-                      {formatUsd(fee)}
-                      {feeSuffix}
-                    </span>
-                  </div>
-                  <div className="flex justify-between border-t pt-3">
-                    <span className="font-semibold text-foreground">Total</span>
-                    <span className="text-xl font-bold text-foreground">
-                      {formatUsd(fee)}
-                      <span className="text-sm font-normal text-muted-foreground">
-                        {feeSuffix}
-                      </span>
-                    </span>
-                  </div>
-                  {llmMode === "managed_credits" && (
-                    <p className="text-xs text-muted-foreground">
-                      Includes 100 starter credits. Additional LLM usage is metered from
-                      your credit wallet.
-                    </p>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    Have a promo code? You can apply it at checkout.
-                  </p>
-                </CardContent>
-              </Card>
+              {llmMode === "managed_credits" && (
+                <p className="text-xs text-muted-foreground">
+                  The first {BRANDING.name} Credits agent under this plan adds 100 starter
+                  credits. LLM usage is metered from your credit wallet.
+                </p>
+              )}
             </div>
           )}
         </CardContent>

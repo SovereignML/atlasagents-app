@@ -14,11 +14,14 @@ import {
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
 import { getEffectiveTeam } from "@/lib/effective-user"
 import { listServersForTeam, MAX_IDLE_SERVERS_PER_TEAM } from "@/lib/byos-server"
+import { findByosPlans } from "@/lib/byos-plan"
+import { planAllowsInstall } from "@/lib/byos-install"
 import { BYOS_PLAN, formatUsd } from "@/configs/plans"
 import { ServerCard, type ServerCardData } from "./server-card"
 
 const PLAN_FEATURES = [
   "Connecting a server is free",
+  "One plan covers every agent on its server",
   "Live specs and health monitoring",
   "Managed updates & backups",
   "Bring your own LLM key, or use credits",
@@ -37,6 +40,7 @@ export default async function ByosPage() {
 
   const servers = ctx ? await listServersForTeam(ctx.teamId) : []
   const idleUsed = servers.filter((s) => s.agentCount === 0).length
+  const plans = await findByosPlans(servers.map((s) => s.id))
 
   const cards: ServerCardData[] = servers.map((s) => ({
     id: s.id,
@@ -56,13 +60,25 @@ export default async function ByosPage() {
     hwKernel: s.hwKernel,
     capacityAgents: s.capacityAgents,
     agentCount: s.agentCount,
+    plan: (() => {
+      const p = plans.get(s.id)
+      return p
+        ? {
+            status: p.status,
+            allowsInstall: planAllowsInstall(p.status),
+            interval: p.interval,
+            currentPeriodEnd: p.currentPeriodEnd?.toISOString() ?? null,
+            cancelAtPeriodEnd: p.cancelAtPeriodEnd,
+          }
+        : null
+    })(),
   }))
 
   return (
     <PageContainer>
       <PageHeader
         title="Your servers"
-        description="Run managed agents on hardware you own. Connecting a server is free — you're only charged when you install an agent on one."
+        description="Run managed agents on hardware you own. Connecting a server is free — buy a BYOS plan for a server to install agents on it."
       />
 
       <div className="grid grid-cols-1 items-start gap-[18px] lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -102,7 +118,12 @@ export default async function ByosPage() {
           ) : (
             <div className="space-y-[18px]">
               {cards.map((s) => (
-                <ServerCard key={s.id} server={s} />
+                <ServerCard
+                  key={s.id}
+                  server={s}
+                  priceMonthly={BYOS_PLAN.displayPriceMonthly}
+                  priceYearly={BYOS_PLAN.displayPriceYearly}
+                />
               ))}
             </div>
           )}
@@ -114,10 +135,11 @@ export default async function ByosPage() {
           </p>
           <p className="mt-2 text-3xl font-semibold text-foreground">
             {formatUsd(BYOS_PLAN.displayPriceMonthly)}
-            <span className="ml-1 text-sm font-normal text-muted-foreground">/mo per agent</span>
+            <span className="ml-1 text-sm font-normal text-muted-foreground">/mo per server</span>
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Billed only once an agent is installed. Connected servers with no agent cost nothing.
+            Or {formatUsd(BYOS_PLAN.displayPriceYearly)}/yr. Buy it for the servers you want to
+            run agents on; connected servers without a plan cost nothing.
           </p>
           <ul className="mt-5 space-y-2 border-t border-border pt-5 text-sm text-muted-foreground">
             {PLAN_FEATURES.map((f) => (

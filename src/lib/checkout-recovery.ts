@@ -12,9 +12,14 @@
 // handler the webhook runs. That handler claims `stripe_checkout:<session.id>`,
 // so the webhook and this path can race freely — whichever claims first
 // processes the payment, the other no-ops.
+//
+// BYOS plans get the same treatment. A plan is bought for a connected server,
+// not an instance, so there is no `pending` row to find: the install page (the
+// plan's success_url) asks about its server, and the sweep scans recent paid
+// `byos_plan` sessions that never produced a Subscription row.
 
 import type Stripe from "stripe"
-import { db, instances, users, eq, and, gt } from "@/db"
+import { db, instances, subscriptions, users, eq, and, gt } from "@/db"
 import { stripe, isStripeConfigured } from "@/lib/stripe"
 import { handleCheckoutSessionCompleted } from "@/lib/stripe-events"
 
@@ -87,6 +92,85 @@ export async function recoverPaidCheckout(instanceId: string): Promise<boolean> 
     console.error(`[checkout-recovery] lookup failed for ${instanceId}:`, err)
     return false
   }
+}
+
+function isByosPlanSession(s: Stripe.Checkout.Session): boolean {
+  return s.metadata?.type === "byos_plan" && isPaid(s)
+}
+
+/**
+ * The install page for `serverId` found no plan. If Stripe holds a paid
+ * `byos_plan` session for it (the customer just came back from Checkout and
+ * the webhook hasn't landed, or never will), record the plan now. Awaited —
+ * it is a few DB writes, and the caller re-reads the plan straight after.
+ * Never throws; throttled per server.
+ */
+export async function recoverByosPlanCheckout(serverId: string, userId: string): Promise<boolean> {
+  if (!isStripeConfigured()) return false
+  const key = `byos_plan:${serverId}`
+  const now = Date.now()
+  if (now - (lastLookupAt.get(key) ?? 0) < LOOKUP_MIN_INTERVAL_MS) return false
+  lastLookupAt.set(key, now)
+
+  try {
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, userId),
+      columns: { stripeCustomerId: true },
+    })
+    if (!user?.stripeCustomerId) return false
+    const sessions = await stripe.checkout.sessions.list({
+      customer: user.stripeCustomerId,
+      created: { gte: Math.floor((now - MAX_PENDING_AGE_MS) / 1000) },
+      limit: 100,
+    })
+    const session = sessions.data.find(
+      (s) => isByosPlanSession(s) && s.metadata?.byosServerId === serverId,
+    )
+    if (!session) return false
+    console.warn(
+      `[checkout-recovery] BYOS plan session ${session.id} for server ${serverId} is paid but ` +
+        `unrecorded — the webhook never processed it. Recording now.`,
+    )
+    await handleCheckoutSessionCompleted(session)
+    return true
+  } catch (err) {
+    console.error(`[checkout-recovery] BYOS plan lookup failed for server ${serverId}:`, err)
+    return false
+  }
+}
+
+/**
+ * Background sweep for BYOS plans: paid `byos_plan` sessions from the last day,
+ * past the webhook's grace window, whose subscription has no local row.
+ */
+export async function sweepPaidByosPlanCheckouts(): Promise<number> {
+  if (!isStripeConfigured()) return 0
+  const now = Date.now()
+  const sessions = await stripe.checkout.sessions.list({
+    status: "complete",
+    created: { gte: Math.floor((now - MAX_PENDING_AGE_MS) / 1000) },
+    limit: 100,
+  })
+  let recovered = 0
+  for (const session of sessions.data) {
+    if (!isByosPlanSession(session)) continue
+    if (now - session.created * 1000 < SWEEP_GRACE_MS) continue
+    const subId =
+      typeof session.subscription === "string" ? session.subscription : session.subscription?.id
+    if (!subId) continue
+    const local = await db.query.subscriptions.findFirst({
+      where: eq(subscriptions.stripeSubscriptionId, subId),
+      columns: { id: true },
+    })
+    if (local) continue
+    try {
+      await handleCheckoutSessionCompleted(session)
+      recovered++
+    } catch (err) {
+      console.error(`[checkout-recovery] BYOS plan sweep failed for ${session.id}:`, err)
+    }
+  }
+  return recovered
 }
 
 /** Background sweep: every recent `pending` row past the webhook's grace window. */

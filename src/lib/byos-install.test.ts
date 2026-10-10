@@ -3,6 +3,10 @@ import { describe, it, expect } from "vitest"
 import {
   byosConnectionFields,
   installBlockedReason,
+  pickBestPlan,
+  planAllowsInstall,
+  planBlockedReason,
+  planIsLive,
   platformOwnsHostVm,
 } from "./byos-install"
 
@@ -100,5 +104,52 @@ describe("platformOwnsHostVm", () => {
     expect(platformOwnsHostVm("BYOS")).toBe(false)
     expect(platformOwnsHostVm("Byos")).toBe(false)
     expect(platformOwnsHostVm(" byos ")).toBe(false)
+  })
+})
+
+describe("BYOS plan entitlement", () => {
+  it("keeps agents covered through dunning, but not after Stripe ends the plan", () => {
+    expect(planIsLive("active")).toBe(true)
+    expect(planIsLive("trialing")).toBe(true)
+    expect(planIsLive("past_due")).toBe(true)
+    for (const s of ["canceled", "incomplete", "incomplete_expired", "unpaid", null, undefined]) {
+      expect(planIsLive(s)).toBe(false)
+    }
+  })
+
+  it("only lets a paid-up plan take a NEW install", () => {
+    expect(planAllowsInstall("active")).toBe(true)
+    expect(planAllowsInstall("trialing")).toBe(true)
+    expect(planAllowsInstall("past_due")).toBe(false)
+    expect(planAllowsInstall("canceled")).toBe(false)
+  })
+
+  it("explains each refusal, and has none for a paid-up plan", () => {
+    expect(planBlockedReason(null)).toMatch(/needs a BYOS plan/)
+    expect(planBlockedReason({ status: "past_due" })).toMatch(/unpaid invoice/)
+    expect(planBlockedReason({ status: "active" })).toBeNull()
+  })
+
+  describe("pickBestPlan", () => {
+    const at = (d: number) => new Date(2026, 9, d)
+
+    it("returns null when nothing is live", () => {
+      expect(pickBestPlan([])).toBeNull()
+      expect(pickBestPlan([{ status: "canceled", createdAt: at(1) }])).toBeNull()
+    })
+
+    it("prefers a plan that allows installs over a newer past_due one", () => {
+      const paid = { status: "active", createdAt: at(1) }
+      const dunning = { status: "past_due", createdAt: at(9) }
+      expect(pickBestPlan([dunning, paid])).toBe(paid)
+      expect(pickBestPlan([paid, dunning])).toBe(paid)
+    })
+
+    it("takes the newest among equally-good plans", () => {
+      const older = { status: "active", createdAt: at(1) }
+      const newer = { status: "active", createdAt: at(5) }
+      expect(pickBestPlan([older, newer])).toBe(newer)
+      expect(pickBestPlan([newer, older])).toBe(newer)
+    })
   })
 })

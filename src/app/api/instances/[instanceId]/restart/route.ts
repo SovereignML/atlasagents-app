@@ -6,6 +6,7 @@ import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { canOperateInstance } from "@/lib/instance-access"
 import { restartBot } from "@/lib/provisioner"
 import { logAuditEvent } from "@/lib/audit"
+import { byosAgentIsCovered } from "@/lib/byos-plan"
 
 export async function POST(
   _req: NextRequest,
@@ -39,6 +40,18 @@ export async function POST(
     return NextResponse.json(
       { error: `Cannot restart instance in ${instance.status} state` },
       { status: 400 }
+    )
+  }
+
+  // A BYOS agent stopped because its server's plan ended must not be brought
+  // back by a restart (systemctl restart starts a stopped unit).
+  if (instance.status === "stopped" && !(await byosAgentIsCovered(instance))) {
+    return NextResponse.json(
+      {
+        error: "This server's BYOS plan has ended. Buy a plan for it to start this agent again.",
+        code: "byos_plan_required",
+      },
+      { status: 402 },
     )
   }
 

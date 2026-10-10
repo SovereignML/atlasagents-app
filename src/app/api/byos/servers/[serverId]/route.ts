@@ -3,6 +3,7 @@ import { auth } from "@/auth"
 import { db, byosServers, instances, and, eq, ne, sql } from "@/db"
 import { getEffectiveTeam } from "@/lib/effective-user"
 import { refreshServer } from "@/lib/byos-server"
+import { findByosPlan } from "@/lib/byos-plan"
 import { apiError } from "@/lib/api-error"
 
 /**
@@ -47,8 +48,10 @@ export async function POST(
  * nothing on the machine is touched — it is the customer's hardware, and
  * "disconnect" means we stop managing it, not that we go and delete things.
  *
- * Refused while agents are installed, because those are billed and running;
- * the agent has to be deleted first.
+ * Refused while agents are installed (they are running; delete them first),
+ * and while the server has a BYOS plan that will renew — disconnecting would
+ * leave a subscription billing for a server nobody can see. A plan already set
+ * to cancel at period end doesn't block it.
  */
 export async function DELETE(
   _req: NextRequest,
@@ -74,6 +77,17 @@ export async function DELETE(
           error: `This server still has ${count} agent${count === 1 ? "" : "s"} on it. Delete ${
             count === 1 ? "it" : "them"
           } first.`,
+        },
+        { status: 409 },
+      )
+    }
+
+    const plan = await findByosPlan(serverId)
+    if (plan && !plan.cancelAtPeriodEnd) {
+      return NextResponse.json(
+        {
+          error:
+            "This server has a BYOS plan that will renew. Cancel it from Billing first, then disconnect.",
         },
         { status: 409 },
       )

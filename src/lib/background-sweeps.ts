@@ -3,13 +3,13 @@
 // scripts/cron-tick.sh drives these too, but a production box without the
 // crontab installed silently lost both: Free demos outlived their 30-minute
 // trial until someone happened to load an instance page (the only other
-// trigger), and a paid deploy whose webhook went missing stayed `pending`
-// forever. Both jobs are idempotent, so running here AND from cron is safe.
+// trigger), and a paid deploy (or BYOS plan) whose webhook went missing was
+// never recorded. Every job is idempotent, so running here AND from cron is safe.
 // Started from src/instrumentation.ts under the same production-only gate as
 // the warm-pool scheduler — the reaper destroys real VMs.
 
 import { maybeReapDemoInstances } from "@/lib/demo-reaper"
-import { sweepPendingPaidCheckouts } from "@/lib/checkout-recovery"
+import { sweepPaidByosPlanCheckouts, sweepPendingPaidCheckouts } from "@/lib/checkout-recovery"
 
 const SWEEP_INTERVAL_MS = 60_000
 
@@ -23,6 +23,9 @@ async function runSweeps(): Promise<void> {
     await maybeReapDemoInstances()
     await sweepPendingPaidCheckouts().catch((err) => {
       console.error("[background-sweeps] checkout recovery sweep failed:", err)
+    })
+    await sweepPaidByosPlanCheckouts().catch((err) => {
+      console.error("[background-sweeps] BYOS plan recovery sweep failed:", err)
     })
   } finally {
     inFlight = false
