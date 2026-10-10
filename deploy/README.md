@@ -130,7 +130,7 @@ reverse-proxy setup — no special headers required beyond `X-Forwarded-*`.
 Provisioning can upsert **proxied DNS** for each instance via the Cloudflare API:
 
 - **`CLOUDFLARE_API_TOKEN`** and **`CLOUDFLARE_ZONE_ID`** — required for automatic `A` records in the agent zone (`sovereignclaw.xyz` by default: `<name>.sovereignclaw.xyz`). That gives you **DNS + TLS at the Cloudflare edge** (visitors hit HTTPS on Cloudflare first).
-- **`CLOUDFLARE_AGENT_DOMAIN`** / **`CLOUDFLARE_AGENT_ZONE_ID`** (+ `_ORIGIN_CERT_*`) — optional: move **new** agents to another zone; existing agents keep their hostnames. Runbook: [`docs/REBRAND-LEGACY-IDENTIFIERS.md`](../docs/REBRAND-LEGACY-IDENTIFIERS.md#the-managed-agent-zone-sovereignclawxyz).
+- **`CLOUDFLARE_AGENT_DOMAIN`** / **`CLOUDFLARE_AGENT_ZONE_ID`** (+ `_ORIGIN_CERT_*`) — optional: move **new** agents to another zone (`atlasdeploy.xyz`); existing agents keep their hostnames. Check the config with `node --env-file=.env --import tsx scripts/check-agent-zones.ts --live`. Runbook: [`docs/REBRAND-LEGACY-IDENTIFIERS.md`](../docs/REBRAND-LEGACY-IDENTIFIERS.md#the-managed-agent-zone-sovereignclawxyz).
 
 **Origin connection** (Cloudflare → the agent box) is separate:
 

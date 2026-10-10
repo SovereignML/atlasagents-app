@@ -10,16 +10,18 @@ vi.mock("@/lib/ssh", () => ({
 
 const { ensureManagedOriginCert } = await import("./agent-origin-cert")
 
-const LEGACY_CERT = "-----BEGIN CERTIFICATE-----\nLEGACY\n-----END CERTIFICATE-----\n"
-const LEGACY_KEY = "-----BEGIN PRIVATE KEY-----\nLEGACYKEY\n-----END PRIVATE KEY-----\n"
-const NEW_CERT = "-----BEGIN CERTIFICATE-----\nNEW\n-----END CERTIFICATE-----\n"
-const NEW_KEY = "-----BEGIN PRIVATE KEY-----\nNEWKEY\n-----END PRIVATE KEY-----\n"
+const {
+  ATLASDEPLOY_CERT: NEW_CERT,
+  ATLASDEPLOY_KEY: NEW_KEY,
+  SOVEREIGNCLAW_CERT: LEGACY_CERT,
+  SOVEREIGNCLAW_KEY: LEGACY_KEY,
+} = await import("./__fixtures__/origin-certs")
 
 const VARS = {
   CLOUDFLARE_ZONE_ID: "zone-legacy",
   CLOUDFLARE_ORIGIN_CERT_PEM: LEGACY_CERT,
   CLOUDFLARE_ORIGIN_CERT_KEY: LEGACY_KEY,
-  CLOUDFLARE_AGENT_DOMAIN: "atlasagents.xyz",
+  CLOUDFLARE_AGENT_DOMAIN: "atlasdeploy.xyz",
   CLOUDFLARE_AGENT_ZONE_ID: "zone-new",
   CLOUDFLARE_AGENT_ORIGIN_CERT_PEM: NEW_CERT,
   CLOUDFLARE_AGENT_ORIGIN_CERT_KEY: NEW_KEY,
@@ -53,8 +55,8 @@ describe("ensureManagedOriginCert()", () => {
   // The warm-pool gap: a pooled VM never had a cert baked in, so it served
   // `tls internal` — a 526 behind a Full (strict) edge.
   it("installs the cert even when the box has none", async () => {
-    const out = await ensureManagedOriginCert(target, "agent-1a2b.atlasagents.xyz")
-    expect(out).toEqual({ useCfOriginTls: true, zone: "atlasagents.xyz" })
+    const out = await ensureManagedOriginCert(target, "agent-1a2b.atlasdeploy.xyz")
+    expect(out).toEqual({ useCfOriginTls: true, zone: "atlasdeploy.xyz" })
     expect(sshInstallCloudflareOriginCert).toHaveBeenCalledWith(target, NEW_CERT, NEW_KEY)
   })
 
@@ -67,16 +69,16 @@ describe("ensureManagedOriginCert()", () => {
     delete process.env.CLOUDFLARE_AGENT_ORIGIN_CERT_PEM
     delete process.env.CLOUDFLARE_AGENT_ORIGIN_CERT_KEY
     sshVmHasCloudflareOriginCerts.mockResolvedValue(true)
-    const out = await ensureManagedOriginCert(target, "agent-1a2b.atlasagents.xyz")
+    const out = await ensureManagedOriginCert(target, "agent-1a2b.atlasdeploy.xyz")
     expect(out.useCfOriginTls).toBe(true)
     expect(sshInstallCloudflareOriginCert).not.toHaveBeenCalled()
   })
 
   it("falls back, with a warning, when the install fails", async () => {
     sshInstallCloudflareOriginCert.mockResolvedValue({ stdout: "", stderr: "no caddy user", code: 1 })
-    const out = await ensureManagedOriginCert(target, "agent-1a2b.atlasagents.xyz")
+    const out = await ensureManagedOriginCert(target, "agent-1a2b.atlasdeploy.xyz")
     expect(out.useCfOriginTls).toBe(false)
-    expect(out.warning).toMatch(/Could not install the atlasagents\.xyz origin certificate \(exit 1\): no caddy user/)
+    expect(out.warning).toMatch(/Could not install the atlasdeploy\.xyz origin certificate \(exit 1\): no caddy user/)
   })
 
   it("leaves a hostname outside every agent zone alone", async () => {
@@ -85,9 +87,18 @@ describe("ensureManagedOriginCert()", () => {
     expect(sshInstallCloudflareOriginCert).not.toHaveBeenCalled()
   })
 
+  it("fails loudly on another zone's cert rather than installing one that cannot serve the hostname", async () => {
+    process.env.CLOUDFLARE_AGENT_ORIGIN_CERT_PEM = LEGACY_CERT
+    process.env.CLOUDFLARE_AGENT_ORIGIN_CERT_KEY = LEGACY_KEY
+    await expect(ensureManagedOriginCert(target, "agent-1a2b.atlasdeploy.xyz")).rejects.toThrow(
+      /CLOUDFLARE_AGENT_ORIGIN_CERT_PEM is a certificate for \*\.sovereignclaw\.xyz/,
+    )
+    expect(sshInstallCloudflareOriginCert).not.toHaveBeenCalled()
+  })
+
   it("fails loudly on a malformed cert rather than serving self-signed", async () => {
     process.env.CLOUDFLARE_AGENT_ORIGIN_CERT_PEM = "nope"
-    await expect(ensureManagedOriginCert(target, "agent-1a2b.atlasagents.xyz")).rejects.toThrow(
+    await expect(ensureManagedOriginCert(target, "agent-1a2b.atlasdeploy.xyz")).rejects.toThrow(
       /CLOUDFLARE_AGENT_ORIGIN_CERT_PEM is set but does not contain valid PEM/,
     )
   })

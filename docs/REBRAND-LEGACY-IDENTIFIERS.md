@@ -254,6 +254,13 @@ Full (strict) zone answers with a 526.
 
 ### Cutover runbook
 
+**Target: `atlasdeploy.xyz`** — registered 2026-08-17, active on Cloudflare in
+the platform account (verified 2026-10-11: `macy` / `johnathan` nameservers,
+Universal SSL covering `*.atlasdeploy.xyz`, the platform token reads its DNS).
+On that date `sovereignclaw.xyz` still held 14 agent A records and both zones
+were in SSL mode **Full**. (`atlasagents.xyz`, named here earlier, is someone
+else's parked domain.)
+
 1. **Own the domain** and put it on Cloudflare (nameservers on Cloudflare,
    zone active). `dig +short NS <domain>` must show the Cloudflare pair the
    account uses (`macy` / `johnathan`), not a registrar's parking servers.
@@ -264,19 +271,40 @@ Full (strict) zone answers with a 526.
 4. Set `CLOUDFLARE_AGENT_DOMAIN`, `CLOUDFLARE_AGENT_ZONE_ID`,
    `CLOUDFLARE_AGENT_ORIGIN_CERT_PEM`, `CLOUDFLARE_AGENT_ORIGIN_CERT_KEY`.
    **Change nothing else** — the legacy variables still serve every existing
-   agent. Then run `node --env-file=.env --import tsx scripts/check-agent-zones.ts`
-   — read-only, prints which zone new agents will use and anything missing.
+   agent (see *Replacing the zone outright* below for what repointing them
+   costs). Then run
+   `node --env-file=.env --import tsx scripts/check-agent-zones.ts --live`.
+   It prints no secrets; offline it shows which zone new agents use and checks
+   each origin cert against its zone (names, key, expiry), and `--live` asks
+   Cloudflare (GET only) whether each zone id is that domain's zone, whether
+   the token reaches its DNS, and which SSL mode it is in. Provisioning
+   refuses the same bad certs, before a VM is paid for.
 5. Run `node --env-file=.env --import tsx scripts/cloudflare-bootstrap.ts`. It
-   now targets the agent zone: Full (strict), Always Use HTTPS, min TLS 1.2,
-   wildcard fallback record.
+   targets the agent zone: Full (strict), Always Use HTTPS, min TLS 1.2, plus a
+   wildcard fallback record only if `CLOUDFLARE_FALLBACK_IP` is set. Leave the
+   legacy zone in Full until step 8 has given its agents their cert.
 6. Restart the app. New agents get `<name>.<domain>`. Warm-pool keys include
    the zone, so the pool retires its old-zone VMs and bakes replacements on
    its own within a few refill passes.
 7. Deploy one OpenClaw and one Hermes agent and load both URLs.
+8. Run `scripts/repair-agent-ingress.ts` (dry run, then `--apply`): it installs
+   the legacy zone's cert on old agents that never got one (warm-pool
+   deliveries). After that the legacy zone can go to Full (strict) as well.
 
 **Rollback:** unset the four `CLOUDFLARE_AGENT_*` variables and restart. Agents
 created in the new zone keep serving, but the app can no longer manage their
 DNS or certs — restore the variables before deleting or reprovisioning them.
+
+**Replacing the zone outright** — pointing `CLOUDFLARE_BASE_DOMAIN` /
+`CLOUDFLARE_ZONE_ID` / `CLOUDFLARE_ORIGIN_CERT_*` at the new zone instead of
+using `CLOUDFLARE_AGENT_*` — serves new agents just as well, and is fine once
+no agent lives in the old zone. Before that, every old agent falls out of
+every configured zone: it keeps serving, but deleting it leaves its DNS record
+pointing at a released IP, and its cert can no longer be reinstalled. It also
+moves white-label custom hostnames when `CLOUDFLARE_SAAS_ZONE_ID` is unset
+(Cloudflare for SaaS was not enabled on any zone as of 2026-10-11, so none
+existed). `check-agent-zones.ts --live` counts the A records left in
+`sovereignclaw.xyz` when nothing names it any more.
 
 **Keep `sovereignclaw.xyz` registered** (currently until 2027-04-26) for as
 long as any agent lives in it. Moving existing agents is not implemented and is

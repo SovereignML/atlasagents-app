@@ -1,19 +1,20 @@
 /**
  * One-time Cloudflare zone bootstrap for the agent zone new agents are created
- * in — `CLOUDFLARE_AGENT_DOMAIN` once that is configured, otherwise the legacy
- * `sovereignclaw.xyz` (see src/lib/agent-zones.ts).
+ * in — `CLOUDFLARE_AGENT_DOMAIN` once that is configured, otherwise the zone in
+ * `CLOUDFLARE_BASE_DOMAIN` / `CLOUDFLARE_ZONE_ID` (see src/lib/agent-zones.ts).
  *
  *   - Forces SSL=Full(Strict), Always-Use-HTTPS, Auto-HTTPS-Rewrites, min TLS 1.2
- *   - Adds a wildcard A record `*.<zone>` → CLOUDFLARE_FALLBACK_IP
- *     (proxied) so unknown subdomains don't leak origin errors.
+ *   - Only when CLOUDFLARE_FALLBACK_IP is set: adds a wildcard A record
+ *     `*.<zone>` → that IP (proxied), so unknown subdomains land on a page of
+ *     yours instead of NXDOMAIN. That host then needs the zone's origin cert
+ *     too, or the wildcard is a 526.
  *
  * Run with:
  *   node --env-file=.env --import tsx scripts/cloudflare-bootstrap.ts
  *
- * Required env: CLOUDFLARE_API_TOKEN (with Zone Settings + DNS edit on the zone),
- *               the zone (CLOUDFLARE_AGENT_DOMAIN + CLOUDFLARE_AGENT_ZONE_ID, or
- *               the legacy CLOUDFLARE_ZONE_ID), and
- *               CLOUDFLARE_FALLBACK_IP (the "agent not found" landing IP)
+ * Required env: CLOUDFLARE_API_TOKEN (with Zone Settings + DNS edit on the zone)
+ *               and the zone (CLOUDFLARE_AGENT_DOMAIN + CLOUDFLARE_AGENT_ZONE_ID,
+ *               or CLOUDFLARE_ZONE_ID). Optional: CLOUDFLARE_FALLBACK_IP.
  *
  * Full (strict) needs an Origin CA certificate on every agent box. Issue it in
  * the Cloudflare dashboard for THIS zone (SSL/TLS → Origin Server → Create
@@ -28,12 +29,7 @@ import { patchZoneSetting, upsertDnsRecord } from "@/lib/cloudflare"
 import { agentZoneConfigProblems, primaryAgentZone } from "@/lib/agent-zones"
 
 async function main() {
-  const fallbackIp = process.env.CLOUDFLARE_FALLBACK_IP
-  if (!fallbackIp) {
-    throw new Error(
-      "CLOUDFLARE_FALLBACK_IP is not set (IP of the wildcard landing host)",
-    )
-  }
+  const fallbackIp = process.env.CLOUDFLARE_FALLBACK_IP?.trim()
   const zone = primaryAgentZone()
   if (!zone.zoneId) {
     throw new Error(`No zone id for ${zone.domain} (CLOUDFLARE_AGENT_ZONE_ID / CLOUDFLARE_ZONE_ID).`)
@@ -47,6 +43,10 @@ async function main() {
   await patchZoneSetting("automatic_https_rewrites", "on", ctx)
   await patchZoneSetting("min_tls_version", "1.2", ctx)
 
+  if (!fallbackIp) {
+    console.log("CLOUDFLARE_FALLBACK_IP not set: no wildcard record (unknown subdomains stay NXDOMAIN). Done.")
+    return
+  }
   console.log(`Upserting wildcard fallback *.${zone.domain} → ${fallbackIp} (proxied)`)
   const rec = await upsertDnsRecord(
     {

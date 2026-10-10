@@ -30,6 +30,7 @@
  * Pure: reads an env object, never the network, so it is unit-testable.
  */
 
+import { X509Certificate, createPrivateKey, type KeyObject } from "node:crypto"
 import { isValidPem, normalizePem } from "@/lib/pem"
 
 // LEGACY WIRE FORMAT — the agent zone every existing agent was created in.
@@ -41,12 +42,12 @@ export const LEGACY_AGENT_DOMAIN = "sovereignclaw.xyz"
 type Env = Record<string, string | undefined>
 
 export type AgentZone = {
-  /** Apex the agent hostnames hang off, e.g. "atlasagents.xyz". Lowercase, no dots at the ends. */
+  /** Apex the agent hostnames hang off, e.g. "atlasdeploy.xyz". Lowercase, no dots at the ends. */
   domain: string
   /** Cloudflare zone id that holds the A records. Null when DNS automation is off for this zone. */
   zoneId: string | null
-  /** Env vars holding this zone's Origin CA cert + key (read lazily — see originCertFor). */
-  certVars: { cert: string; key: string }
+  /** Env vars that configure this zone, for messages; the cert + key are read lazily (see originCertFor). */
+  vars: { domain: string; zoneId: string; cert: string; key: string }
 }
 
 export type OriginCert = { certPem: string; keyPem: string }
@@ -65,7 +66,12 @@ export function legacyAgentZone(env: Env = process.env): AgentZone {
   return {
     domain: normalizeDomain(clean(env.CLOUDFLARE_BASE_DOMAIN) ?? LEGACY_AGENT_DOMAIN),
     zoneId: clean(env.CLOUDFLARE_ZONE_ID),
-    certVars: { cert: "CLOUDFLARE_ORIGIN_CERT_PEM", key: "CLOUDFLARE_ORIGIN_CERT_KEY" },
+    vars: {
+      domain: "CLOUDFLARE_BASE_DOMAIN",
+      zoneId: "CLOUDFLARE_ZONE_ID",
+      cert: "CLOUDFLARE_ORIGIN_CERT_PEM",
+      key: "CLOUDFLARE_ORIGIN_CERT_KEY",
+    },
   }
 }
 
@@ -83,7 +89,12 @@ export function newAgentZone(env: Env = process.env): AgentZone | null {
   return {
     domain: normalizeDomain(domain),
     zoneId,
-    certVars: { cert: "CLOUDFLARE_AGENT_ORIGIN_CERT_PEM", key: "CLOUDFLARE_AGENT_ORIGIN_CERT_KEY" },
+    vars: {
+      domain: "CLOUDFLARE_AGENT_DOMAIN",
+      zoneId: "CLOUDFLARE_AGENT_ZONE_ID",
+      cert: "CLOUDFLARE_AGENT_ORIGIN_CERT_PEM",
+      key: "CLOUDFLARE_AGENT_ORIGIN_CERT_KEY",
+    },
   }
 }
 
@@ -119,16 +130,74 @@ export function zoneDnsEnabled(
   return Boolean(zone?.zoneId && clean(env.CLOUDFLARE_API_TOKEN))
 }
 
+/** The DNS names a certificate covers (its subjectAltName entries). */
+function certDnsNames(x509: X509Certificate): string[] {
+  return (x509.subjectAltName ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.startsWith("DNS:"))
+    .map((s) => s.slice(4))
+}
+
+/** What a PEM certificate covers and until when, for the check script. Throws if it does not parse. */
+export function describeCertificate(certPem: string): { names: string[]; notAfter: Date } {
+  const x509 = new X509Certificate(certPem)
+  return { names: certDnsNames(x509), notAfter: new Date(x509.validTo) }
+}
+
+/**
+ * Why a cert + key cannot serve a zone's agents behind a Full (strict) edge,
+ * or null when they can. A cert for another zone is exactly what a textual
+ * find-and-replace of the domain in .env leaves behind, because the domain
+ * inside a PEM is base64. Every one of these is a 526 (or a Caddy that refuses
+ * to load the pair) on every agent in the zone, so it is caught here, once,
+ * instead of on each box.
+ */
+function originCertProblem(zone: AgentZone, certPem: string, keyPem: string, env: Env, now: Date): string | null {
+  const { cert: certVar, key: keyVar } = zone.vars
+  let x509: X509Certificate
+  try {
+    x509 = new X509Certificate(certPem)
+  } catch {
+    return `${certVar} is not a readable X.509 certificate.`
+  }
+  // Agent hostnames are one label under the zone apex: <name>.<zone>.
+  if (!x509.checkHost(`agent.${zone.domain}`)) {
+    const names = certDnsNames(x509)
+    return (
+      `${certVar} is a certificate for ${names.length ? names.join(", ") : "other names"}, but agents get ` +
+      `<name>.${zone.domain} (${zone.vars.domain}${clean(env[zone.vars.domain]) ? "" : " is unset, so that is the default"}): ` +
+      `every one would be a 526 behind Full (strict). Fix whichever is wrong — the domain, or the certificate ` +
+      `(a Cloudflare Origin CA certificate for *.${zone.domain} and ${zone.domain}, created in that zone).`
+    )
+  }
+  let key: KeyObject
+  try {
+    key = createPrivateKey(keyPem)
+  } catch {
+    return `${keyVar} is not a readable private key (use the unencrypted PEM key Cloudflare shows once, when the certificate is created).`
+  }
+  if (!x509.checkPrivateKey(key)) {
+    return `${keyVar} is not the private key of ${certVar}: Caddy would refuse to load the pair.`
+  }
+  const notAfter = new Date(x509.validTo)
+  if (notAfter.getTime() <= now.getTime()) {
+    return `${certVar} expired on ${notAfter.toISOString().slice(0, 10)}. Create a new Origin CA certificate for *.${zone.domain}.`
+  }
+  return null
+}
+
 /**
  * A zone's Origin CA cert + key, or null when none is configured.
  *
- * Throws on a half-configured or malformed pair. Ignoring it would put a
- * self-signed cert in front of a Full (strict) edge, which every visitor sees
- * as a 526 — failing the provision is the kinder outcome, and it is what the
- * provisioner always did for a bad CLOUDFLARE_ORIGIN_CERT_PEM.
+ * Throws on a half-configured or malformed pair, and on one that cannot serve
+ * the zone (another zone's cert, a key from another cert, expired). Ignoring it
+ * would put the wrong cert in front of a Full (strict) edge, which every
+ * visitor sees as a 526 — failing the provision is the kinder outcome, and it
+ * is what the provisioner always did for a bad CLOUDFLARE_ORIGIN_CERT_PEM.
  */
-export function originCertFor(zone: AgentZone, env: Env = process.env): OriginCert | null {
-  const { cert: certVar, key: keyVar } = zone.certVars
+export function originCertFor(zone: AgentZone, env: Env = process.env, now: Date = new Date()): OriginCert | null {
+  const { cert: certVar, key: keyVar } = zone.vars
   // Trimmed only to decide whether it is set; the PEM itself is used as given,
   // exactly as the provisioner always passed it through.
   const certRaw = clean(env[certVar]) ? env[certVar]! : null
@@ -152,6 +221,8 @@ export function originCertFor(zone: AgentZone, env: Env = process.env): OriginCe
       )
     }
   }
+  const problem = originCertProblem(zone, certPem, keyPem, env, now)
+  if (problem) throw new Error(problem)
   return { certPem, keyPem }
 }
 
@@ -171,7 +242,7 @@ export function agentZoneConfigProblems(env: Env = process.env): string[] {
     try {
       if (!originCertFor(zone, env)) {
         problems.push(
-          `No origin certificate for ${zone.domain} (${zone.certVars.cert} / ${zone.certVars.key}): ` +
+          `No origin certificate for ${zone.domain} (${zone.vars.cert} / ${zone.vars.key}): ` +
             `agents there are served with a self-signed cert, which only works while the zone's SSL mode is "Full", not "Full (strict)".`,
         )
       }

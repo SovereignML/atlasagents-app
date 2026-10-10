@@ -3,6 +3,7 @@ import {
   LEGACY_AGENT_DOMAIN,
   agentZoneConfigProblems,
   agentZones,
+  describeCertificate,
   legacyAgentZone,
   newAgentZone,
   originCertFor,
@@ -10,11 +11,12 @@ import {
   zoneDnsEnabled,
   zoneForHostname,
 } from "./agent-zones"
-
-const CERT = "-----BEGIN CERTIFICATE-----\nAAA\n-----END CERTIFICATE-----\n"
-const KEY = "-----BEGIN PRIVATE KEY-----\nBBB\n-----END PRIVATE KEY-----\n"
-const NEW_CERT = "-----BEGIN CERTIFICATE-----\nNEW\n-----END CERTIFICATE-----\n"
-const NEW_KEY = "-----BEGIN PRIVATE KEY-----\nNEWKEY\n-----END PRIVATE KEY-----\n"
+import {
+  ATLASDEPLOY_CERT as NEW_CERT,
+  ATLASDEPLOY_KEY as NEW_KEY,
+  SOVEREIGNCLAW_CERT as CERT,
+  SOVEREIGNCLAW_KEY as KEY,
+} from "./__fixtures__/origin-certs"
 
 /** Production today: the legacy zone only. */
 const LEGACY_ONLY = {
@@ -24,10 +26,10 @@ const LEGACY_ONLY = {
   CLOUDFLARE_ORIGIN_CERT_KEY: KEY,
 }
 
-/** After the cutover: new agents go to atlasagents.xyz, old ones stay put. */
+/** After the cutover: new agents go to atlasdeploy.xyz, old ones stay put. */
 const CUTOVER = {
   ...LEGACY_ONLY,
-  CLOUDFLARE_AGENT_DOMAIN: "atlasagents.xyz",
+  CLOUDFLARE_AGENT_DOMAIN: "atlasdeploy.xyz",
   CLOUDFLARE_AGENT_ZONE_ID: "zone-new",
   CLOUDFLARE_AGENT_ORIGIN_CERT_PEM: NEW_CERT,
   CLOUDFLARE_AGENT_ORIGIN_CERT_KEY: NEW_KEY,
@@ -50,16 +52,16 @@ describe("agent zones — before any cutover", () => {
 
 describe("agent zones — after the cutover", () => {
   it("creates new agents in the new zone", () => {
-    expect(primaryAgentZone(CUTOVER)).toMatchObject({ domain: "atlasagents.xyz", zoneId: "zone-new" })
+    expect(primaryAgentZone(CUTOVER)).toMatchObject({ domain: "atlasdeploy.xyz", zoneId: "zone-new" })
   })
 
   it("keeps both zones live, new first", () => {
-    expect(agentZones(CUTOVER).map((z) => z.domain)).toEqual(["atlasagents.xyz", "sovereignclaw.xyz"])
+    expect(agentZones(CUTOVER).map((z) => z.domain)).toEqual(["atlasdeploy.xyz", "sovereignclaw.xyz"])
   })
 
   it("routes an existing agent by its hostname, not by configuration", () => {
     expect(zoneForHostname("bot-bold-fox.sovereignclaw.xyz", CUTOVER)?.zoneId).toBe("zone-legacy")
-    expect(zoneForHostname("bot-bold-fox.atlasagents.xyz", CUTOVER)?.zoneId).toBe("zone-new")
+    expect(zoneForHostname("bot-bold-fox.atlasdeploy.xyz", CUTOVER)?.zoneId).toBe("zone-new")
   })
 
   it("does not move the legacy variables, which also back white-label hostnames", () => {
@@ -100,7 +102,7 @@ describe("zoneForHostname()", () => {
 
 describe("a half-finished cutover", () => {
   it("is ignored rather than thrown on, so DNS cleanup keeps working", () => {
-    const env = { ...LEGACY_ONLY, CLOUDFLARE_AGENT_DOMAIN: "atlasagents.xyz" }
+    const env = { ...LEGACY_ONLY, CLOUDFLARE_AGENT_DOMAIN: "atlasdeploy.xyz" }
     expect(newAgentZone(env)).toBeNull()
     expect(primaryAgentZone(env).domain).toBe("sovereignclaw.xyz")
   })
@@ -121,7 +123,7 @@ describe("originCertFor()", () => {
   it("is null when the zone has no cert", () => {
     const env = { ...CUTOVER, CLOUDFLARE_AGENT_ORIGIN_CERT_PEM: "", CLOUDFLARE_AGENT_ORIGIN_CERT_KEY: "" }
     expect(originCertFor(primaryAgentZone(env), env)).toBeNull()
-    expect(agentZoneConfigProblems(env).join("\n")).toMatch(/No origin certificate for atlasagents\.xyz/)
+    expect(agentZoneConfigProblems(env).join("\n")).toMatch(/No origin certificate for atlasdeploy\.xyz/)
   })
 
   it("turns literal \\n escapes back into newlines", () => {
@@ -141,6 +143,72 @@ describe("originCertFor()", () => {
   it("refuses something that is not PEM", () => {
     const env = { ...LEGACY_ONLY, CLOUDFLARE_ORIGIN_CERT_PEM: "not a cert" }
     expect(() => originCertFor(legacyAgentZone(env), env)).toThrow(/does not contain valid PEM/)
+  })
+})
+
+// Each of these passes the PEM-shape check and is still a 526 (or a Caddy that
+// will not start) on every agent in the zone.
+describe("originCertFor() — does the cert fit the zone", () => {
+  it("refuses another zone's cert, which is what a find-and-replace of the domain leaves behind", () => {
+    // The domain moved; the PEM, whose names are base64, did not.
+    const env = { ...LEGACY_ONLY, CLOUDFLARE_BASE_DOMAIN: "atlasdeploy.xyz" }
+    expect(() => originCertFor(legacyAgentZone(env), env)).toThrow(
+      /CLOUDFLARE_ORIGIN_CERT_PEM is a certificate for \*\.sovereignclaw\.xyz, sovereignclaw\.xyz, but agents get <name>\.atlasdeploy\.xyz \(CLOUDFLARE_BASE_DOMAIN\)/,
+    )
+    expect(agentZoneConfigProblems(env).join("\n")).toMatch(/526/)
+  })
+
+  it("says so when the domain is the default rather than a variable", () => {
+    // The new cert went in, CLOUDFLARE_BASE_DOMAIN did not: agents would still be named *.sovereignclaw.xyz.
+    const env = { ...LEGACY_ONLY, CLOUDFLARE_ORIGIN_CERT_PEM: NEW_CERT, CLOUDFLARE_ORIGIN_CERT_KEY: NEW_KEY }
+    expect(() => originCertFor(legacyAgentZone(env), env)).toThrow(
+      /<name>\.sovereignclaw\.xyz \(CLOUDFLARE_BASE_DOMAIN is unset, so that is the default\)/,
+    )
+  })
+
+  it("refuses a key that belongs to another cert", () => {
+    const env = { ...LEGACY_ONLY, CLOUDFLARE_ORIGIN_CERT_KEY: NEW_KEY }
+    expect(() => originCertFor(legacyAgentZone(env), env)).toThrow(
+      /CLOUDFLARE_ORIGIN_CERT_KEY is not the private key of CLOUDFLARE_ORIGIN_CERT_PEM/,
+    )
+  })
+
+  it("refuses PEM blocks that do not parse", () => {
+    const junkCert = { ...LEGACY_ONLY, CLOUDFLARE_ORIGIN_CERT_PEM: "-----BEGIN CERTIFICATE-----\nAAA\n-----END CERTIFICATE-----\n" }
+    expect(() => originCertFor(legacyAgentZone(junkCert), junkCert)).toThrow(/not a readable X\.509 certificate/)
+    const junkKey = { ...LEGACY_ONLY, CLOUDFLARE_ORIGIN_CERT_KEY: "-----BEGIN PRIVATE KEY-----\nBBB\n-----END PRIVATE KEY-----\n" }
+    expect(() => originCertFor(legacyAgentZone(junkKey), junkKey)).toThrow(/CLOUDFLARE_ORIGIN_CERT_KEY is not a readable private key/)
+  })
+
+  it("refuses an expired cert", () => {
+    expect(() => originCertFor(legacyAgentZone(LEGACY_ONLY), LEGACY_ONLY, new Date("2200-01-01"))).toThrow(
+      /CLOUDFLARE_ORIGIN_CERT_PEM expired on 2126-/,
+    )
+  })
+
+  it("describes what a cert covers, for the check script", () => {
+    const { names, notAfter } = describeCertificate(NEW_CERT)
+    expect(names).toEqual(["*.atlasdeploy.xyz", "atlasdeploy.xyz"])
+    expect(notAfter.getUTCFullYear()).toBe(2126)
+  })
+})
+
+describe("replacing the zone outright instead (legacy variables repointed)", () => {
+  const REPLACED = {
+    CLOUDFLARE_API_TOKEN: "tok",
+    CLOUDFLARE_BASE_DOMAIN: "atlasdeploy.xyz",
+    CLOUDFLARE_ZONE_ID: "zone-new",
+    CLOUDFLARE_ORIGIN_CERT_PEM: NEW_CERT,
+    CLOUDFLARE_ORIGIN_CERT_KEY: NEW_KEY,
+  }
+
+  it("serves new agents correctly", () => {
+    expect(primaryAgentZone(REPLACED)).toMatchObject({ domain: "atlasdeploy.xyz", zoneId: "zone-new" })
+    expect(originCertFor(primaryAgentZone(REPLACED), REPLACED)).toEqual({ certPem: NEW_CERT, keyPem: NEW_KEY })
+  })
+
+  it("drops every existing agent out of all zones, which is why the runbook keeps the legacy variables", () => {
+    expect(zoneForHostname("bot-bold-fox.sovereignclaw.xyz", REPLACED)).toBeNull()
   })
 })
 

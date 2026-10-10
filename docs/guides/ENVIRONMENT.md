@@ -200,16 +200,18 @@ Ed25519 keypair used to SSH into provisioned VMs.
 
 ## 19. Cloudflare (DNS / SSL / origin certs)
 
+Check the whole block with `node --env-file=.env --import tsx scripts/check-agent-zones.ts --live` (read-only; prints no secrets).
+
 | Variable | Required? | What it does | How to obtain / generate |
 |----------|-----------|--------------|--------------------------|
 | `CLOUDFLARE_API_TOKEN` | Feature | Automatic proxied `A` records for managed agent hostnames + custom-hostname management. | Cloudflare token with **Zone:DNS:Edit** + **Zone:SSL:Edit** (add SSL/Certificates:Edit for SaaS) on **every agent zone** (legacy and new). |
 | `CLOUDFLARE_ZONE_ID` | Feature | Zone id of the **legacy agent zone** (`sovereignclaw.xyz`), which keeps serving every agent created in it after a zone move. Also the fallback for `CLOUDFLARE_SAAS_ZONE_ID` — do not repoint it at a new zone. | Cloudflare dashboard → your zone → Overview. |
 | `CLOUDFLARE_SAAS_ZONE_ID` | Feature | SaaS-enabled zone for white-label custom hostnames. Falls back to `CLOUDFLARE_ZONE_ID`. | Your Cloudflare-for-SaaS zone id. |
-| `CLOUDFLARE_BASE_DOMAIN` | Feature | Domain of the legacy agent zone. Defaults to `sovereignclaw.xyz`. | Leave unset. |
-| `CLOUDFLARE_FALLBACK_IP` | Optional | Wildcard landing host IP (used by `scripts/cloudflare-bootstrap.ts`). | Your app server IP. |
-| `CLOUDFLARE_ORIGIN_CERT_PEM` | Optional | Origin CA cert (PEM) for `*.<legacy zone>`, installed over SSH on each box when an agent is configured (enables Cloudflare **Full (strict)**). | Cloudflare → the legacy zone → SSL/TLS → Origin Server → Create Certificate. |
+| `CLOUDFLARE_BASE_DOMAIN` | Feature | Domain of the legacy agent zone. Defaults to `sovereignclaw.xyz`. Do not repoint it (or `CLOUDFLARE_ZONE_ID` / `CLOUDFLARE_ORIGIN_CERT_*`) at a new zone while agents still live in the old one — use `CLOUDFLARE_AGENT_*`. | Leave unset. |
+| `CLOUDFLARE_FALLBACK_IP` | Optional | Wildcard landing host IP for `scripts/cloudflare-bootstrap.ts`; unset = no wildcard record, unknown subdomains stay NXDOMAIN. The host needs the zone's origin cert, or the wildcard is a 526. | Your app server IP. |
+| `CLOUDFLARE_ORIGIN_CERT_PEM` | Optional | Origin CA cert (PEM) for `*.<legacy zone>`, installed over SSH on each box when an agent is configured (enables Cloudflare **Full (strict)**). Provisioning refuses a cert that does not cover the zone, a key that is not its key, or an expired cert. | Cloudflare → the legacy zone → SSL/TLS → Origin Server → Create Certificate. |
 | `CLOUDFLARE_ORIGIN_CERT_KEY` | Optional | Matching origin CA private key (PEM). | Same as above. |
-| `CLOUDFLARE_AGENT_DOMAIN` | Optional | Domain of the **new agent zone**. With `CLOUDFLARE_AGENT_ZONE_ID` also set, new agents get `<name>.<this domain>`; existing agents keep their hostnames. Unset = no zone move. | A domain you own, on Cloudflare (e.g. `atlasagents.xyz`). |
+| `CLOUDFLARE_AGENT_DOMAIN` | Optional | Domain of the **new agent zone**. With `CLOUDFLARE_AGENT_ZONE_ID` also set, new agents get `<name>.<this domain>`; existing agents keep their hostnames. Unset = no zone move. | A domain you own, on Cloudflare (`atlasdeploy.xyz`). |
 | `CLOUDFLARE_AGENT_ZONE_ID` | Optional | Zone id of the new agent zone. Required together with `CLOUDFLARE_AGENT_DOMAIN`. | Cloudflare dashboard → the new zone → Overview. |
 | `CLOUDFLARE_AGENT_ORIGIN_CERT_PEM` | Optional | Origin CA cert for `*.<new agent domain>` (needed for Full (strict) there). | Cloudflare → the **new** zone → SSL/TLS → Origin Server → Create Certificate. |
 | `CLOUDFLARE_AGENT_ORIGIN_CERT_KEY` | Optional | Matching private key. | Same as above. |

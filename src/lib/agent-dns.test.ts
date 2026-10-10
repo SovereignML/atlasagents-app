@@ -39,7 +39,7 @@ afterEach(() => {
 })
 
 function cutover() {
-  process.env.CLOUDFLARE_AGENT_DOMAIN = "atlasagents.xyz"
+  process.env.CLOUDFLARE_AGENT_DOMAIN = "atlasdeploy.xyz"
   process.env.CLOUDFLARE_AGENT_ZONE_ID = "zone-new"
 }
 
@@ -56,7 +56,7 @@ describe("createAgentSubdomain()", () => {
   it("creates new agents in the new zone after the cutover", async () => {
     cutover()
     const { name } = await createAgentSubdomain("agent-1a2b", "203.0.113.10")
-    expect(name).toBe("agent-1a2b.atlasagents.xyz")
+    expect(name).toBe("agent-1a2b.atlasdeploy.xyz")
     expect(upsertDnsRecord).toHaveBeenCalledWith(expect.anything(), { zoneId: "zone-new" })
   })
 })
@@ -70,7 +70,7 @@ describe("deleteAgentSubdomain()", () => {
 
   it("deletes a new agent's record in the new zone", async () => {
     cutover()
-    await deleteAgentSubdomain("inst", "rec-new", "agent-1a2b.atlasagents.xyz")
+    await deleteAgentSubdomain("inst", "rec-new", "agent-1a2b.atlasdeploy.xyz")
     expect(deleteDnsRecord).toHaveBeenCalledWith("rec-new", { zoneId: "zone-new" })
   })
 
