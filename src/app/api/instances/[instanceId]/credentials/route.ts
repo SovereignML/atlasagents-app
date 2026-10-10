@@ -6,6 +6,7 @@ import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { canOperateInstance } from "@/lib/instance-access"
 import { decryptSecret } from "@/lib/crypto-secret"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
+import { runtimeCaps } from "@/lib/runtimes/labels"
 
 export async function GET(
   _req: NextRequest,
@@ -38,7 +39,7 @@ export async function GET(
   // enabled: then the openclawAdmin* columns hold the Open WebUI login, which
   // we surface below like any other admin login. Without the sidecar there is
   // no admin login at all, so tell the dashboard to hide the card.
-  if (instance.runtime === "hermes" && !instance.webuiEnabled) {
+  if (!runtimeCaps(instance.runtime).nativeAdminLogin && !instance.webuiEnabled) {
     return NextResponse.json(
       {
         error: "Hermes runtime has no admin login. Use the gateway token instead.",

@@ -38,10 +38,13 @@ import { calcPlanPrice, formatUsd } from "@/lib/pricing"
 import type { BillingInterval } from "@/lib/pricing"
 import { generateProjectName } from "@/lib/project-name"
 import { cn } from "@/lib/utils"
+import { RUNTIME_IDS } from "@/lib/runtimes/ids"
+import { RUNTIME_CAPS } from "@/lib/runtimes/labels"
+import type { RuntimeId } from "@/lib/runtimes/types"
 
 type Interface = "web" | "telegram" | "discord" | "api"
 type DeploymentTarget = "vps" | "shared" | "serverless"
-type Runtime = "openclaw" | "hermes"
+type Runtime = RuntimeId
 
 type AgentConfig = {
   use_case: string
@@ -62,10 +65,18 @@ type AgentConfig = {
 const FIXED_INTERFACE: Interface = "web"
 const FIXED_DEPLOYMENT_TARGET: DeploymentTarget = "vps"
 
-const RUNTIME_OPTIONS: { value: Runtime; label: string; hint: string; enabled: boolean }[] = [
-  { value: "openclaw", label: "OpenClaw", hint: "Default agent runtime", enabled: true },
-  { value: "hermes", label: "Hermes", hint: "Nous Research Hermes (Python)", enabled: true },
-]
+const RUNTIME_HINTS: Record<Runtime, string> = {
+  openclaw: "Default agent runtime",
+  hermes: "Nous Research Hermes (Python)",
+}
+
+const RUNTIME_OPTIONS: { value: Runtime; label: string; hint: string; enabled: boolean }[] =
+  RUNTIME_IDS.map((id) => ({
+    value: id,
+    label: RUNTIME_CAPS[id].label,
+    hint: RUNTIME_HINTS[id],
+    enabled: true,
+  }))
 
 // Map the lucide icon names referenced in agent-categories.ts to their
 // components so the use-case cards can render an icon per category.
@@ -138,13 +149,14 @@ export default function DeployPage() {
 
   const coreActions = selectedCategoryObj?.examples ? [...selectedCategoryObj.examples] : []
 
-  // Hermes boxes Open WebUI as a sidecar, so it needs ≥2GB RAM. The Free demo
-  // runs on a 4GB machine, so Hermes is allowed on Free; only sub-2GB plans are
-  // blocked.
-  function planSupportsRuntime(plan: PlanConfig): boolean {
-    if (runtime !== "hermes") return true
+  // Each engine has a RAM floor (`minRamGb`). Hermes boxes Open WebUI as a
+  // sidecar, so it needs ≥2GB RAM. The Free demo runs on a 4GB machine, so
+  // Hermes is allowed on Free; only sub-2GB plans are blocked.
+  function planSupportsRuntime(plan: PlanConfig, rt: Runtime = runtime): boolean {
+    const { minRamGb } = RUNTIME_CAPS[rt]
+    if (minRamGb === 0) return true
     const server = resolveServerForPlan(plan)
-    return !!server && server.ramGb >= 2
+    return !!server && server.ramGb >= minRamGb
   }
 
   // Free-plan-specific gating, layered on top of runtime support: the lifetime
@@ -154,7 +166,7 @@ export default function DeployPage() {
     if (plan.tier !== "free" || !freeUsage) return null
     if (freeUsage.exhausted) return "Free limit reached"
     if (freeUsage.activeRuntimes.includes(runtime)) {
-      return `Free ${runtime === "hermes" ? "Hermes" : "OpenClaw"} running`
+      return `Free ${RUNTIME_CAPS[runtime].label} running`
     }
     return null
   }
@@ -299,14 +311,12 @@ export default function DeployPage() {
                     // may already be live on the new runtime). Clear it so the
                     // form can't deploy an unsupported/blocked combo.
                     if (selectedPlan) {
-                      const server = resolveServerForPlan(selectedPlan)
-                      const hermesUnsupported =
-                        next === "hermes" && (!server || server.ramGb < 2)
+                      const runtimeUnsupported = !planSupportsRuntime(selectedPlan, next)
                       const freeBlocked =
                         selectedPlan.tier === "free" &&
                         !!freeUsage &&
                         (freeUsage.exhausted || freeUsage.activeRuntimes.includes(next))
-                      if (hermesUnsupported || freeBlocked) {
+                      if (runtimeUnsupported || freeBlocked) {
                         setSelectedPlan(null)
                       }
                     }

@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import type { AgentTool } from "@/configs/agent-tools"
+import { isRuntimeId } from "@/lib/runtimes/labels"
 import { KnowledgeManager } from "./instance-knowledge-manager"
 
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -89,9 +90,7 @@ export function ToolsTab({
   }, [enabled, initial])
 
   function supportedHere(tool: AgentTool): boolean {
-    return runtimeId === "openclaw" || runtimeId === "hermes"
-      ? tool.support[runtimeId] != null
-      : false
+    return isRuntimeId(runtimeId) ? tool.support[runtimeId] != null : false
   }
 
   function toggle(tool: AgentTool) {

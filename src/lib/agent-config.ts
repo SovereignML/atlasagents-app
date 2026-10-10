@@ -1,11 +1,13 @@
 import { z } from "zod"
+import { RUNTIME_IDS } from "@/lib/runtimes/ids"
+import { runtimeCaps } from "@/lib/runtimes/labels"
 
 export const ToneSchema = z.enum(["formal", "sales", "technical", "friendly"])
 export const InterfaceKindSchema = z.enum(["web", "telegram", "discord", "slack", "api"])
 export const DeploymentTargetSchema = z.enum(["vps", "shared", "serverless", "byos"])
 export const KnowledgeSourceSchema = z.enum(["none", "url", "file"])
 export const BudgetTierSchema = z.enum(["low", "mid", "high"])
-export const RuntimeSchema = z.enum(["openclaw", "hermes"])
+export const RuntimeSchema = z.enum(RUNTIME_IDS)
 
 /** Shape posted by the deploy wizard under `body.agentConfig`. */
 export const AgentConfigSchema = z.object({
@@ -48,8 +50,8 @@ export function normalizeAgentConfig(cfg: AgentConfig): AgentConfig {
   if (cfg.deployment_target !== "vps" && cfg.deployment_target !== "byos") {
     return { ...cfg, runtime: "openclaw", webui_enabled: false }
   }
-  // The Open WebUI sidecar only exists for Hermes.
-  if (cfg.runtime !== "hermes") {
+  // The Open WebUI sidecar only exists for engines that ship one (Hermes).
+  if (!runtimeCaps(cfg.runtime).hasSidecar) {
     return { ...cfg, webui_enabled: false }
   }
   return cfg

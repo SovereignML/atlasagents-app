@@ -13,6 +13,7 @@ import type {
 } from "./types"
 import { buildBootstrapFraming, browserInstallStep } from "./bootstrap"
 import { npmSpec } from "@/lib/runtime-versions"
+import { RUNTIME_CAPS } from "./labels"
 
 /* --- Caddy building blocks (shared by both runtime renderers) ------------ */
 
@@ -427,6 +428,7 @@ ${args.browserDeps === false ? "" : browserInstallStep()}`
   return {
     id: spec.id,
     displayName: spec.displayName,
+    caps: RUNTIME_CAPS[spec.id],
     npmPackage: spec.npmPackage,
     registry: spec.registry,
     version: spec.version,

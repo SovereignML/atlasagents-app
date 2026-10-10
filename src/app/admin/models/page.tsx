@@ -23,6 +23,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import { HERMES_MIN_CONTEXT } from "@/lib/runtimes/labels"
 
 type ConfiguredModel = {
   model: string
@@ -51,8 +52,6 @@ type AllowedModel = {
   enabled: boolean
 }
 
-/** Hermes rejects <64k models at startup — see HERMES_MIN_CONTEXT. */
-const HERMES_MIN_CONTEXT = 64_000
 
 type TestResult = {
   ok: boolean

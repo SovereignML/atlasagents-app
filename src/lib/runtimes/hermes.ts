@@ -18,6 +18,7 @@ import {
   renderToolServiceHandles,
   renderToolServiceSiteBody,
 } from "./shared"
+import { RUNTIME_CAPS } from "./labels"
 
 /**
  * Real Hermes runtime — Python package `hermes-agent` installed into a venv,
@@ -563,6 +564,7 @@ WantedBy=multi-user.target
 export const hermesRuntime: RuntimeEngine = {
   id: "hermes",
   displayName: "Hermes",
+  caps: RUNTIME_CAPS.hermes,
   npmPackage: HERMES_PYPI_DIST,
   registry: "pypi",
   version: HERMES_VERSION,
