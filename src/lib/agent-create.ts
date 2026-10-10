@@ -127,6 +127,15 @@ export async function createInstanceFromAgentFields(
   // sub-2GB plan still can't run it.
   if (args.agentConfig) {
     const caps = runtimeCaps(args.agentConfig.runtime)
+    // The Free plan's per-runtime slots (src/lib/free-tier.ts) only know
+    // OpenClaw and Hermes; the beta engines are paid-only.
+    if (planConfig.tier === "free" && !caps.allowedOnFree) {
+      return {
+        ok: false,
+        status: 400,
+        error: `${caps.label} is not available on the Free plan. Choose Builder or higher.`,
+      }
+    }
     if (serverConfig.ramGb < caps.minRamGb) {
       return {
         ok: false,

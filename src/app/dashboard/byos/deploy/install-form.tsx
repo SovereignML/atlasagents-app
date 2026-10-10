@@ -67,6 +67,8 @@ const STEP_LABELS: Record<Step, string> = {
 const RUNTIME_HINTS: Record<Runtime, string> = {
   openclaw: "Default agent runtime",
   hermes: "Nous Research Hermes (Python)",
+  "claude-code": "Anthropic's coding agent, with a browser terminal",
+  codex: "OpenAI's coding agent, with a browser terminal",
 }
 
 const RUNTIME_OPTIONS: { value: Runtime; label: string; hint: string }[] = RUNTIME_IDS.map(
@@ -100,6 +102,17 @@ export function ByosInstallForm({ server }: { server: InstallServer }) {
 
   // Agent step
   const [runtime, setRuntime] = useState<Runtime>("openclaw")
+  // Engines this account may deploy. Beta engines stay hidden until the server
+  // says otherwise (CLI_RUNTIMES_ENABLED, or a platform admin).
+  const [availableRuntimes, setAvailableRuntimes] = useState<Runtime[]>(() =>
+    RUNTIME_IDS.filter((id) => !RUNTIME_CAPS[id].beta),
+  )
+  useEffect(() => {
+    fetch("/api/runtimes")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => Array.isArray(d?.available) && setAvailableRuntimes(d.available))
+      .catch(() => {})
+  }, [])
 
   // Model step
   const [llmMode, setLlmMode] = useState<LlmMode>("managed_credits")
@@ -363,7 +376,7 @@ export function ByosInstallForm({ server }: { server: InstallServer }) {
                   className="grid w-full grid-cols-1 gap-2 md:grid-cols-2"
                   spacing={1}
                 >
-                  {RUNTIME_OPTIONS.map((r) => {
+                  {RUNTIME_OPTIONS.filter((r) => availableRuntimes.includes(r.value)).map((r) => {
                     const disabled = forcesHermes && !RUNTIME_CAPS[r.value].supportsCustomBaseUrl
                     const fits = fitsRuntime(r.value)
                     const fp = getFootprint(runtimeFootprintKey(r.value))
@@ -379,7 +392,12 @@ export function ByosInstallForm({ server }: { server: InstallServer }) {
                           disabled && "opacity-50"
                         )}
                       >
-                        <p className="text-sm font-medium text-foreground">{r.label}</p>
+                        <p className="text-sm font-medium text-foreground">
+                          {r.label}
+                          {RUNTIME_CAPS[r.value].beta && (
+                            <span className="ml-2 text-[10px] font-normal text-muted-foreground uppercase">Beta</span>
+                          )}
+                        </p>
                         <p className="text-xs text-muted-foreground">{r.hint}</p>
                         {fp && (
                           <p
@@ -398,8 +416,8 @@ export function ByosInstallForm({ server }: { server: InstallServer }) {
                 </ToggleGroup>
                 {forcesHermes && (
                   <p className="text-xs text-muted-foreground">
-                    Your chosen key provider runs on Hermes, so OpenClaw isn&apos;t
-                    available for this agent.
+                    Your chosen key provider runs on Hermes, so the other engines
+                    aren&apos;t available for this agent.
                   </p>
                 )}
                 {probed && !fitsRuntime(runtime) && selectedFootprint && (

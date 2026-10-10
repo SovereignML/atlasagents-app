@@ -45,6 +45,25 @@ export type RuntimeCaps = {
   hasSidecar: boolean
   /** Minimum model context window the engine accepts, when it has one. */
   minContext?: number
+  /**
+   * OpenRouter slug prefixes the engine can drive, e.g. `["anthropic/"]` —
+   * Claude Code speaks the Anthropic Messages API, so only Claude models work.
+   * Absent ⇒ any allowed chat model. Filters the per-instance model picker.
+   */
+  modelSlugPrefixes?: string[]
+  /**
+   * Ships a login-protected browser terminal at `/terminal` running the
+   * engine's own TUI (ttyd + tmux). Its login is the chat UI's admin account,
+   * so the admin credentials must reach the env on every (re)provision.
+   */
+  hasTerminal: boolean
+  /** Offered on the Free plan (which has one live agent per engine). */
+  allowedOnFree: boolean
+  /**
+   * Behind `CLI_RUNTIMES_ENABLED`: hidden from, and rejected for, everyone but
+   * platform admins until the flag is on. See `runtimeAvailableTo`.
+   */
+  beta?: boolean
 }
 
 export const RUNTIME_CAPS: Record<RuntimeId, RuntimeCaps> = {
@@ -55,6 +74,8 @@ export const RUNTIME_CAPS: Record<RuntimeId, RuntimeCaps> = {
     nativeAdminLogin: true,
     supportsCustomBaseUrl: false,
     hasSidecar: false,
+    hasTerminal: false,
+    allowedOnFree: true,
   },
   hermes: {
     label: "Hermes",
@@ -64,6 +85,32 @@ export const RUNTIME_CAPS: Record<RuntimeId, RuntimeCaps> = {
     supportsCustomBaseUrl: true,
     hasSidecar: true,
     minContext: HERMES_MIN_CONTEXT,
+    hasTerminal: false,
+    allowedOnFree: true,
+  },
+  "claude-code": {
+    label: "Claude Code",
+    minRamGb: 2,
+    exposesOpenAiApi: true,
+    nativeAdminLogin: false,
+    supportsCustomBaseUrl: false,
+    hasSidecar: true,
+    modelSlugPrefixes: ["anthropic/"],
+    hasTerminal: true,
+    allowedOnFree: false,
+    beta: true,
+  },
+  codex: {
+    label: "Codex",
+    minRamGb: 2,
+    exposesOpenAiApi: true,
+    nativeAdminLogin: false,
+    supportsCustomBaseUrl: false,
+    hasSidecar: true,
+    modelSlugPrefixes: ["openai/"],
+    hasTerminal: true,
+    allowedOnFree: false,
+    beta: true,
   },
 }
 
@@ -78,6 +125,25 @@ export function isRuntimeId(id: string | null | undefined): id is RuntimeId {
 /** Capabilities for a runtime id, coercing NULL / unknown to OpenClaw. */
 export function runtimeCaps(id: string | null | undefined): RuntimeCaps {
   return RUNTIME_CAPS[isRuntimeId(id) ? id : FALLBACK_RUNTIME_ID]
+}
+
+/**
+ * Whether a viewer may pick this engine. Beta engines need the
+ * `CLI_RUNTIMES_ENABLED` flag (resolved server-side and passed in, so this stays
+ * client-safe) unless the viewer is a platform admin.
+ */
+export function runtimeAvailableTo(
+  id: string | null | undefined,
+  viewer: { betaEnabled: boolean; isAdmin: boolean },
+): boolean {
+  if (!isRuntimeId(id)) return false
+  return !RUNTIME_CAPS[id].beta || viewer.betaEnabled || viewer.isAdmin
+}
+
+/** True when `slug` is a model the engine can drive (see `modelSlugPrefixes`). */
+export function runtimeAcceptsModel(id: string | null | undefined, slug: string): boolean {
+  const prefixes = runtimeCaps(id).modelSlugPrefixes
+  return !prefixes || prefixes.some((p) => slug.startsWith(p))
 }
 
 /** Client-safe display labels, derived from `RUNTIME_CAPS`. */

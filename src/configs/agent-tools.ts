@@ -5,7 +5,8 @@ import { n8nToolService } from "@/lib/runtimes/n8n-service"
  * Per-runtime realization of a tool. `null` means the tool is not available on
  * that runtime — `enabledToolsForRuntime` filters those out so a tool that only
  * one runtime supports silently no-ops on the other instead of breaking the
- * config render.
+ * config render. Engines with no entry (Claude Code, Codex) bring their own
+ * built-in tools; catalog runtime tools read as unsupported there until mapped.
  */
 export type ToolRuntimeSupport = {
   /** OpenClaw: tool name granted in `tools.alsoAllow` (e.g. "browser"). */

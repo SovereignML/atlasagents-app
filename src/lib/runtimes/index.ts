@@ -1,14 +1,23 @@
 import { openclawRuntime } from "./openclaw"
 import { hermesRuntime } from "./hermes"
+import { claudeCodeRuntime } from "./claude-code"
+import { codexRuntime } from "./codex"
 import type { RuntimeEngine, RuntimeId } from "./types"
 
 export const RUNTIMES: Record<RuntimeId, RuntimeEngine> = {
   openclaw: openclawRuntime,
   hermes: hermesRuntime,
+  "claude-code": claudeCodeRuntime,
+  codex: codexRuntime,
 }
 
 /** All selectable runtimes, in display order, for UI menus. */
-export const RUNTIME_LIST: RuntimeEngine[] = [openclawRuntime, hermesRuntime]
+export const RUNTIME_LIST: RuntimeEngine[] = [
+  openclawRuntime,
+  hermesRuntime,
+  claudeCodeRuntime,
+  codexRuntime,
+]
 
 /** Default runtime for instances with no explicit choice (backward compat). */
 export const DEFAULT_RUNTIME_ID: RuntimeId = "openclaw"

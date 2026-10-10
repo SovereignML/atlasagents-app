@@ -19,6 +19,7 @@ import { claimEvent, releaseEvent } from "@/lib/idempotency"
 import { isTeamSuspended } from "@/lib/tenant"
 import { getTeamAgentLimit, countTeamAgents } from "@/lib/seats"
 import { runtimeCaps } from "@/lib/runtimes/labels"
+import { runtimeDeployDenial } from "@/lib/runtime-access"
 import {
   getByoProvider,
   isByoProviderId,
@@ -265,6 +266,8 @@ async function handleByosDeploy(req: NextRequest) {
     return NextResponse.json({ error: `Invalid agentConfig: ${parsedAgentConfig.error}` }, { status: 400 })
   }
   const cfg = parsedAgentConfig.data
+  const runtimeDenial = runtimeDeployDenial(cfg.runtime, session)
+  if (runtimeDenial) return NextResponse.json({ error: runtimeDenial }, { status: 403 })
   // Derive the shared agent columns the same way the managed deploy path does
   // (soul, skills, botToken, runtime, and — critically — webuiEnabled, which
   // Hermes needs so the Open WebUI sidecar is installed and fronted by Caddy).

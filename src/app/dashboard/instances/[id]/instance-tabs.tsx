@@ -900,6 +900,7 @@ function CredentialsCard({
   ipAddress,
   runtimeLabel,
   webui,
+  terminal,
 }: {
   instanceId: string
   domain: string | null
@@ -907,8 +908,10 @@ function CredentialsCard({
   tlsStatus: string | null
   ipAddress: string | null
   runtimeLabel: string
-  /** When true the admin account is the Open WebUI login (Hermes sidecar). */
+  /** When true the admin account is the Open WebUI login (the chat UI sidecar). */
   webui?: boolean
+  /** When true the same login also opens the browser terminal at /terminal. */
+  terminal?: boolean
 }) {
   const [revealed, setRevealed] = useState<{ email: string; password: string; loginUrl: string | null } | null>(null)
   const [loading, setLoading] = useState(false)
@@ -950,7 +953,9 @@ function CredentialsCard({
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
             {webui
-              ? "Log into Open WebUI (the web chat UI for your Hermes agent) with the auto-generated admin account."
+              ? `Log into Open WebUI (the web chat UI for your ${runtimeLabel} agent) with the auto-generated admin account.${
+                  terminal ? " The same login opens its browser terminal." : ""
+                }`
               : `Log into your ${runtimeLabel} agent with the auto-generated admin account.`}
           </p>
           <Button size="sm" onClick={reveal} disabled={loading}>
@@ -968,6 +973,19 @@ function CredentialsCard({
               Login at{" "}
               <a href={loginUrl} target="_blank" rel="noreferrer" className="text-primary underline">
                 {loginUrl}
+              </a>
+            </p>
+          )}
+          {loginUrl && terminal && (
+            <p className="font-mono text-[10px] text-muted-foreground">
+              Terminal at{" "}
+              <a
+                href={`${loginUrl.replace(/\/$/, "")}/terminal/`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-primary underline"
+              >
+                {`${loginUrl.replace(/\/$/, "")}/terminal/`}
               </a>
             </p>
           )}
@@ -1512,6 +1530,7 @@ function OverviewTab({
               ipAddress={instance.ipAddress}
               runtimeLabel={instance.runtimeLabel}
               webui={runtimeCaps(instance.runtime).hasSidecar && instance.webuiEnabled}
+              terminal={runtimeCaps(instance.runtime).hasTerminal}
             />
           ) : null
         // Hermes leads with the Open WebUI login (primary path) and pushes the

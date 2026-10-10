@@ -42,6 +42,7 @@ import {
 } from "@/lib/runtimes/shared"
 import { ENV_KEY_CHANGED, buildEnvKeyUpsertScript } from "@/lib/runtimes/env-upsert"
 import { getRuntime, type RuntimeEngine, type RuntimeId } from "@/lib/runtimes"
+import { runtimeAcceptsModel } from "@/lib/runtimes/labels"
 import { FREE_DEMO_TTL_MS } from "@/configs/plans"
 import { isSafeVersion, resolveForRegistry } from "@/lib/runtime-versions"
 import {
@@ -98,7 +99,7 @@ import {
   AGENT_TOOLS,
   type AgentTool,
 } from "@/configs/agent-tools"
-import type { ToolService, ToolServiceRoute } from "@/lib/runtimes/types"
+import type { TerminalSpec, ToolService, ToolServiceRoute } from "@/lib/runtimes/types"
 import { claimWarmVm, isPoolEnabled } from "@/lib/warm-pool"
 import { platformOwnsHostVm } from "@/lib/byos-install"
 
@@ -378,6 +379,20 @@ async function resolveRuntimeLlmConfig(
     modelSlug: instance.modelSlug,
     routedModel: route.model,
   })
+  // Claude Code / Codex only drive their own model family, and only through
+  // OpenRouter (Anthropic- or OpenAI-compatible endpoints). Fail before boot
+  // rather than hand the user an agent that errors on its first message.
+  if (runtime.caps.modelSlugPrefixes) {
+    if (llmProvider !== "openrouter") {
+      throw new Error(`${runtime.displayName} runs on OpenRouter only (provider "${llmProvider}").`)
+    }
+    if (!runtimeAcceptsModel(runtime.id, model)) {
+      throw new Error(
+        `${runtime.displayName} cannot use model "${model}" — it needs a ` +
+          `${runtime.caps.modelSlugPrefixes.join(" or ")} model.`,
+      )
+    }
+  }
   if (runtime.renderInitScript && !isValidOpenRouterSlug(model)) {
     throw new Error(
       `${runtime.displayName} model "${model}" is not a valid OpenRouter <author>/<slug> ` +
@@ -824,6 +839,99 @@ if ! grep -q '"id"' /tmp/v1_models.out; then
 fi
 echo "=== provision: v1_models_ok ==="
 `
+}
+
+/**
+ * Install (or refresh) and start a runtime's browser terminal unit, then wait
+ * for ttyd to answer. Best-effort by design — callers log a failure and carry
+ * on, because the agent, its API and the chat UI do not depend on it. Exits 2
+ * when ttyd is not installed (the bootstrap's apt step is best-effort too).
+ *
+ * The unit is only restarted when its file changed: a restart kills the tmux
+ * session someone may be working in, so a routine reprovision (a skills toggle)
+ * must not do it. An unchanged unit is just `start`ed, a no-op if running.
+ */
+function buildTerminalStartScript(terminal: TerminalSpec): string {
+  const unitB64 = Buffer.from(terminal.renderSystemdUnit(), "utf8").toString("base64")
+  const svc = bashSingleQuoteForScript(terminal.serviceName)
+  return `#!/bin/bash
+set -uo pipefail
+UNIT=/etc/systemd/system/${terminal.serviceName}.service
+
+echo "=== terminal: install ==="
+if ! command -v ttyd >/dev/null 2>&1 || ! command -v tmux >/dev/null 2>&1; then
+  echo "ttyd/tmux not installed — browser terminal unavailable" >&2
+  exit 2
+fi
+echo ${bashSingleQuoteForScript(unitB64)} | base64 -d > "\${UNIT}.new"
+CHANGED=0
+if ! cmp -s "\${UNIT}.new" "\${UNIT}"; then
+  mv "\${UNIT}.new" "\${UNIT}"
+  systemctl daemon-reload
+  CHANGED=1
+else
+  rm -f "\${UNIT}.new"
+fi
+systemctl enable ${svc} >/dev/null 2>&1 || true
+if [ "\${CHANGED}" = "1" ]; then systemctl restart ${svc}; else systemctl start ${svc}; fi
+
+echo "=== terminal: health ==="
+for _ in \$(seq 1 15); do
+  if curl -sf -o /dev/null -m 3 "http://127.0.0.1:${terminal.port}${terminal.healthPath}"; then
+    echo "=== terminal: ok ==="
+    exit 0
+  fi
+  sleep 1
+done
+echo "terminal did not answer on :${terminal.port}" >&2
+journalctl -u ${svc} --no-pager -n 30 || true
+exit 1
+`
+}
+
+/**
+ * Run buildTerminalStartScript and record the outcome. Never throws — a broken
+ * terminal is a warning, not a failed deploy.
+ */
+async function startRuntimeTerminal(
+  instanceId: string,
+  target: SshTarget,
+  runtime: RuntimeEngine,
+  stage: VpsStage,
+): Promise<void> {
+  if (!runtime.terminal) return
+  try {
+    const step = await sshRunScriptLogged(
+      target,
+      buildTerminalStartScript(runtime.terminal),
+      stage,
+      "provision:terminal (ttyd)",
+      { timeoutMs: 60_000 },
+    )
+    await logSshStep(instanceId, step)
+    const ok = step.exitCode === 0 || step.exitCode === null
+    await logInstanceEvent({
+      instanceId,
+      level: ok ? "info" : "warn",
+      stage,
+      action: "terminal_started",
+      result: ok ? "ok" : "error",
+      message: ok
+        ? `${runtime.displayName} browser terminal is up at /terminal (same login as the chat UI).`
+        : step.exitCode === 2
+          ? "The browser terminal is unavailable on this server (ttyd could not be installed). The agent itself is unaffected."
+          : `The browser terminal did not start (exit ${step.exitCode}). The agent itself is unaffected.`,
+    })
+  } catch (err) {
+    await logInstanceEvent({
+      instanceId,
+      level: "warn",
+      stage,
+      action: "terminal_started",
+      result: "error",
+      message: `Could not start the browser terminal: ${err instanceof Error ? err.message : String(err)}`,
+    })
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -2473,6 +2581,9 @@ async function configureRuntimeOverSsh(
       })
     }
 
+    // Browser terminal (Claude Code / Codex). Best-effort, never fails the deploy.
+    await startRuntimeTerminal(instance.id, target, runtime, currentStage)
+
     // Companion services (n8n): install + start + seed once the gateway is
     // healthy. Kept off the warm-pool critical path (see runWarmPoolPostChecks).
     // Best-effort — a failure logs a warning but doesn't fail the deploy.
@@ -2925,6 +3036,11 @@ function sidecarServiceFor(instance: Instance): string | undefined {
   return instance.webuiEnabled && runtime.sidecar ? runtime.sidecar.serviceName : undefined
 }
 
+/** systemd unit name for the runtime's browser terminal, when it has one. */
+function terminalServiceFor(instance: Instance): string | undefined {
+  return getRuntime(instance.runtime).terminal?.serviceName
+}
+
 export async function restartBot(instance: Instance): Promise<void> {
   if (isLiveMode() && instance.ipAddress) {
     if (usesSystemd(instance)) {
@@ -2932,6 +3048,8 @@ export async function restartBot(instance: Instance): Promise<void> {
       await sshSystemctlRestart(target, getRuntime(instance.runtime).serviceName)
       const sidecar = sidecarServiceFor(instance)
       if (sidecar) await sshSystemctlRestart(target, sidecar)
+      const terminal = terminalServiceFor(instance)
+      if (terminal) await sshSystemctlRestart(target, terminal)
     } else if (instance.containerName) {
       await sshDockerRestart({ host: instance.ipAddress, instanceId: instance.id }, instance.containerName)
     }
@@ -2983,7 +3101,9 @@ export async function pauseBot(instance: Instance): Promise<void> {
   if (isLiveMode() && instance.ipAddress) {
     if (usesSystemd(instance)) {
       const target = sshTargetFor(instance)
-      // Stop the sidecar before the gateway it depends on.
+      // Stop the terminal and sidecar before the gateway they depend on.
+      const terminal = terminalServiceFor(instance)
+      if (terminal) await sshSystemctlStop(target, terminal)
       const sidecar = sidecarServiceFor(instance)
       if (sidecar) await sshSystemctlStop(target, sidecar)
       await sshSystemctlStop(target, getRuntime(instance.runtime).serviceName)
@@ -3005,10 +3125,12 @@ export async function resumeBot(instance: Instance): Promise<void> {
   if (isLiveMode() && instance.ipAddress) {
     if (usesSystemd(instance)) {
       const target = sshTargetFor(instance)
-      // Start the gateway before the sidecar that depends on it.
+      // Start the gateway before the sidecar and terminal that depend on it.
       await sshSystemctlStart(target, getRuntime(instance.runtime).serviceName)
       const sidecar = sidecarServiceFor(instance)
       if (sidecar) await sshSystemctlStart(target, sidecar)
+      const terminal = terminalServiceFor(instance)
+      if (terminal) await sshSystemctlStart(target, terminal)
     } else if (instance.containerName) {
       await sshDockerStart({ host: instance.ipAddress, instanceId: instance.id }, instance.containerName)
     }
@@ -3720,8 +3842,9 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
     const owner = `${systemUser}:${systemUser}`
 
     // Hermes has no admin login (bearer-token only). OpenClaw keeps the
-    // email/password it minted at first provision.
-    const hasAdminLogin = runtime.caps.nativeAdminLogin
+    // email/password it minted at first provision. The CLI engines need the
+    // chat UI's login in the env too: it is what guards their /terminal.
+    const hasAdminLogin = runtime.caps.nativeAdminLogin || runtime.caps.hasTerminal
     const adminEmail = hasAdminLogin
       ? (instance.openclawAdminEmail ??
         `admin+${instance.id.slice(0, 8)}@${runtime.id}.local`)
@@ -3889,6 +4012,10 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
       level: "info",
       message: `${runtime.displayName} service restarted with new config and identity files.`,
     })
+
+    // Installs the terminal on boxes that predate it; otherwise a no-op unless
+    // its unit changed (see buildTerminalStartScript for why it is not restarted).
+    await startRuntimeTerminal(instance.id, target, runtime, "writing_config")
 
     // Keep the chat UI's upstream connection and pre-selected model in step with
     // the gateway's. The init script above re-pinned Hermes' `model.default`;

@@ -1,7 +1,7 @@
 import { asc, eq } from "drizzle-orm"
 
 import { db, allowedModels } from "@/db"
-import { HERMES_MIN_CONTEXT, runtimeCaps } from "@/lib/runtimes/labels"
+import { HERMES_MIN_CONTEXT, runtimeAcceptsModel, runtimeCaps } from "@/lib/runtimes/labels"
 import {
   ALLOWED_OPENROUTER_MODELS,
   OPENROUTER_BASE_URL,
@@ -122,6 +122,8 @@ export async function syncModelMetadata(): Promise<{ updated: number }> {
 /** True for a chat model that satisfies the runtime's constraints. */
 function isSelectableForRuntime(row: AllowedModelRow, runtimeId: string): boolean {
   if (!row.enabled || row.kind !== "chat") return false
+  // Claude Code / Codex can only drive their own model family.
+  if (!runtimeAcceptsModel(runtimeId, row.slug)) return false
   // Hermes needs a known ≥64k context; OpenClaw has no floor.
   const { minContext } = runtimeCaps(runtimeId)
   if (minContext != null) {

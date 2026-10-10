@@ -68,6 +68,8 @@ const FIXED_DEPLOYMENT_TARGET: DeploymentTarget = "vps"
 const RUNTIME_HINTS: Record<Runtime, string> = {
   openclaw: "Default agent runtime",
   hermes: "Nous Research Hermes (Python)",
+  "claude-code": "Anthropic's coding agent, with a browser terminal",
+  codex: "OpenAI's coding agent, with a browser terminal",
 }
 
 const RUNTIME_OPTIONS: { value: Runtime; label: string; hint: string; enabled: boolean }[] =
@@ -126,6 +128,17 @@ export default function DeployPage() {
   const [projectName, setProjectName] = useState(() => generateProjectName())
   const [useCase, setUseCase] = useState<string>("")
   const [runtime, setRuntime] = useState<Runtime>("openclaw")
+  // Engines this account may deploy. Beta engines stay hidden until the server
+  // says otherwise (CLI_RUNTIMES_ENABLED, or a platform admin).
+  const [availableRuntimes, setAvailableRuntimes] = useState<Runtime[]>(() =>
+    RUNTIME_IDS.filter((id) => !RUNTIME_CAPS[id].beta),
+  )
+  useEffect(() => {
+    fetch("/api/runtimes")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => Array.isArray(d?.available) && setAvailableRuntimes(d.available))
+      .catch(() => {})
+  }, [])
 
   const [billingInterval, setBillingInterval] = useState<BillingInterval>("month")
   const [selectedPlan, setSelectedPlan] = useState<PlanConfig | null>(null)
@@ -153,7 +166,8 @@ export default function DeployPage() {
   // sidecar, so it needs ≥2GB RAM. The Free demo runs on a 4GB machine, so
   // Hermes is allowed on Free; only sub-2GB plans are blocked.
   function planSupportsRuntime(plan: PlanConfig, rt: Runtime = runtime): boolean {
-    const { minRamGb } = RUNTIME_CAPS[rt]
+    const { minRamGb, allowedOnFree } = RUNTIME_CAPS[rt]
+    if (plan.tier === "free" && !allowedOnFree) return false
     if (minRamGb === 0) return true
     const server = resolveServerForPlan(plan)
     return !!server && server.ramGb >= minRamGb
@@ -324,7 +338,7 @@ export default function DeployPage() {
                   className="grid w-full grid-cols-1 gap-2 md:grid-cols-2"
                   spacing={1}
                 >
-                  {RUNTIME_OPTIONS.map((r) => {
+                  {RUNTIME_OPTIONS.filter((r) => availableRuntimes.includes(r.value)).map((r) => {
                     const isSelected = runtime === r.value
                     return (
                       <ToggleGroupItem
@@ -355,6 +369,11 @@ export default function DeployPage() {
                           {!r.enabled && (
                             <Badge variant="outline" className="text-[10px]">
                               Coming soon
+                            </Badge>
+                          )}
+                          {r.enabled && RUNTIME_CAPS[r.value].beta && (
+                            <Badge variant="outline" className="text-[10px]">
+                              Beta
                             </Badge>
                           )}
                         </div>
