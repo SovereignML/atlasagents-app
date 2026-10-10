@@ -71,6 +71,24 @@ export async function handleCheckoutSessionCompleted(
     return
   }
 
+  // Two paths deliver a paid session here: the webhook and checkout-recovery
+  // (which asks Stripe directly when the webhook never arrives). Claim the
+  // session itself — not the webhook event id — so they can't both process it.
+  // Released on error so either path can re-attempt.
+  if (!(await claimEvent("stripe_checkout", session.id))) return
+  try {
+    await handlePaidSubscriptionCheckout(session, instanceId, metadata)
+  } catch (err) {
+    await releaseEvent("stripe_checkout", session.id)
+    throw err
+  }
+}
+
+async function handlePaidSubscriptionCheckout(
+  session: Stripe.Checkout.Session,
+  instanceId: string,
+  metadata: { planSlug?: string; interval?: "month" | "year" },
+): Promise<void> {
   const instance = await db.query.instances.findFirst({
     where: eq(instances.id, instanceId),
   })
@@ -112,7 +130,10 @@ export async function handleCheckoutSessionCompleted(
     const fresh = await db.query.instances.findFirst({
       where: eq(instances.id, instanceId),
     })
-    if (fresh) {
+    // Only a `pending` row is waiting on this payment. Anything else is already
+    // being (or was) provisioned — calling provisionBot again would contend the
+    // lock and the catch below would mark a healthy deploy failed.
+    if (fresh?.status === "pending") {
       await provisionBot(fresh)
     }
   } catch (err) {
@@ -146,6 +167,22 @@ export async function handleCheckoutSessionCompleted(
         interval: metadata.interval ?? "month",
       },
     })
+
+  // Grant the first invoice's plan credits HERE, not only from invoice.paid.
+  // Stripe does not order events: invoice.paid routinely lands before this
+  // handler has created the Subscription row, finds nothing, returns 200 — and
+  // the credits are never granted (the event is claimed, so a resend no-ops).
+  // Running the same handler now, with the row in place, closes that race.
+  // Idempotent: both paths share the `invoice_grant:<invoice.id>` claim.
+  if (stripeSubscriptionId) {
+    const sub = await stripe.subscriptions.retrieve(stripeSubscriptionId, {
+      expand: ["latest_invoice"],
+    })
+    const invoice = sub.latest_invoice
+    if (invoice && typeof invoice !== "string" && invoice.status === "paid") {
+      await handleInvoicePaid(invoice)
+    }
+  }
 
   await db.insert(instanceLogs).values({
     instanceId,

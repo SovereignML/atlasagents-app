@@ -48,6 +48,10 @@ export async function register() {
     if (warmPoolEnabled) {
       const { startWarmPoolScheduler } = await import("@/lib/warm-pool")
       startWarmPoolScheduler()
+      // Demo reaper + paid-checkout recovery. Same gate: the reaper destroys
+      // real VMs, so a dev laptop on the production `.env` must not run it.
+      const { startBackgroundSweeps } = await import("@/lib/background-sweeps")
+      startBackgroundSweeps()
     } else {
       console.warn(
         "[instrumentation] warm-pool scheduler NOT started (dev). " +
