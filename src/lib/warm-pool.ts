@@ -309,9 +309,13 @@ async function advanceWarmVm(row: typeof warmVms.$inferSelect): Promise<{
     // Bootstrap complete — run bake-finalize + capture the host fingerprint,
     // then mark ready. Failures here are non-fatal (best-effort warmup).
     try {
-      await sshRunScript(target, buildBakeFinalizeScript(row.runtime as RuntimeId, row.webuiEnabled), {
-        timeoutMs: 180_000,
-      })
+      // Long timeout on purpose: with a sidecar this waits for Open WebUI's
+      // first boot, which is exactly the cost we want paid here, not at claim.
+      await sshRunScript(
+        target,
+        buildBakeFinalizeScript(row.runtime as RuntimeId, row.webuiEnabled, { waitForSidecar: true }),
+        { timeoutMs: 480_000 },
+      )
     } catch {
       // warmup failed — still usable; claim re-runs the authoritative config.
     }

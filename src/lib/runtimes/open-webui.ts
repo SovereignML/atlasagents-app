@@ -218,6 +218,12 @@ export type OpenWebUiSidecarOpts = {
  * sentence-transformers, etc.) can't break the runtime's pins. Reaches the
  * gateway on loopback and binds its own UI on 127.0.0.1:8080 (HOST/PORT from
  * the env file); Caddy is the only public ingress.
+ *
+ * The unit `Wants=` the gateway rather than `Requires=` it. With `Requires=`,
+ * every gateway restart (each claim, each config change) also restarted Open
+ * WebUI and threw away its warm start, and a gateway that failed to start at
+ * bake kept Open WebUI from starting at all. Open WebUI copes with the gateway
+ * being briefly down; it just reports the model as unreachable until it is back.
  */
 export function makeOpenWebUiSidecar(opts: OpenWebUiSidecarOpts): SidecarSpec {
   return {
@@ -290,8 +296,7 @@ export function makeOpenWebUiSidecar(opts: OpenWebUiSidecarOpts): SidecarSpec {
       return `[Unit]
 Description=${opts.description}
 After=network-online.target ${opts.gatewayServiceName}.service
-Requires=${opts.gatewayServiceName}.service
-Wants=network-online.target
+Wants=network-online.target ${opts.gatewayServiceName}.service
 
 [Service]
 Type=simple
