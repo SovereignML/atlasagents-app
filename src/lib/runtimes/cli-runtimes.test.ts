@@ -223,7 +223,7 @@ describe.each(ENGINES)("$rt.displayName engine", ({ rt, port, cli, sdk }) => {
     expect(env.ENABLE_TITLE_GENERATION).toBe("false")
     expect(env.ENABLE_FOLLOW_UP_GENERATION).toBe("false")
     expect(env.OPENAI_API_BASE_URL).toBe(`http://127.0.0.1:${port}/v1`)
-    expect(rt.sidecar!.renderSystemdUnit()).toContain(`Requires=${rt.serviceName}.service`)
+    expect(rt.sidecar!.renderSystemdUnit()).toContain(`Wants=network-online.target ${rt.serviceName}.service`)
   })
 
   it("is beta, paid-only, and ships a sidecar plus terminal", () => {

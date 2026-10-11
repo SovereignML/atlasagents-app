@@ -140,6 +140,30 @@ Model routing is split because the two engines have different constraints:
 
 Budget tiers are `low | mid | high`.
 
+### Prewarmed Open WebUI on warm-pool VMs
+
+Open WebUI's first boot is slow (schema, migrations, a very large Python import), so the
+warm pool pays it at bake time, not while a customer waits
+([`open-webui-claim.ts`](../src/lib/runtimes/open-webui-claim.ts)):
+
+- **Bake** (`buildBakeFinalizeScript(..., { waitForSidecar: true })`) writes a placeholder env
+  with a **random per-VM `WEBUI_SECRET_KEY`** generated on the box, starts the sidecar, waits
+  until `/health` answers, and drops `/opt/open-webui/.atlas-prewarmed`. BYOS prebake starts
+  the sidecar but does not wait or mark, because a BYOS deploy always restarts it.
+- **Claim**: Phase A rewrites the env with the real values but keeps the bake secret. The
+  install phase keeps the sidecar running when the marker is present and it is healthy.
+  Then, before commit, the customer's admin account is **signed up on the running process**,
+  which is also pointed at the real gateway token, `DEFAULT_MODELS` and `WEBUI_URL` through
+  Open WebUI's admin API. Signup is then locked, and verified closed on `/api/config`. No
+  restart is needed. With `ENABLE_PERSISTENT_CONFIG=false` those API writes only touch the live
+  process, and the env file carries the same values into later restarts.
+- **Fallbacks**: no marker (a box baked before this change), an unhealthy sidecar, or a failed
+  hand-off all take the old path: restart the sidecar, then seed through signup.
+
+The sidecar unit `Wants=` the gateway instead of `Requires=` it. Under `Requires=`, every
+gateway restart (including the one at claim) restarted Open WebUI too, and a gateway that
+failed at bake kept Open WebUI from starting at all.
+
 ### The chat UI's default model
 
 Open WebUI needs its own pre-selected model — pinning Hermes' `model.default` is not enough.

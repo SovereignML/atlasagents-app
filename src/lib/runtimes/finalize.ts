@@ -13,6 +13,8 @@
  */
 
 import { getRuntime, type RuntimeId } from "@/lib/runtimes"
+import { buildSidecarBakeSteps } from "@/lib/runtimes/open-webui-claim"
+import { renderEnvFile } from "@/lib/runtimes/shared"
 
 /**
  * Bake-finalize: the slow-once, per-instance-INDEPENDENT work, run once the box
@@ -20,12 +22,26 @@ import { getRuntime, type RuntimeId } from "@/lib/runtimes"
  *  - Hermes: warm the venv + scaffold config via `setup --quick` + `doctor`
  *    (the expensive CLI cold starts), and pre-start Open WebUI so its SQLite DB
  *    + Python caches are warm (it boots fine without a live gateway upstream).
+ *    With `waitForSidecar`, wait until it answers and mark the box prewarmed,
+ *    so the claim keeps it running and only signs the customer up.
  *  - Both: install + enable the systemd unit(s) so claim only rewrites config
  *    and restarts, never installs.
  * Everything is best-effort (`|| true`): the authoritative config + start still
  * happens at claim, so a warmup miss only costs a little latency, never breaks.
  */
-export function buildBakeFinalizeScript(runtimeId: RuntimeId, webuiEnabled: boolean): string {
+export function buildBakeFinalizeScript(
+  runtimeId: RuntimeId,
+  webuiEnabled: boolean,
+  opts: {
+    /**
+     * Wait for Open WebUI to answer and mark the box prewarmed, so a claim can
+     * hand the running sidecar over without restarting it (see
+     * open-webui-claim.ts). The warm pool sets this; BYOS prebake does not,
+     * because its deploy always restarts the sidecar.
+     */
+    waitForSidecar?: boolean
+  } = {},
+): string {
   const runtime = getRuntime(runtimeId)
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
   const unitB64 = Buffer.from(runtime.renderSystemdUnit(), "utf8").toString("base64")
@@ -44,15 +60,16 @@ ${runAs("doctor --fix")}
   let sidecarWarm = ""
   if (webuiEnabled && runtime.sidecar) {
     const sc = runtime.sidecar
-    const sidecarUnitB64 = Buffer.from(sc.renderSystemdUnit(), "utf8").toString("base64")
-    // Placeholder env — rewritten with real secrets at claim. Enough for Open
+    // Placeholder env — rewritten with the real values at claim. Enough for Open
     // WebUI to boot and initialize its DB (it does not require a live upstream).
+    // The session secret is generated on the box, per VM: a prewarmed sidecar
+    // keeps running through the claim, so it must never be a shared constant.
     const placeholderEnv = sc.renderEnv({
       // Minimal instance stub; renderEnv reads gatewayToken/port/secret/publicUrl/model.
       instance: { id: "pool", domain: null } as never,
       gatewayToken: "pool-placeholder-token",
       gatewayPort: runtime.gatewayPort,
-      secretKey: "pool-placeholder-secret",
+      secretKey: "replaced-on-box",
       publicUrl: null,
       enableSignup: true,
       // A pooled VM has no instance yet, so no model to pin. Empty means the
@@ -60,22 +77,15 @@ ${runAs("doctor --fix")}
       // with the real per-instance value before the admin account is seeded.
       model: "",
     })
-    const envB64 = Buffer.from(
-      Object.entries(placeholderEnv)
-        .map(([k, v]) => `${k}=${v}`)
-        .join("\n") + "\n",
-      "utf8",
-    ).toString("base64")
-    sidecarWarm = `
-echo "=== bake: open-webui warmup ==="
-mkdir -p "$(dirname ${q(sc.envPath)})"
-echo ${q(envB64)} | base64 -d > ${q(sc.envPath)}
-chmod 600 ${q(sc.envPath)}
-echo ${q(sidecarUnitB64)} | base64 -d > "/etc/systemd/system/${sc.serviceName}.service"
-systemctl daemon-reload
-systemctl enable ${q(sc.serviceName)} || true
-systemctl start ${q(sc.serviceName)} || true
-`
+    sidecarWarm = buildSidecarBakeSteps({
+      envB64: Buffer.from(renderEnvFile(placeholderEnv), "utf8").toString("base64"),
+      envPath: sc.envPath,
+      unitB64: Buffer.from(sc.renderSystemdUnit(), "utf8").toString("base64"),
+      serviceName: sc.serviceName,
+      port: sc.port,
+      healthPath: sc.healthPath,
+      waitForReady: opts.waitForSidecar === true,
+    })
   }
 
   return `#!/bin/bash

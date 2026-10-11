@@ -205,7 +205,7 @@ describe("buildPrebakeScript()", () => {
     expect(script).toContain("prebake_finalize")
     expect(script).toContain("/etc/systemd/system/hermes-gateway.service")
     expect(script).toContain("/etc/systemd/system/open-webui.service")
-    expect(script).toContain("systemctl start 'open-webui'")
+    expect(script).toContain("systemctl restart 'open-webui'")
     expect(script).toContain("systemctl enable 'hermes-gateway'")
   })
 

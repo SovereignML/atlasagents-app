@@ -41,6 +41,13 @@ import {
   renderEnvFile,
 } from "@/lib/runtimes/shared"
 import { ENV_KEY_CHANGED, buildEnvKeyUpsertScript } from "@/lib/runtimes/env-upsert"
+import {
+  SIDECAR_PREWARMED,
+  buildCaptureBakeSecret,
+  buildClaimPrewarmedSidecarScript,
+  buildRestoreBakeSecret,
+  buildReusePrewarmedSidecar,
+} from "@/lib/runtimes/open-webui-claim"
 import { getRuntime, type RuntimeEngine, type RuntimeId } from "@/lib/runtimes"
 import { runtimeAcceptsModel } from "@/lib/runtimes/labels"
 import { FREE_DEMO_TTL_MS } from "@/configs/plans"
@@ -477,6 +484,12 @@ function buildPhaseWriteConfig(opts: {
   /** Optional sidecar env file (Hermes → Open WebUI). Written next to the runtime env. */
   sidecarEnvB64?: string
   sidecarEnvPath?: string
+  /**
+   * Warm-pool claim: if the box holds a prewarmed Open WebUI, keep its bake-time
+   * WEBUI_SECRET_KEY in the rewritten env file. The sidecar is not restarted on
+   * that path, so the file must match the secret the live process signs with.
+   */
+  keepPrewarmedSidecarSecret?: boolean
 }): string {
   const { installDir, configSubdir, configFileName, systemUser, envPath } = opts.runtime.paths
   const owner = `${systemUser}:${systemUser}`
@@ -510,12 +523,15 @@ chown -R ${owner} "\${OC_HOME}/${configSubdir}/workspace"
 
   // Sidecar env (e.g. Open WebUI). Written to an absolute path the sidecar's
   // systemd unit references via --env-file; owned by the runtime system user.
+  const keepSecret = opts.keepPrewarmedSidecarSecret === true && opts.sidecarEnvPath
   const sidecarEnvBlock =
     opts.sidecarEnvB64 && opts.sidecarEnvPath
       ? `
 echo "=== provision: write_sidecar_env ==="
 mkdir -p "$(dirname ${bashSingleQuoteForScript(opts.sidecarEnvPath)})"
+${keepSecret ? buildCaptureBakeSecret(opts.sidecarEnvPath) : ""}
 echo ${bashSingleQuoteForScript(opts.sidecarEnvB64)} | base64 -d > ${bashSingleQuoteForScript(opts.sidecarEnvPath)} || exit 1
+${keepSecret ? buildRestoreBakeSecret(opts.sidecarEnvPath) : ""}
 chmod 600 ${bashSingleQuoteForScript(opts.sidecarEnvPath)}
 chown ${owner} ${bashSingleQuoteForScript(opts.sidecarEnvPath)}
 `
@@ -548,7 +564,18 @@ const PROVISION_INSTALL_START_SSH_TIMEOUT_MS = 300_000
  * service crashes during the health check, the script restarts the service
  * and re-runs health checks before giving up.
  */
-type PhaseService = { serviceName: string; port: number; healthPath: string; unitB64: string }
+type PhaseService = {
+  serviceName: string
+  port: number
+  healthPath: string
+  unitB64: string
+  /**
+   * Keep the service running when the box marks it prewarmed and it is healthy,
+   * instead of stopping and restarting it (warm-pool Open WebUI; see
+   * open-webui-claim.ts). Falls back to the normal start otherwise.
+   */
+  reuseIfPrewarmed?: boolean
+}
 
 function buildPhaseInstallAndStart(opts: {
   /** Ordered: dependencies first (gateway), public-facing service last (e.g. sidecar). */
@@ -568,10 +595,17 @@ function buildPhaseInstallAndStart(opts: {
     )
     .join("\n")
   const startServices = opts.services
-    .map(
-      (s) =>
-        `start_one ${bashSingleQuoteForScript(s.serviceName)} ${bashSingleQuoteForScript(String(s.port))} ${bashSingleQuoteForScript(s.healthPath)} || exit 1`,
-    )
+    .map((s) => {
+      const start = `start_one ${bashSingleQuoteForScript(s.serviceName)} ${bashSingleQuoteForScript(String(s.port))} ${bashSingleQuoteForScript(s.healthPath)} || exit 1`
+      return s.reuseIfPrewarmed
+        ? buildReusePrewarmedSidecar({
+            serviceName: s.serviceName,
+            port: s.port,
+            healthPath: s.healthPath,
+            startCommand: start,
+          })
+        : start
+    })
     .join("\n")
 
   return `#!/bin/bash
@@ -2198,6 +2232,10 @@ async function configureRuntimeOverSsh(
   // Open WebUI sidecar (Hermes only): provisioned when the instance opted in
   // and the runtime defines a sidecar.
   const webuiEnabled = Boolean(instance.webuiEnabled) && Boolean(runtime.sidecar)
+  // A warm-pool VM may hold a prewarmed Open WebUI. If the box confirms it
+  // (marker + healthy), the claim keeps it running and signs the customer up
+  // over its API instead of restarting it. See open-webui-claim.ts.
+  const mayReusePrewarmedSidecar = fromWarmPool && webuiEnabled
 
   // OpenClaw uses an admin email/password for its own dashboard login. Hermes
   // authenticates with a single bearer token (API_SERVER_KEY) and has no admin
@@ -2354,6 +2392,7 @@ async function configureRuntimeOverSsh(
     identityMdB64,
     sidecarEnvB64,
     sidecarEnvPath,
+    keepPrewarmedSidecarSecret: mayReusePrewarmedSidecar,
   })
   const phaseAStep = await sshRunScriptLogged(
     target,
@@ -2442,6 +2481,7 @@ async function configureRuntimeOverSsh(
                 port: runtime.sidecar.port,
                 healthPath: runtime.sidecar.healthPath,
                 unitB64: sidecarUnitB64,
+                reuseIfPrewarmed: mayReusePrewarmedSidecar,
               },
             ]
           : []),
@@ -2454,6 +2494,11 @@ async function configureRuntimeOverSsh(
   )
   await logSshStep(instance.id, installStep)
   const installFailed = installStep.exitCode !== 0 && installStep.exitCode !== null
+  // The box kept its prewarmed Open WebUI running (still holding the bake
+  // placeholder config): the customer's account and the real gateway wiring
+  // must be applied below, before the deploy is committed.
+  const sidecarPrewarmed = !installFailed && installStep.stdout.includes(SIDECAR_PREWARMED)
+  let webuiAdminSeeded = false
   if (installFailed) {
     const stdout = installStep.stdout
     let failedPhase = "B+C+D"
@@ -2581,6 +2626,23 @@ async function configureRuntimeOverSsh(
       })
     }
 
+    // Warm-pool claim with a prewarmed Open WebUI: create the customer's admin
+    // account on the running sidecar and point it at the real gateway, model
+    // and URL over its API — no restart. On the critical path because until it
+    // runs the chat UI holds the bake placeholder token and open signup. If the
+    // live hand-off fails, fall back to the restart-based seed: the env file
+    // already holds the real values, so a restart picks them up.
+    if (webuiEnabled && runtime.sidecar && sidecarPrewarmed) {
+      webuiAdminSeeded = await claimPrewarmedSidecar({
+        instanceId: instance.id,
+        target,
+        runtime,
+        stage: currentStage,
+        adminEmail,
+        adminPassword,
+      })
+    }
+
     // Browser terminal (Claude Code / Codex). Best-effort, never fails the deploy.
     await startRuntimeTerminal(instance.id, target, runtime, currentStage)
 
@@ -2647,7 +2709,8 @@ async function configureRuntimeOverSsh(
       instanceId: instance.id,
       target,
       runtime,
-      webuiEnabled,
+      // Already done synchronously above when the sidecar was prewarmed.
+      webuiEnabled: webuiEnabled && !webuiAdminSeeded,
       adminEmail,
       adminPassword,
     }).catch(() => {
@@ -2666,6 +2729,104 @@ async function configureRuntimeOverSsh(
     containerPort: runtime.gatewayPort,
     vmId,
     mocked: false,
+  }
+}
+
+/**
+ * Hand a prewarmed Open WebUI to the customer: sign their admin account up on
+ * the running sidecar and apply the real config live (see open-webui-claim.ts).
+ * Falls back to the restart-based seed when the live hand-off fails. Returns
+ * whether the admin account exists and signup is locked. Never throws.
+ */
+async function claimPrewarmedSidecar(opts: {
+  instanceId: string
+  target: SshTarget
+  runtime: RuntimeEngine
+  stage: VpsStage
+  adminEmail: string
+  adminPassword: string
+}): Promise<boolean> {
+  const { instanceId, target, runtime, stage, adminEmail, adminPassword } = opts
+  const sidecar = runtime.sidecar
+  if (!sidecar) return false
+
+  try {
+    const claimStep = await sshRunScriptLogged(
+      target,
+      buildClaimPrewarmedSidecarScript({
+        port: sidecar.port,
+        envPath: sidecar.envPath,
+        adminEmail,
+        adminPassword,
+      }),
+      stage,
+      "provision:claim (open-webui account + live config)",
+      { timeoutMs: 90_000 },
+    )
+    await logSshStep(instanceId, claimStep)
+    if (claimStep.exitCode === 0 || claimStep.exitCode === null) {
+      await logInstanceEvent({
+        instanceId,
+        stage,
+        action: "webui_admin_seeded",
+        result: "ok",
+        message: "Open WebUI was prewarmed: admin account created and public signup disabled, no restart.",
+      })
+      return true
+    }
+    await logInstanceEvent({
+      instanceId,
+      level: "warn",
+      stage,
+      action: "webui_prewarm_claim",
+      result: "error",
+      message: `Prewarmed Open WebUI hand-off failed (exit ${claimStep.exitCode}); restarting it and seeding the admin instead. ${
+        claimStep.stderr.trim().split("\n").pop() ?? ""
+      }`.trim(),
+    })
+  } catch (err) {
+    await logInstanceEvent({
+      instanceId,
+      level: "warn",
+      stage,
+      action: "webui_prewarm_claim",
+      result: "error",
+      message: `Prewarmed Open WebUI hand-off failed; restarting it and seeding the admin instead. ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    })
+  }
+
+  try {
+    const seedStep = await sshRunScriptLogged(
+      target,
+      buildSeedSidecarAdminScript({
+        port: sidecar.port,
+        signupPath: sidecar.seedAdmin.signupPath,
+        envPath: sidecar.envPath,
+        serviceName: sidecar.serviceName,
+        adminEmail,
+        adminPassword,
+      }),
+      stage,
+      "provision:seed (open-webui admin) [prewarm fallback]",
+      { timeoutMs: 120_000 },
+    )
+    await logSshStep(instanceId, seedStep)
+    const seedOk = seedStep.exitCode === 0 || seedStep.exitCode === null
+    await logInstanceEvent({
+      instanceId,
+      level: seedOk ? "info" : "warn",
+      stage,
+      action: "webui_admin_seeded",
+      result: seedOk ? "ok" : "error",
+      message: seedOk
+        ? "Open WebUI admin account created and public signup disabled."
+        : "Could not seed the Open WebUI admin; signup is left open so the first visitor becomes admin.",
+    })
+    return seedOk
+  } catch {
+    return false
   }
 }
 
