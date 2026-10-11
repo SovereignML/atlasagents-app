@@ -50,6 +50,7 @@ import {
 } from "@/lib/runtimes/open-webui-claim"
 import { getRuntime, type RuntimeEngine, type RuntimeId } from "@/lib/runtimes"
 import { runtimeAcceptsModel } from "@/lib/runtimes/labels"
+import { selectableModelsForRuntime } from "@/lib/allowed-models"
 import { FREE_DEMO_TTL_MS } from "@/configs/plans"
 import { isSafeVersion, resolveForRegistry } from "@/lib/runtime-versions"
 import {
@@ -412,6 +413,20 @@ async function resolveRuntimeLlmConfig(
     providerToken: creds.providerToken,
     model,
     fallbackModel: route.fallback,
+  }
+}
+
+/**
+ * Slugs the runtime's chat UI may offer — the same list as the dashboard's
+ * per-instance picker. Best-effort: a DB hiccup costs the extra picker
+ * entries, never the provision, so it degrades to "default model only".
+ */
+async function selectableModelSlugs(runtimeId: string | null): Promise<string[]> {
+  try {
+    return (await selectableModelsForRuntime(runtimeId)).map((m) => m.slug)
+  } catch (err) {
+    console.error("[provisioner] could not load selectable models:", err)
+    return []
   }
 }
 
@@ -2430,6 +2445,7 @@ async function configureRuntimeOverSsh(
       envPath: runtime.paths.envPath,
       provider: llmConfig.providerToken,
       model: llmConfig.model,
+      selectableModels: await selectableModelSlugs(instance.runtime),
       baseUrl: llmConfig.baseUrl,
       enabledToolIds: expandAutoEnabledTools(instance.enabledTools ?? []),
       // Warm-pool VMs already ran setup/doctor at bake — skip them at claim.
@@ -4069,6 +4085,7 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
         envPath,
         provider: llmConfig.providerToken,
         model: llmConfig.model,
+        selectableModels: await selectableModelSlugs(instance.runtime),
         baseUrl: llmConfig.baseUrl,
         enabledToolIds: expandAutoEnabledTools(instance.enabledTools ?? []),
       })

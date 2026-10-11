@@ -176,6 +176,22 @@ the file, which by then holds a locked `ENABLE_SIGNUP` and a session secret we d
 and restarts the sidecar. `DEFAULT_MODELS` matches against the `id` Hermes returns from
 `GET /v1/models`.
 
+That list is the **only** thing Open WebUI's model picker shows, and unconfigured Hermes
+advertises a single id, `hermes-agent`, which never matched the slug in `DEFAULT_MODELS`.
+`renderInitScript` therefore writes `platforms.api_server.extra` into `config.yaml` (with the
+venv's PyYAML, because `hermes config set` splits keys on dots and slugs contain them):
+
+- `model_name` = the default slug, so `/v1/models` lists it under its real name and
+  `DEFAULT_MODELS` selects it;
+- `model_routes` = one alias per other slug from `selectableModelsForRuntime` (the same list as
+  the dashboard picker), so users can switch model per chat. A request whose `model` matches a
+  route runs on that model; anything else falls back to `model.default`.
+
+Routes are written only for the `openrouter` provider (the slugs are OpenRouter's), and the list
+is refreshed on every provision/reprovision, so a model newly enabled in admin shows up in
+the picker after that agent's next reprovision. The step is best-effort: if it fails, the picker
+loses its extra entries, but the agent keeps working.
+
 ### Credentials & switching
 
 - **`GET /api/instances/[instanceId]/credentials`** returns the admin login for OpenClaw, and for Hermes **only when the Open WebUI sidecar is enabled** (then `openclawAdmin*` hold the Open WebUI login). A Hermes instance **without** the sidecar has no admin login at all — the route returns `409 NO_ADMIN_FOR_HERMES` and the dashboard hides the card; bots authenticate with the **gateway token** (`API_SERVER_KEY`) instead. The OpenClaw/WebUI login and the gateway token are independent — rotating one doesn't rotate the other.
