@@ -14,6 +14,13 @@ updates:
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # typescript-eslint (via eslint-config-next) supports TypeScript < 6.1, and
+      # lint fails outright on TypeScript 7 ("typescript-eslint does not support
+      # TS 7.0"). package.json pins ~6.0.3 for the same reason. Lift this once a
+      # typescript-eslint release supports newer TypeScript.
+      - dependency-name: typescript
+        versions: [">= 6.1.0"]
 
   - package-ecosystem: github-actions
     directory: /
