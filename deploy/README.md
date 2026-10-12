@@ -118,10 +118,30 @@ npm run build
 pm2 restart redesigned-giggle       # or: sudo systemctl restart redesigned-giggle
 ```
 
+`pm2 restart` keeps the environment pm2 already holds. When an upgrade changes
+the `env` block in `deploy/pm2.config.cjs` (as the loopback bind below did),
+reload from the file instead, then save:
+
+```bash
+pm2 reload deploy/pm2.config.cjs --update-env && pm2 save
+ss -ltn | grep ':3000 '             # expect 127.0.0.1:3000, not 0.0.0.0:3000
+```
+
 ## 7. Reverse proxy
 
 Point nginx / Cloudflare Tunnel at `127.0.0.1:3000`. Standard Next.js
 reverse-proxy setup — no special headers required beyond `X-Forwarded-*`.
+
+The server binds to loopback (`HOSTNAME=127.0.0.1` in both start paths), so the
+proxy must run on the same host. Anything that called the app at
+`http://<server-ip>:3000` must use the public https URL instead — in particular
+`NEXT_PUBLIC_GATEWAY_BASE_URL`, which agents post their events and usage to.
+
+From the internet, only 22, 80 and 443 should answer. Enforce that in the cloud
+firewall (Azure network security group, DigitalOcean cloud firewall), not only
+with `ufw`: Docker-published ports such as Uptime Kuma's `-p 3001:3001` bypass
+`ufw` entirely. Publish those on loopback (`-p 127.0.0.1:3001:3001`) and reach
+them through the proxy or an SSH tunnel.
 
 **Per-team white-label custom dashboard domains** are served via **Cloudflare for SaaS** (the edge terminates TLS and proxies to your origin), so they no longer require Caddy as the public listener — see §10.
 
