@@ -74,13 +74,13 @@ POST /api/billing/usage-sync
 
 ### Enforcement
 
-After charging, each instance is checked and hard-stopped if any condition trips (`enforce()`):
+After charging, each instance is checked and hard-stopped if any condition trips (`decideEnforcement` in `src/lib/usage-enforcement.ts`, then `enforce()`):
 
 | Condition | Trigger |
 |-----------|---------|
 | **Cap hit** | `state.usageUsd >= state.limitUsd` |
 | **Anomaly** | one interval's `delta > ANOMALY_USD_PER_INTERVAL` (default **$50**, env-overridable) |
-| **Drained** | wallet below the minimum buffer (`isAboveMinimum` false) |
+| **Drained** | wallet below the minimum buffer (`isAboveMinimum` false). **Not applied to Free-tier demos** (non-null `expiresAt`): their 10-credit grant is below the 200-credit floor from the start, so they are bounded by the key cap and the 30-minute lifetime instead. |
 
 Enforcement is idempotent: disable the OpenRouter key (`updateRuntimeKey({ disabled: true })`), pause the bot (`pauseBot`), log the instance event, notify the user (billing/low-balance), and alert an admin (anomalies are flagged as the interesting case — a possible leaked token).
 

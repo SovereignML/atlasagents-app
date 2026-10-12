@@ -43,8 +43,11 @@ import {
 const PRICE_MONTHLY = 30
 const DAILY_COST_CREDITS = usdToCredits(PRICE_MONTHLY / 30)
 
-/** A running, non-BYOS instance owned by a funded-or-not user. */
-async function seedRunningInstance(): Promise<{ userId: string; instanceId: string }> {
+/** A running, non-BYOS instance owned by a funded-or-not user. Pass
+ *  `expiresAt` to make it a Free-tier demo. */
+async function seedRunningInstance(
+  opts: { expiresAt?: Date } = {},
+): Promise<{ userId: string; instanceId: string }> {
   const [user] = await db
     .insert(users)
     .values({ email: `${createId()}@itest.local` })
@@ -86,6 +89,7 @@ async function seedRunningInstance(): Promise<{ userId: string; instanceId: stri
       serverConfigId: config.id,
       storageGb: 50,
       status: "running",
+      expiresAt: opts.expiresAt ?? null,
     })
     .returning({ id: instances.id })
 
@@ -179,6 +183,25 @@ describe("daily billing — claim lifecycle (DB-backed)", () => {
     expect(second.charged).toBe(0)
     // Balance unchanged — the claim, not a balance check, is what prevents it.
     expect(await getWalletCredits(userId)).toBe(funded - DAILY_COST_CREDITS)
+    expect(pauseBot).not.toHaveBeenCalled()
+  })
+
+  it("skips a Free-tier demo: no charge, no claim, no pause", async () => {
+    // A demo's 10-credit grant can't cover a day of compute, so billing it
+    // would pause the demo mid-trial. The reaper ends it instead.
+    const { userId, instanceId } = await seedRunningInstance({
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    })
+    await depositToWallet(userId, 10, "topup")
+
+    const report = await runDailyBilling()
+
+    expect(report.processed).toBe(1)
+    expect(report.charged).toBe(0)
+    expect(report.stopped).toBe(0)
+    expect(report.errors).toEqual([])
+    expect(await claimExists(report.billingDay, instanceId)).toBe(false)
+    expect(await getWalletCredits(userId)).toBe(10)
     expect(pauseBot).not.toHaveBeenCalled()
   })
 })

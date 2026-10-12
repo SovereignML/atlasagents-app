@@ -48,11 +48,11 @@ export type WarmPoolBillingReport = {
 }
 
 /**
- * Runs daily billing for all running instances. For each instance the
- * daily cost is `serverConfig.priceMonthly / 30` (USD), converted to
- * credits and deducted from the owner's wallet. If the wallet can't
- * cover the charge the instance is paused and an admin notification is
- * created.
+ * Runs daily billing for all running instances except BYOS agents and
+ * Free-tier demos. For each instance the daily cost is
+ * `serverConfig.priceMonthly / 30` (USD), converted to credits and deducted
+ * from the owner's wallet. If the wallet can't cover the charge the instance
+ * is paused and an admin notification is created.
  *
  * Idempotency: a PER-INSTANCE claim key (`daily_billing:<day>:<instanceId>`)
  * is taken inside the same transaction as that instance's deduction, so the
@@ -88,6 +88,11 @@ export async function runDailyBilling(): Promise<DailyBillingReport> {
     // Revenue for these instances comes entirely from the management-panel
     // Stripe subscription; LLM usage (managed_credits) is metered separately.
     if (instance.deploymentTarget === "byos") continue
+
+    // Free-tier demo (non-null expiresAt): a 30-minute trial the platform
+    // carries, torn down by the demo reaper. Its 10-credit grant can never
+    // cover a day of compute, so charging it would pause the demo mid-trial.
+    if (instance.expiresAt) continue
 
     const dailyCostUsd = instance.serverConfig.priceMonthly / DAYS_PER_MONTH
     const dailyCostCredits = usdToCredits(dailyCostUsd)
