@@ -1,0 +1,21 @@
+# Dependabot version updates. npm minor and patch bumps arrive as one grouped
+# PR a week; a major bump gets its own PR. CI runs on each, including the
+# critical-advisory audit.
+#
+# Per-advisory security PRs are a separate switch: "Dependabot security
+# updates" in the repo's Settings → Code security.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

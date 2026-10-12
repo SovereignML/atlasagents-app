@@ -23,7 +23,8 @@ NextAuth v5, Stripe + Stripe Connect, Tailwind v4 / shadcn. Source of truth:
 - `npx tsc --noEmit` — typecheck (CI runs this; there is no `typecheck` script)
 - `npm run db:push` — sync schema to the DB (see Hard rules)
 
-CI (`.github/workflows/ci.yml`) runs lint, `npx tsc --noEmit`, test, build.
+CI (`.github/workflows/ci.yml`) runs lint, `npx tsc --noEmit`, test, integration
+tests, build, and `npm audit --omit=dev --audit-level=critical`.
 
 ## Hard rules
 
