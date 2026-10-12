@@ -2,23 +2,133 @@ import Link from "next/link"
 import { MotionConfig } from "framer-motion"
 import { Reveal, RevealGroup, RevealItem } from "@/components/marketing/motion/reveal"
 import { BRANDING } from "@/configs/branding"
+import { db, providers, providerHealthLogs, desc, eq, sql } from "@/db"
+import {
+  deploymentsState,
+  overallState,
+  HEADLINES,
+  type CheckState,
+  type ProviderProbe,
+} from "@/lib/platform-status"
 
-const SERVICES = [
-  { name: "API", status: "operational", uptime: 99.99 },
-  { name: "Dashboard", status: "operational", uptime: 99.98 },
-  { name: "Deploy Orchestrator", status: "operational", uptime: 99.95 },
-  { name: "Gateway", status: "operational", uptime: 99.97 },
-  { name: "Stripe Billing", status: "operational", uptime: 99.99 }, // {{TODO: confirm / wire live}}
-  { name: "Authentication", status: "operational", uptime: 99.99 },
-]
+// Checked when requested, never prerendered at build time.
+export const dynamic = "force-dynamic"
 
-const INCIDENTS = [
-  { date: "2026-03-28", title: "Brief gateway latency spike", status: "resolved", duration: "12 min" },
-  { date: "2026-03-14", title: "Scheduled Stripe webhook maintenance", status: "resolved", duration: "30 min" },
-]
+type Check = { name: string; state: CheckState; detail: string }
+type Snapshot = { checks: Check[]; checkedAt: Date }
 
-export default function StatusPage() {
-  const allOk = SERVICES.every((s) => s.status === "operational")
+// A public, unauthenticated page: reuse one snapshot for this long so traffic
+// can't turn into database load.
+const SNAPSHOT_TTL_MS = 30_000
+const QUERY_TIMEOUT_MS = 3_000
+
+async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function checkDatabase(): Promise<Check> {
+  const name = "Database"
+  try {
+    await withTimeout(db.execute(sql`select 1`), QUERY_TIMEOUT_MS)
+    return { name, state: "operational", detail: "Answered a query." }
+  } catch {
+    return {
+      name,
+      state: "outage",
+      detail: "Did not answer within 3 seconds. Sign-in, billing and the dashboard depend on it.",
+    }
+  }
+}
+
+/** The newest probe for each enabled provider (null if it has never been probed). */
+async function latestProviderProbes(): Promise<ProviderProbe[]> {
+  const enabled = await db.query.providers.findMany({
+    where: eq(providers.enabled, true),
+    columns: { id: true },
+  })
+  return Promise.all(
+    enabled.map(async (p) => {
+      const [probe] = await db
+        .select({ status: providerHealthLogs.status, checkedAt: providerHealthLogs.checkedAt })
+        .from(providerHealthLogs)
+        .where(eq(providerHealthLogs.providerId, p.id))
+        .orderBy(desc(providerHealthLogs.checkedAt))
+        .limit(1)
+      return probe ?? null
+    }),
+  )
+}
+
+const DEPLOYMENT_DETAIL: Record<CheckState, string> = {
+  operational: "A server provider passed its latest health check.",
+  degraded: "Server providers are returning errors, so new deployments may fail or be slow.",
+  outage: "No server provider passed its latest health check, so new deployments will fail.",
+  unknown: "No server provider health check in the last hour.",
+}
+
+async function checkDeployments(now: Date): Promise<Check> {
+  const name = "New agent deployments"
+  try {
+    const state = deploymentsState(await withTimeout(latestProviderProbes(), QUERY_TIMEOUT_MS), now)
+    return { name, state, detail: DEPLOYMENT_DETAIL[state] }
+  } catch {
+    return { name, state: "unknown", detail: "Provider health could not be read." }
+  }
+}
+
+/** Never rejects: each check turns its own failure into a state. */
+async function takeSnapshot(): Promise<Snapshot> {
+  const checkedAt = new Date()
+  const checks: Check[] = [
+    { name: "Dashboard and API", state: "operational", detail: "Served this page." },
+    ...(await Promise.all([checkDatabase(), checkDeployments(checkedAt)])),
+  ]
+  return { checks, checkedAt }
+}
+
+let cached: { at: number; snapshot: Promise<Snapshot> } | null = null
+
+function getSnapshot(): Promise<Snapshot> {
+  const now = Date.now()
+  if (!cached || now - cached.at >= SNAPSHOT_TTL_MS) {
+    cached = { at: now, snapshot: takeSnapshot() }
+  }
+  return cached.snapshot
+}
+
+const STATE_STYLE: Record<CheckState, { dot: string; text: string; label: string }> = {
+  operational: { dot: "bg-primary", text: "text-primary", label: "Operational" },
+  degraded: { dot: "bg-amber-400", text: "text-amber-400", label: "Degraded" },
+  outage: { dot: "bg-red-400", text: "text-red-400", label: "Down" },
+  unknown: {
+    dot: "bg-[var(--text-secondary)]",
+    text: "text-[var(--text-secondary)]",
+    label: "Unknown",
+  },
+}
+
+const BANNER_STYLE: Record<CheckState, string> = {
+  operational: "border-primary bg-primary/10",
+  degraded: "border-amber-400/40 bg-amber-400/10",
+  outage: "border-red-500/40 bg-red-500/10",
+  unknown: "border-[var(--border-color)] bg-[var(--card-bg)]",
+}
+
+export default async function StatusPage() {
+  const { checks, checkedAt } = await getSnapshot()
+  const overall = overallState(checks.map((c) => c.state))
+  const beacon = STATE_STYLE[overall].dot
+
   return (
     <MotionConfig reducedMotion="user">
       <div className="min-h-screen bg-[var(--bg-color)] text-[var(--text-primary)]">
@@ -28,119 +138,61 @@ export default function StatusPage() {
               {BRANDING.name}
             </Link>
             <div className="text-xs font-mono text-[var(--text-secondary)]">
-              Last updated: {new Date().toISOString().slice(0, 19).replace("T", " ")} UTC
+              Checked: {checkedAt.toISOString().slice(0, 19).replace("T", " ")} UTC
             </div>
           </div>
 
-          <Reveal
-            className={`rounded-2xl border p-6 flex items-center gap-4 ${
-              allOk ? "border-primary bg-primary/10" : "border-red-500/40 bg-red-500/10"
-            }`}
-          >
-            {/* Live beacon — pulsing ring that conveys "monitoring right now". */}
+          <Reveal className={`rounded-2xl border p-6 flex items-center gap-4 ${BANNER_STYLE[overall]}`}>
+            {/* Live beacon, colored by the worst current check. */}
             <span className="relative flex h-3.5 w-3.5 shrink-0">
               <span
-                className={`absolute inline-flex h-full w-full rounded-full opacity-75 animate-[beacon-pulse_2s_ease-out_infinite] ${
-                  allOk ? "bg-primary" : "bg-red-400"
-                }`}
+                className={`absolute inline-flex h-full w-full rounded-full opacity-75 animate-[beacon-pulse_2s_ease-out_infinite] ${beacon}`}
               />
-              <span
-                className={`relative inline-flex h-3.5 w-3.5 rounded-full ${
-                  allOk ? "bg-primary" : "bg-red-400"
-                }`}
-              />
+              <span className={`relative inline-flex h-3.5 w-3.5 rounded-full ${beacon}`} />
             </span>
             <div>
-              <h1 className="text-3xl font-bold text-[var(--text-primary)]">
-                {allOk ? "All systems operational" : "Incident in progress"}
-              </h1>
+              <h1 className="text-3xl font-bold text-[var(--text-primary)]">{HEADLINES[overall]}</h1>
               <p className="text-sm text-[var(--text-secondary)] mt-1">
-                Live from our monitoring probes, every 60 seconds.
+                Checked live when this page is requested; results are reused for up to 30 seconds.
               </p>
             </div>
           </Reveal>
 
           <section>
-            <h2 className="text-xs font-mono text-[var(--text-secondary)] mb-3">
-              Services
-            </h2>
+            <h2 className="text-xs font-mono text-[var(--text-secondary)] mb-3">Services</h2>
             <RevealGroup className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] overflow-hidden">
-              {SERVICES.map((s, i) => (
-                <RevealItem
-                  key={s.name}
-                  className={`flex items-center justify-between px-4 py-3 transition-colors hover:bg-[var(--card-hover)] ${
-                    i !== SERVICES.length - 1 ? "border-b border-[var(--border-color)]" : ""
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="relative flex h-2 w-2">
-                      <span className="absolute inline-flex h-full w-full rounded-full bg-primary opacity-60 animate-ping" />
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-                    </span>
-                    <span className="text-sm">{s.name}</span>
-                  </div>
-                  <div className="flex items-center gap-6">
-                    <span className="text-[10px] font-mono uppercase tracking-wide text-primary">
-                      {s.status}
-                    </span>
-                    <span className="text-xs font-mono text-[var(--text-secondary)] w-20 text-right tabular-nums">
-                      {s.uptime.toFixed(2)}%
-                    </span>
-                  </div>
-                </RevealItem>
-              ))}
-            </RevealGroup>
-          </section>
-
-          <section>
-            <h2 className="text-xs font-mono text-[var(--text-secondary)] mb-3">
-              90-day timeline
-            </h2>
-            <Reveal className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] p-4">
-              <div className="flex gap-0.5">
-                {Array.from({ length: 90 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className={`flex-1 h-10 rounded-[2px] transition-transform duration-150 hover:scale-y-110 origin-bottom ${
-                      i === 17 ? "bg-amber-400/70" : "bg-primary/40 hover:bg-primary/70"
+              {checks.map((c, i) => {
+                const style = STATE_STYLE[c.state]
+                return (
+                  <RevealItem
+                    key={c.name}
+                    className={`flex items-start justify-between gap-6 px-4 py-3 transition-colors hover:bg-[var(--card-hover)] ${
+                      i !== checks.length - 1 ? "border-b border-[var(--border-color)]" : ""
                     }`}
-                    title={i === 17 ? `Day ${90 - i} · incident` : `Day ${90 - i} · operational`}
-                  />
-                ))}
-              </div>
-              <div className="flex justify-between text-[10px] font-mono text-[var(--text-secondary)] mt-2">
-                <span>90 days ago</span>
-                <span>Today</span>
-              </div>
-            </Reveal>
-          </section>
-
-          <section>
-            <h2 className="text-xs font-mono text-[var(--text-secondary)] mb-3">
-              Recent incidents
-            </h2>
-            <RevealGroup className="space-y-2">
-              {INCIDENTS.map((i) => (
-                <RevealItem
-                  key={i.date}
-                  className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] shadow-[var(--shadow-sm)] p-4 flex items-center justify-between transition-all duration-300 hover:border-primary/30 hover:shadow-[var(--shadow-hover)]"
-                >
-                  <div>
-                    <p className="text-sm">{i.title}</p>
-                    <p className="text-[10px] font-mono text-[var(--text-secondary)] mt-1">
-                      {i.date} · {i.duration}
-                    </p>
-                  </div>
-                  <span className="text-[10px] font-mono uppercase tracking-wide text-primary border border-primary/40 px-2 py-0.5 rounded-full">
-                    {i.status}
-                  </span>
-                </RevealItem>
-              ))}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className={`mt-1.5 inline-flex h-2 w-2 shrink-0 rounded-full ${style.dot}`} />
+                      <div>
+                        <p className="text-sm">{c.name}</p>
+                        <p className="text-xs text-[var(--text-secondary)] mt-0.5">{c.detail}</p>
+                      </div>
+                    </div>
+                    <span className={`text-[10px] font-mono uppercase tracking-wide ${style.text}`}>
+                      {style.label}
+                    </span>
+                  </RevealItem>
+                )
+              })}
             </RevealGroup>
           </section>
 
-          <p className="text-[10px] font-mono text-amber-400/80">
-            Warning: live monitoring integration pending. Current values are placeholder
+          <p className="text-xs text-[var(--text-secondary)]">
+            Each agent&apos;s own health is on its page in the dashboard. Seeing a problem that
+            isn&apos;t shown here? Email{" "}
+            <a href={`mailto:${BRANDING.supportEmail}`} className="underline">
+              {BRANDING.supportEmail}
+            </a>
+            .
           </p>
         </div>
       </div>
