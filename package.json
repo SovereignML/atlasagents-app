@@ -82,7 +82,7 @@
     "@vitest/ui": "^4.1.8",
     "dotenv": "^16.4.7",
     "drizzle-kit": "^0.31.5",
-    "eslint": "^9",
+    "eslint": "^10",
     "eslint-config-next": "16.4.0",
     "shadcn": "^4.1.0",
     "tailwindcss": "^4",
