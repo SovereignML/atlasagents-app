@@ -435,6 +435,42 @@ WantedBy=multi-user.target
       ? `${run("config set browser.provider local")} || echo "warn: could not set browser.provider" >&2\n`
       : ""
 
+    // What `/v1/models` advertises — the only list the Open WebUI picker sees.
+    // Unset, Hermes lists a single id, `hermes-agent`, which never matches the
+    // sidecar's DEFAULT_MODELS (the slug), so the picker opened with nothing
+    // valid selected. `model_name` advertises the default under its real slug;
+    // each `model_routes` alias maps a slug the UI sends as `model` to that
+    // model for that request (any other value falls back to `model.default`).
+    // Written with the venv's PyYAML because `config set` splits keys on dots
+    // and slugs contain them (`z-ai/glm-5.1`). Best-effort: a failure costs the
+    // picker, not the agent.
+    const routes =
+      args.provider === "openrouter"
+        ? [...new Set(args.selectableModels ?? [])].filter((s) => s && s !== args.model)
+        : []
+    const apiModels = JSON.stringify({ default: args.model, provider: args.provider, routes })
+    const python = args.cliBinary.replace(/[^/]+$/, "python")
+    const modelsStep = `sudo -u ${bashSingleQuote(args.systemUser)} env HOME=${bashSingleQuote(args.installDir)} HERMES_API_MODELS=${bashSingleQuote(apiModels)} ${bashSingleQuote(python)} - <<'PY' || echo "warn: could not write api_server model routes" >&2
+import json, os, yaml
+spec = json.loads(os.environ["HERMES_API_MODELS"])
+path = os.path.join(os.environ["HOME"], ${JSON.stringify(HERMES_CONFIG_SUBDIR)}, "config.yaml")
+with open(path, encoding="utf-8") as f:
+    cfg = yaml.safe_load(f) or {}
+def node(parent, key):
+    if not isinstance(parent.get(key), dict):
+        parent[key] = {}
+    return parent[key]
+extra = node(node(node(cfg, "platforms"), "api_server"), "extra")
+extra["model_name"] = spec["default"]
+extra["model_routes"] = {s: {"model": s, "provider": spec["provider"]} for s in spec["routes"]}
+tmp = path + ".tmp"
+with open(tmp, "w", encoding="utf-8") as f:
+    yaml.safe_dump(cfg, f, sort_keys=False)
+os.chmod(tmp, os.stat(path).st_mode & 0o777)
+os.replace(tmp, path)
+PY
+`
+
     // Warm-pool fast path: `setup --quick` and `doctor --fix` already ran at
     // bake, so at claim we only apply the per-instance config deltas + a fast
     // `config check`. This is the single biggest saving toward the <25s target.
@@ -467,6 +503,8 @@ ${baseUrlStep}${run("config set terminal.backend local")} || exit 1
 
 echo "=== provision: hermes_toolsets ==="
 ${toolsetsStep}${browserStep}
+echo "=== provision: hermes_api_models ==="
+${modelsStep}
 echo "=== provision: hermes_config_check ==="
 if ! ${run("config check")}; then
   echo "hermes config check failed" >&2

@@ -291,3 +291,55 @@ describe("Hermes bootstrap — Python install strategy", () => {
     }
   })
 })
+
+/**
+ * `/v1/models` is the only list Open WebUI's picker sees. Unconfigured, Hermes
+ * advertises just `hermes-agent`, which never matched the sidecar's
+ * DEFAULT_MODELS (the slug) — so the picker had no valid default and offered
+ * nothing else to switch to.
+ */
+describe("hermesRuntime.renderInitScript() api_server models", () => {
+  const base = {
+    installDir: "/opt/hermes",
+    systemUser: "hermes",
+    cliBinary: "/opt/hermes/venv/bin/hermes",
+    envPath: "/opt/hermes/.hermes/.env",
+    model: "minimax/minimax-m2.5",
+    baseUrl: "https://openrouter.ai/api/v1",
+  }
+  const spec = (script: string) => {
+    const m = script.match(/HERMES_API_MODELS='([^']*)'/)
+    expect(m).not.toBeNull()
+    return JSON.parse(m![1]) as { default: string; provider: string; routes: string[] }
+  }
+
+  it("advertises the default under its slug and routes every other selectable model", () => {
+    const script = hermesRuntime.renderInitScript!({
+      ...base,
+      provider: "openrouter",
+      selectableModels: ["minimax/minimax-m2.5", "z-ai/glm-5.1", "openai/gpt-5.5", "z-ai/glm-5.1"],
+    })!
+    expect(spec(script)).toEqual({
+      default: "minimax/minimax-m2.5",
+      provider: "openrouter",
+      routes: ["z-ai/glm-5.1", "openai/gpt-5.5"],
+    })
+    expect(script).toContain("'/opt/hermes/venv/bin/python' - <<'PY'")
+    expect(script).toContain('extra["model_name"] = spec["default"]')
+  })
+
+  it("lists only the default for a non-OpenRouter provider", () => {
+    const script = hermesRuntime.renderInitScript!({
+      ...base,
+      provider: "nvidia",
+      selectableModels: ["z-ai/glm-5.1"],
+    })!
+    expect(spec(script).routes).toEqual([])
+    expect(spec(script).default).toBe("minimax/minimax-m2.5")
+  })
+
+  it("does not fail the provision when the write fails", () => {
+    const script = hermesRuntime.renderInitScript!({ ...base, provider: "openrouter" })!
+    expect(script).toMatch(/<<'PY' \|\| echo "warn: could not write api_server model routes"/)
+  })
+})

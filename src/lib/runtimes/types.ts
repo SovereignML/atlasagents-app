@@ -53,6 +53,13 @@ export type RenderInitScriptArgs = {
   provider: LlmProvider | string
   /** Validated model slug (<author>/<slug>, ≥64k context) to pin as the default. */
   model: string
+  /**
+   * Every model the instance may run (`selectableModelsForRuntime`). Hermes
+   * advertises these on `/v1/models` as `model_routes` so the chat UI's picker
+   * can switch per conversation. Only applied for the "openrouter" provider —
+   * the slugs are OpenRouter's. Omitted/empty ⇒ only the default is listed.
+   */
+  selectableModels?: string[]
   /** OpenAI-compatible base URL for the provider (e.g. NVIDIA's endpoint). */
   baseUrl: string
   /** Catalog tool ids enabled on the instance (e.g. ["browser"]); see agent-tools.ts. */
