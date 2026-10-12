@@ -12,9 +12,9 @@ For the rest of the env reference, see [.env.example](../.env.example). For depl
 
 | Concern | Choice |
 |---|---|
-| SDK | `@sentry/nextjs` v10 |
+| SDK | `@sentry/nextjs` v11 |
 | Enabled when | a DSN env var is set (see §3) — otherwise fully disabled |
-| PII | **Off** (`sendDefaultPii: false`) — no IPs, cookies, or headers sent |
+| PII | **Off**: `dataCollection: SENTRY_DATA_COLLECTION` (`src/lib/sentry-data-collection.ts`) sends no user info, cookies, bodies, local variables, or IP/user headers |
 | Performance traces | 10% sampling by default (`SENTRY_TRACES_SAMPLE_RATE`) |
 | Source maps | Uploaded at build time **only** when `SENTRY_AUTH_TOKEN` + org/project are set |
 | Session replay | Not enabled |
@@ -28,7 +28,7 @@ For the rest of the env reference, see [.env.example](../.env.example). For depl
 | `src/instrumentation.ts` | Server boot | Loads the right config per runtime; exports `onRequestError` (captures errors from nested RSC + route handlers) |
 | `src/instrumentation-client.ts` | Browser | Client-side `Sentry.init`; exports `onRouterTransitionStart` for navigation traces |
 | `src/app/global-error.tsx` | Browser | Last-resort error boundary — renders when the **root layout** crashes; reports via `Sentry.captureException`. Self-contained (own `<html>/<body>`, inline styles, no theme/font deps) because the root layout is gone when it renders |
-| `next.config.ts` | Build | `withSentryConfig(...)` wrapper — bundle instrumentation + conditional source-map upload |
+| `next.config.ts` | Build | `withSentryConfig(...)` wrapper from `@sentry/nextjs/config` — bundle instrumentation + conditional source-map upload |
 
 ### How an error reaches Sentry
 
@@ -93,14 +93,14 @@ In dev (`npm run dev` with no DSN) you should see **no** Sentry network activity
 
 | Default | Where | Why / when to change |
 |---|---|---|
-| `sendDefaultPii: false` | all three init files | Privacy-by-default: no user IPs/cookies. If you later want user context on errors, prefer explicit `Sentry.setUser({ id })` (no email) at session start rather than flipping this on |
+| `dataCollection: SENTRY_DATA_COLLECTION` | all three init files | Privacy-by-default. v11 removed `sendDefaultPii`, and an unset `dataCollection` collects everything; the shared constant is Sentry's documented equivalent of v10's `sendDefaultPii: false`, plus no local variables in stack frames. If you later want user context on errors, prefer explicit `Sentry.setUser({ id })` (no email) at session start rather than loosening this |
 | `tracesSampleRate: 0.1` | all three init files | Raise for more performance visibility, at quota cost. Errors are always captured regardless |
 | `widenClientFileUpload: false` | `next.config.ts` | Keeps upload scope lean; widen if client traces come through unsymbolicated |
-| `disableLogger: true` | `next.config.ts` | Strips Sentry's debug logger from production bundles |
+| `webpack.treeshake.removeDebugLogging: true` | `next.config.ts` | Strips Sentry's debug logger from webpack production bundles (v10's `disableLogger`); Turbopack builds ignore it |
 
 ## 7. Interaction with the rest of the stack
 
 - **Boot-time env validation** (`src/instrumentation.ts` → `billing-config` + `env-check`) runs *after* Sentry server init, so a production boot refusal is itself reported if a DSN is set.
 - **CI** (`.github/workflows/ci.yml`) builds without any Sentry vars — the wrapper and inits all no-op, so CI needs no Sentry secrets.
 - **Standalone output**: `output: "standalone"` is unaffected; Sentry's runtime code ships inside the server bundle.
-- **Turbopack**: builds use Next 16 + Turbopack; `withSentryConfig` v10 supports this. If a future SDK/Next upgrade breaks the build, the wrapper in `next.config.ts` is the first thing to bisect.
+- **Turbopack**: builds use Next 16 + Turbopack; `withSentryConfig` v11 supports this. If a future SDK/Next upgrade breaks the build, the wrapper in `next.config.ts` is the first thing to bisect.
