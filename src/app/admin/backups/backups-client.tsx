@@ -175,7 +175,7 @@ export function BackupsClient({
       const res = await fetch(`/api/admin/backups/${b.id}/download`)
       const body = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(body.error || "Could not create download link")
-      window.location.href = body.url
+      window.location.assign(body.url)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Download failed")
     } finally {

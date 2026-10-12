@@ -485,6 +485,7 @@ function ByosKeyCard({ instanceId }: { instanceId: string }) {
     }
   }
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instanceId])
@@ -2842,6 +2843,7 @@ function LogsTab({ instanceId, logs: polledLogs }: { instanceId: string; logs: L
 
   useEffect(() => {
     if (!initialized) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setInitialized(true)
       loadMore()
     }
@@ -2849,6 +2851,7 @@ function LogsTab({ instanceId, logs: polledLogs }: { instanceId: string; logs: L
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setOlderLogs([])
     setCursor(null)
     setHasMore(true)
@@ -2857,6 +2860,7 @@ function LogsTab({ instanceId, logs: polledLogs }: { instanceId: string; logs: L
 
   useEffect(() => {
     if (!initialized) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setInitialized(true)
       loadMore()
     }

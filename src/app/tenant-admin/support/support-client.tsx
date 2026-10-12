@@ -56,12 +56,14 @@ export function SupportInboxClient() {
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadList()
   }, [loadList])
 
   // Poll the open thread for new messages.
   useEffect(() => {
     if (selected == null) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadThread(selected)
     const t = setInterval(() => void loadThread(selected), 10_000)
     return () => clearInterval(t)

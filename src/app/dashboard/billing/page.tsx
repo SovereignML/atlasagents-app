@@ -101,8 +101,13 @@ export default async function BillingPage() {
 
   const wallet = await getOrCreateWallet(userId)
 
-  const since30 = new Date(Date.now() - 30 * 86_400_000)
-  const since7 = new Date(Date.now() - 7 * 86_400_000)
+  // Server component: this runs once per request, so reading the clock is not
+  // the impure render react-hooks/purity guards against (which targets client
+  // components re-rendered by the React Compiler).
+  // eslint-disable-next-line react-hooks/purity
+  const now = Date.now()
+  const since30 = new Date(now - 30 * 86_400_000)
+  const since7 = new Date(now - 7 * 86_400_000)
 
   const [transactions, subs, byAgentRows, apiUsage7, userInstances] = await Promise.all([
     db.query.walletTransactions.findMany({

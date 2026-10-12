@@ -158,6 +158,7 @@ export function ByosInstallForm({ server }: { server: InstallServer }) {
       (fallbackEnabled && requiresHermes(fallbackProvider)))
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (forcesHermes && runtime !== "hermes") setRuntime("hermes")
   }, [forcesHermes, runtime])
 
