@@ -213,26 +213,26 @@ Alternatives: **nginx + certbot** proxying `127.0.0.1:3000`, or a **Cloudflare T
 
 ## 12. Wire the cron jobs
 
-Frequent internal jobs run from one crontab line via [`scripts/cron-tick.sh`](../../scripts/cron-tick.sh) (it curls localhost, skipping any endpoint whose token env is unset):
+Every scheduled job runs from one crontab line via [`scripts/cron-tick.sh`](../../scripts/cron-tick.sh). It reads each bearer token from `.env`, curls localhost, and skips any endpoint whose token is unset:
 
 ```bash
 crontab -e
-# every minute — uptime-sync, metrics-collect, alerts-eval, usage-sync, demo-reap:
 * * * * * /opt/redesigned-giggle/scripts/cron-tick.sh >> /var/log/redesigned-giggle/cron.log 2>&1
 ```
 
-The **daily/nightly** jobs are **not** in that script — add them as separate crontab lines with their bearer tokens:
+| When (UTC) | Job |
+|------------|-----|
+| every minute | uptime-sync, metrics-collect, alerts-eval, usage-sync, demo-reap |
+| every 15 min | reconcile (`?scope=fast`) |
+| 02:00 | database backup to R2 |
+| 02:30 | expire-credits (yearly drip, lapsed plan credits) |
+| 03:00, 15:00 | full reconcile (includes the billing drift scan) |
+| 03:30 | daily compute billing, **only with `DAILY_BILLING_ENABLED=true`** |
+| 04:00 / 04:10 / 04:20 | audit-log, admin-notification and agent-event prunes, **only after that day's backup returned 200** |
 
-```bash
-# daily billing, credit lifecycle, prunes, reconcile:
-0 2 * * *  curl -fsS -X POST -H "Authorization: Bearer $BILLING_CRON_TOKEN"          http://127.0.0.1:3000/api/billing/daily
-5 2 * * *  curl -fsS -X POST -H "Authorization: Bearer $CREDIT_EXPIRY_CRON_TOKEN"    http://127.0.0.1:3000/api/billing/expire-credits
-10 2 * * * curl -fsS -X POST -H "Authorization: Bearer $AUDIT_RETENTION_CRON_TOKEN"  http://127.0.0.1:3000/api/audit-log/prune
-15 2 * * * curl -fsS -X POST -H "Authorization: Bearer $ADMIN_NOTIFICATION_RETENTION_CRON_TOKEN" http://127.0.0.1:3000/api/admin/notifications/prune
-20 2 * * * curl -fsS -X POST -H "Authorization: Bearer $EVENTS_RETENTION_CRON_TOKEN" http://127.0.0.1:3000/api/internal/events-prune
-30 2 * * * curl -fsS --max-time 120 -X POST -H "Authorization: Bearer $RECONCILE_CRON_TOKEN" http://127.0.0.1:3000/api/admin/reconcile
-0 3 * * *  curl -fsS --max-time 180 -X POST -H "Authorization: Bearer $BACKUP_CRON_TOKEN"    http://127.0.0.1:3000/api/admin/backups/cron
-```
+Daily billing charges every running managed agent a day of its server price and pauses agents whose wallet can't cover it, which is why it is opt-in. The prunes delete rows for good, which is why they wait for a successful backup.
+
+> **Upgrading an older install?** An earlier version of this guide had you add separate crontab lines for the daily jobs, written as `-H "Authorization: Bearer $BILLING_CRON_TOKEN"`. Cron does not load `.env`, so those lines sent an empty token and got a 401. Delete them; `cron-tick.sh` now runs those jobs.
 
 > **`expire-credits` matters:** without the daily run, **yearly subscribers only ever receive their first month of credits**. The full annotated table (cadence, purpose, timeouts) is in [DEPLOYMENT.md → Scheduled jobs](../DEPLOYMENT.md#scheduled-jobs). The **warm VM pool self-refills in-process** (no external cron); `pool-refill` is only an optional backstop. Stripe events arrive at the webhook `/api/webhooks/stripe`, not via cron.
 
