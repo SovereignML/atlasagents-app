@@ -46,11 +46,11 @@ describe("poolKeyFor()", () => {
 
   it("changes when new agents move to another zone", () => {
     const before = poolKeyFor({ ...target, runtime: "hermes", webuiEnabled: true })
-    process.env.CLOUDFLARE_AGENT_DOMAIN = "atlasagents.xyz"
+    process.env.CLOUDFLARE_AGENT_DOMAIN = "atlasdeploy.xyz"
     process.env.CLOUDFLARE_AGENT_ZONE_ID = "zone-new"
     const after = poolKeyFor({ ...target, runtime: "hermes", webuiEnabled: true })
     expect(after).not.toBe(before)
-    expect(after.endsWith("@atlasagents.xyz")).toBe(true)
+    expect(after.endsWith("@atlasdeploy.xyz")).toBe(true)
   })
 
   it("leaves the sidecar out of a runtime that has none", () => {
