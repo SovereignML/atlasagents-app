@@ -45,7 +45,7 @@ async function checkDatabase(): Promise<Check> {
     return {
       name,
       state: "outage",
-      detail: "Did not answer within 3 seconds. Sign-in, billing and the dashboard depend on it.",
+      detail: "Did not answer a test query. Sign-in, billing and the dashboard depend on it.",
     }
   }
 }
