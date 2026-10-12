@@ -27,7 +27,8 @@ Group=nextjs
 WorkingDirectory=/opt/redesigned-giggle
 EnvironmentFile=/etc/redesigned-giggle.env
 Environment=NODE_ENV=production
-Environment=HOSTNAME=0.0.0.0
+; Loopback only: the reverse proxy is the public listener (see deploy/Caddyfile).
+Environment=HOSTNAME=127.0.0.1
 Environment=PORT=3000
 Environment=NEXT_TELEMETRY_DISABLED=1
 ; Syncs the DB schema (drizzle-kit push), then execs the standalone server

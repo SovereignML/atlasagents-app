@@ -26,15 +26,9 @@ import { pauseBot } from "@/lib/provisioner"
 import { logInstanceEvent } from "@/lib/instance-state"
 import { notify } from "@/lib/notifications/dispatch"
 import { createAdminNotification } from "@/lib/admin-notify"
+import { decideEnforcement } from "@/lib/usage-enforcement"
 
 type Instance = InferSelectModel<typeof instances>
-
-/** A single poll's worth of OpenRouter spend (USD) above this → treat as
- *  abuse (leaked token / runaway loop): enforce immediately + alert admin. */
-const ANOMALY_USD_PER_INTERVAL = ((): number => {
-  const raw = parseFloat(process.env.ANOMALY_USD_PER_INTERVAL ?? "")
-  return Number.isFinite(raw) && raw > 0 ? raw : 50
-})()
 
 /** Don't PATCH the cap for sub-microdollar drift (matches the reconciler). */
 const LIMIT_EPSILON = 1e-6
@@ -223,18 +217,20 @@ export async function runOpenRouterUsageSync(): Promise<UsageSyncReport> {
     }
 
     // ── Enforcement ──────────────────────────────────────────────────────
-    const capHit = state.limitUsd != null && state.usageUsd >= state.limitUsd
-    const anomaly = delta > ANOMALY_USD_PER_INTERVAL
-    const drained = !(await isAboveMinimum(row.userId))
+    // Free-tier demos are exempt from the wallet-floor check (see
+    // decideEnforcement), so skip the wallet read for them.
+    const demo = row.expiresAt != null
+    const enforcement = decideEnforcement({
+      usageUsd: state.usageUsd,
+      limitUsd: state.limitUsd,
+      deltaUsd: delta,
+      aboveMinimum: demo || (await isAboveMinimum(row.userId)),
+      demo,
+    })
 
-    if (capHit || anomaly || drained) {
-      const reason = anomaly
-        ? `anomalous spend $${delta.toFixed(2)} in one interval`
-        : capHit
-          ? "OpenRouter spend cap reached"
-          : "wallet balance below minimum"
+    if (enforcement) {
       try {
-        await enforce(row, state, reason, anomaly)
+        await enforce(row, state, enforcement.reason, enforcement.anomaly)
         report.enforced++
       } catch (err) {
         report.errors.push(

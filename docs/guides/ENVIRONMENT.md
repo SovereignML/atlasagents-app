@@ -40,7 +40,7 @@ Rules of the road:
 |----------|-----------|--------------|--------------------------|
 | `NEXT_PUBLIC_APP_URL` | **Prod** | Public base URL of the app — used for OAuth callbacks, emails, Stripe redirects. **Must be a non-localhost `https://` URL in production** or the boot gate fails. | Your domain, e.g. `https://app.atlasagents.dev`. |
 | `PORT` | Optional | Port the Next.js server listens on. The reverse proxy and `cron-tick.sh` assume this. | Default `3000`. |
-| `HOSTNAME` | Optional | Interface the server binds to. pm2/systemd set `0.0.0.0`. | Default `127.0.0.1` (dev). |
+| `HOSTNAME` | Optional | Interface the server binds to. pm2/systemd set `127.0.0.1`, so only the reverse proxy on the same host can reach it. | Default `127.0.0.1` (dev). |
 
 ## 3. White-label custom dashboard domains
 
@@ -282,18 +282,20 @@ Bearer tokens guarding cron/job endpoints (`Authorization: Bearer <token>`). Gen
 | Variable | Guards endpoint | Cadence |
 |----------|-----------------|---------|
 | `USAGE_SYNC_CRON_TOKEN` | `POST /api/billing/usage-sync` | ~10 min |
-| `BILLING_CRON_TOKEN` | `POST /api/billing/daily` | daily |
-| `CREDIT_EXPIRY_CRON_TOKEN` | `POST /api/billing/expire-credits` | daily |
-| `RECONCILE_CRON_TOKEN` | `POST /api/admin/reconcile` (also provider health/budget sync) | daily |
-| `BACKUP_CRON_TOKEN` | `POST /api/admin/backups/cron` | nightly |
+| `BILLING_CRON_TOKEN` | `POST /api/billing/daily` | daily, 03:30 UTC, only with `DAILY_BILLING_ENABLED=true` |
+| `CREDIT_EXPIRY_CRON_TOKEN` | `POST /api/billing/expire-credits` | daily, 02:30 UTC |
+| `RECONCILE_CRON_TOKEN` | `POST /api/admin/reconcile` (also provider health/budget sync) | `?scope=fast` every 15 min; full at 03:00 and 15:00 UTC |
+| `BACKUP_CRON_TOKEN` | `POST /api/admin/backups/cron` | daily, 02:00 UTC |
 | `UPTIME_SYNC_CRON_TOKEN` | `POST /api/internal/uptime-sync` | ~1–2 min |
 | `METRICS_COLLECT_CRON_TOKEN` | `POST /api/internal/metrics-collect` | ~1–2 min |
 | `ALERTS_EVAL_CRON_TOKEN` | `POST /api/internal/alerts-eval` | ~5–10 min |
 | `DEMO_REAP_CRON_TOKEN` | `POST /api/internal/demo-reap` | ~1 min |
-| `AUDIT_RETENTION_CRON_TOKEN` | `POST /api/audit-log/prune` | daily |
-| `EVENTS_RETENTION_CRON_TOKEN` | `POST /api/internal/events-prune` | daily |
-| `ADMIN_NOTIFICATION_RETENTION_CRON_TOKEN` | `POST /api/admin/notifications/prune` | daily |
+| `AUDIT_RETENTION_CRON_TOKEN` | `POST /api/audit-log/prune` | daily, 04:00 UTC, after a successful backup |
+| `EVENTS_RETENTION_CRON_TOKEN` | `POST /api/internal/events-prune` | daily, 04:20 UTC, after a successful backup |
+| `ADMIN_NOTIFICATION_RETENTION_CRON_TOKEN` | `POST /api/admin/notifications/prune` | daily, 04:10 UTC, after a successful backup |
 | `POOL_REFILL_CRON_TOKEN` | `POST /api/internal/pool-refill` | **optional** (pool self-refills in-process) |
+
+`DAILY_BILLING_ENABLED=true` turns on the scheduled daily compute charge. It is off by default because it charges every running managed agent a day of its server price and pauses agents whose wallet can't cover it.
 
 ## 26. Warm VM pool
 

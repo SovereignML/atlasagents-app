@@ -49,7 +49,11 @@ module.exports = {
       instances: 1,
       env: {
         NODE_ENV: "production",
-        HOSTNAME: "0.0.0.0",
+        // Loopback only: Caddy (deploy/Caddyfile) is the public listener and
+        // proxies to 127.0.0.1:3000, and cron-tick.sh calls 127.0.0.1 too.
+        // 0.0.0.0 served the app over plain HTTP on the box's public IP,
+        // bypassing TLS and Caddy's /api/internal/* block.
+        HOSTNAME: "127.0.0.1",
         PORT: "3000",
         NEXT_TELEMETRY_DISABLED: "1",
       },

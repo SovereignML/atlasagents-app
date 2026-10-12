@@ -71,6 +71,20 @@ jobs:
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/sovereign_test
 
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # Reads package-lock.json only, so no install. Fails on a critical
+      # advisory in a production dependency. Lower severities and dev-only
+      # tooling are left to Dependabot (.github/dependabot.yml), so a fresh
+      # advisory in a dev tool doesn't turn unrelated PRs red.
+      - run: npm audit --omit=dev --audit-level=critical
+
   build:
     name: Build
     runs-on: ubuntu-latest

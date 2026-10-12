@@ -203,6 +203,11 @@ const nextConfig: NextConfig = {
   skipTrailingSlashRedirect: true,
   ...(devOrigins.length > 0 ? { allowedDevOrigins: devOrigins } : {}),
   serverExternalPackages: ["ssh2", "node-ssh", "cpu-features"],
+  // Since 16.3, `next dev` appends a Next.js "agent rules" block to CLAUDE.md
+  // whenever it detects an AI coding agent, and re-adds it if removed. This
+  // repo's CLAUDE.md is curated and several agent sessions run dev servers in
+  // parallel, so that would be a standing uncommitted change in every checkout.
+  agentRules: false,
   images: {
     remotePatterns: [
       // Ghost illustration used by the ghost-404-page component
