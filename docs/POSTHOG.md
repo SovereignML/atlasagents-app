@@ -20,7 +20,7 @@ For the rest of the env reference, see [.env.example](../.env.example). For erro
 | Identity | `posthog.identify(user.id)` on sign-in (email, name, role); `reset()` on sign-out; `person_profiles: "identified_only"` |
 | Session replay | Enabled in code with **all inputs masked** — must *also* be turned on in the PostHog project settings to record |
 | Feature flags | Client hooks (`posthog-js/react`) + server helper (`posthogServer`) |
-| PII | Minimal by design — only the identify fields above; inputs masked in replay (mirrors Sentry's `sendDefaultPii: false` ethos) |
+| PII | Minimal by design — only the identify fields above; inputs masked in replay (mirrors Sentry's privacy-by-default `dataCollection`) |
 
 ## 2. Files involved
 

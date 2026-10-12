@@ -26,7 +26,7 @@ export function PostHogProvider({ children }: { children: ReactNode }) {
       capture_pageleave: true,
       autocapture: true,
       person_profiles: "identified_only",
-      // Privacy: mirror Sentry's sendDefaultPii:false ethos. Replay must also
+      // Privacy: mirror Sentry's privacy-by-default dataCollection. Replay must also
       // be enabled in the PostHog project settings to actually record.
       session_recording: { maskAllInputs: true },
     })

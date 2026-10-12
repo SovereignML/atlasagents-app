@@ -1,5 +1,5 @@
 import type { NextConfig } from "next"
-import { withSentryConfig } from "@sentry/nextjs"
+import { withSentryConfig } from "@sentry/nextjs/config"
 
 import { BRANDING } from "./src/configs/branding"
 
@@ -255,5 +255,7 @@ export default withSentryConfig(nextConfig, {
   silent: !process.env.CI,
   // Keep client bundles lean; we don't proxy events through the app.
   widenClientFileUpload: false,
-  disableLogger: true,
+  // Strip the SDK's debug logging from the bundle (was `disableLogger`). Applies
+  // to webpack builds only; Turbopack, the default, ignores it.
+  webpack: { treeshake: { removeDebugLogging: true } },
 })
