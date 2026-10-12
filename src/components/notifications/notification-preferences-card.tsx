@@ -51,6 +51,7 @@ export function NotificationPreferencesCard() {
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadPrefs().finally(() => setLoading(false))
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)

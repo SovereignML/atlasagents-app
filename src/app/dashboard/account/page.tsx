@@ -145,6 +145,7 @@ export default function AccountPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     if (params.get("linked") === "google") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setGoogleLinked(true)
       window.history.replaceState(null, "", window.location.pathname)
     }

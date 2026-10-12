@@ -92,6 +92,7 @@ export default function AdminSubscriptionsPage() {
   }, [search, statusFilter])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchSubs()
   }, [fetchSubs])
 
