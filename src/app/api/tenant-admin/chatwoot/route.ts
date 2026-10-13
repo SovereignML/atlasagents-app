@@ -6,6 +6,7 @@ import { getTenantConfig } from "@/lib/tenant"
 import { encryptSecret, decryptSecret } from "@/lib/crypto-secret"
 import { assertPublicHost, BlockedHostError } from "@/lib/net-guard"
 import { logAuditEvent } from "@/lib/audit"
+import { publicFetch } from "@/lib/public-fetch"
 
 // GET — current Chatwoot config for the tenant. Secrets are never returned;
 // callers get booleans indicating whether they're set.
@@ -83,10 +84,12 @@ export async function PUT(req: Request) {
 
   // Verify-on-save: list inboxes to confirm base URL + token + account are valid.
   try {
-    const res = await fetch(`${normalizedBase}/api/v1/accounts/${accountId}/inboxes`, {
+    // publicFetch re-checks the address at connect time (see cwFetch).
+    const res = await publicFetch(`${normalizedBase}/api/v1/accounts/${accountId}/inboxes`, {
       // Hyphenated: nginx drops underscore headers by default (see cwFetch).
       headers: { "api-access-token": effectiveToken },
-      signal: AbortSignal.timeout(8000),
+      timeoutMs: 8000,
+      maxRedirects: 0,
     })
     if (!res.ok) {
       return NextResponse.json(
