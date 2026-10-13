@@ -5,6 +5,7 @@
   "scripts": {
     "predev": "lsof -ti:3000 | xargs kill 2>/dev/null || true",
     "dev": "next dev",
+    "prebuild": "rm -rf .next/dev",
     "build": "next build",
     "postbuild": "cp -R public .next/standalone/public && cp -R .next/static .next/standalone/.next/static",
     "start": "next start",
