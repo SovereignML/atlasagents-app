@@ -238,9 +238,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
     async session({ session, token }) {
       // A banned account's session carries no user, so every route that
-      // checks `session?.user?.id` treats it as signed out.
+      // checks `session?.user?.id` treats it as signed out. `user: null` must
+      // be explicit: next-auth's server-side auth() fills a MISSING user with
+      // the raw JWT (next-auth/lib/index.js getSession), which would hand
+      // route handlers the banned user's id.
       if (token.banned) {
-        return { expires: session.expires, banned: true } as unknown as typeof session
+        return { expires: session.expires, banned: true, user: null } as unknown as typeof session
       }
       if (session.user) {
         session.user.id = token.id as string

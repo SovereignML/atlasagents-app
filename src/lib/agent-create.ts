@@ -75,6 +75,17 @@ export type CreateInstanceResult =
 export async function createInstanceFromAgentFields(
   args: CreateInstanceArgs,
 ): Promise<CreateInstanceResult> {
+  // The agent belongs to the owner's active team (created lazily if needed).
+  const teamId = args.teamId ?? (await getUserTeam(args.userId))?.teamId
+  if (!teamId) return { ok: false, status: 500, error: "Could not resolve team" }
+
+  // Deploying spends the team's money, so viewers can't. `userId` is the
+  // effective owner: the customer under honored impersonation, the child-team
+  // owner when a tenant admin acts as a team.
+  if (!canDeploy(await getMembershipRole(args.userId, teamId))) {
+    return { ok: false, status: 403, error: DEPLOY_ROLE_DENIED }
+  }
+
   const planSlug = args.planSlug ?? "builder"
   const billingInterval = args.billingInterval ?? "month"
 
@@ -155,17 +166,6 @@ export async function createInstanceFromAgentFields(
   // "demo agent" signal the reaper + countdown key off of.
   const expiresAt =
     planConfig.tier === "free" ? new Date(Date.now() + FREE_DEMO_TTL_MS) : null
-
-  // The agent belongs to the owner's active team (created lazily if needed).
-  const teamId = args.teamId ?? (await getUserTeam(args.userId))?.teamId
-  if (!teamId) return { ok: false, status: 500, error: "Could not resolve team" }
-
-  // Deploying spends the team's money, so viewers can't. `userId` is the
-  // effective owner: the customer under honored impersonation, the child-team
-  // owner when a tenant admin acts as a team.
-  if (!canDeploy(await getMembershipRole(args.userId, teamId))) {
-    return { ok: false, status: 403, error: DEPLOY_ROLE_DENIED }
-  }
 
   // A tenant admin can suspend an end-customer's (child) team — block new
   // deploys for it. See src/lib/tenant.ts.
