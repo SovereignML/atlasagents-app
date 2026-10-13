@@ -27,6 +27,15 @@ export default {
       return session
     },
     authorized({ auth, request: { nextUrl } }) {
+      // Banned after sign-in: the session has no user (src/auth.ts), so API
+      // routes already refuse it; send pages to the explanation instead of
+      // the login form.
+      if (auth?.banned) {
+        if (nextUrl.pathname.startsWith("/api/")) {
+          return Response.json({ error: "Account suspended" }, { status: 403 })
+        }
+        return Response.redirect(new URL("/banned", nextUrl))
+      }
       const isLoggedIn = !!auth?.user
       const isAdmin = (auth?.user as { role?: string })?.role === "admin"
       const pathname = nextUrl.pathname

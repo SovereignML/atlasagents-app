@@ -18,6 +18,8 @@ import {
   type CfCtx,
 } from "@/lib/cloudflare"
 import { cloudflareErrorResponse } from "@/lib/cloudflare-errors"
+import { readJsonBody } from "@/lib/request-body"
+import { cloudflareDomainSchema } from "@/lib/validations"
 
 const HOST_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/
 const LABEL_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/
@@ -91,15 +93,10 @@ export async function POST(
     return NextResponse.json({ error: "Instance has no IP address" }, { status: 400 })
   }
 
-  const body = (await req.json().catch(() => ({}))) as {
-    zoneId?: string
-    label?: string
-    overwrite?: boolean
-  }
-  const zoneIdParam = body.zoneId?.trim()
-  if (!zoneIdParam) {
-    return NextResponse.json({ error: "Missing zoneId" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, cloudflareDomainSchema)
+  if (!parsed.ok) return parsed.res
+  const body = parsed.data
+  const zoneIdParam = body.zoneId
   const label = (body.label ?? "").trim().toLowerCase()
   if (label && label !== "@" && !LABEL_RE.test(label)) {
     return NextResponse.json({ error: "Invalid subdomain label" }, { status: 400 })

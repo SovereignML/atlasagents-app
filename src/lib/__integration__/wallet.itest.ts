@@ -44,9 +44,9 @@ async function transactions(userId: string) {
 
 describe("wallet (DB-backed)", () => {
   beforeEach(async () => {
-    // Wallet → User and WalletTransaction → Wallet are ON DELETE CASCADE, so
-    // deleting users clears the whole ledger for a clean slate.
-    await db.execute(sql`DELETE FROM "User"`)
+    // Wallet → User is ON DELETE RESTRICT (users are closed, never deleted),
+    // so truncate with CASCADE to clear the whole ledger for a clean slate.
+    await db.execute(sql`TRUNCATE TABLE "User" CASCADE`)
   })
 
   it("getOrCreateWallet is idempotent — two calls yield one wallet row", async () => {

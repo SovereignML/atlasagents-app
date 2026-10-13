@@ -7,6 +7,7 @@ import { getInstanceAccessLevel } from "@/lib/instance-access"
 import { IllegalTransitionError } from "@/lib/instance-state"
 import { stripe, isStripeConfigured } from "@/lib/stripe"
 import { logAuditEvent } from "@/lib/audit"
+import { stripeIdempotencyKey } from "@/lib/stripe-idempotency"
 
 /**
  * REST-friendly DELETE alias for /api/instances/:id. Mirrors the POST /delete
@@ -56,7 +57,9 @@ export async function DELETE(
   if (sub) {
     if (isStripeConfigured() && sub.stripeSubscriptionId) {
       try {
-        await stripe.subscriptions.cancel(sub.stripeSubscriptionId)
+        await stripe.subscriptions.cancel(sub.stripeSubscriptionId, undefined, {
+          idempotencyKey: stripeIdempotencyKey("cancel-subscription", sub.stripeSubscriptionId),
+        })
       } catch (err) {
         console.warn(`[instance DELETE] stripe cancel failed:`, err)
       }

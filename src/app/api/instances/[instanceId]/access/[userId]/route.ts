@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { getEffectiveUserId } from "@/lib/effective-user"
-import { setInstanceAccess, revokeInstanceAccess, isAccessLevel } from "@/lib/instance-access"
+import { setInstanceAccess, revokeInstanceAccess } from "@/lib/instance-access"
+import { readJsonBody } from "@/lib/request-body"
+import { instanceAccessUpdateSchema } from "@/lib/validations"
 
 /**
  * PATCH /api/instances/[instanceId]/access/[userId]
@@ -19,10 +21,9 @@ export async function PATCH(
   }
   const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
   const { instanceId, userId } = await params
-  const body = (await req.json().catch(() => ({}))) as { level?: string }
-  if (!isAccessLevel(body.level)) {
-    return NextResponse.json({ error: "Invalid level" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, instanceAccessUpdateSchema)
+  if (!parsed.ok) return parsed.res
+  const body = parsed.data
 
   const result = await setInstanceAccess({
     instanceId,

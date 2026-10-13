@@ -6,8 +6,9 @@ import {
   getInstanceAccessLevel,
   listInstanceAccess,
   setInstanceAccess,
-  isAccessLevel,
 } from "@/lib/instance-access"
+import { readJsonBody } from "@/lib/request-body"
+import { instanceAccessGrantSchema } from "@/lib/validations"
 
 /**
  * GET /api/instances/[instanceId]/access
@@ -81,10 +82,9 @@ export async function POST(
   }
   const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
   const { instanceId } = await params
-  const body = (await req.json().catch(() => ({}))) as { userId?: string; level?: string }
-  if (!body.userId || !isAccessLevel(body.level)) {
-    return NextResponse.json({ error: "Missing userId or invalid level" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, instanceAccessGrantSchema)
+  if (!parsed.ok) return parsed.res
+  const body = parsed.data
 
   const result = await setInstanceAccess({
     instanceId,

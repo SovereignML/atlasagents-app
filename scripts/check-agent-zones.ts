@@ -7,11 +7,14 @@
 // Usage:
 //   node --env-file=.env --import tsx scripts/check-agent-zones.ts          # offline
 //   node --env-file=.env --import tsx scripts/check-agent-zones.ts --live   # + Cloudflare API, GET only
+//   node --env-file=.env --import tsx scripts/check-agent-zones.ts --live --strict
 //
 // --live also asks Cloudflare whether each zone id is the zone its domain says
 // (a find-and-replace of the domain in .env never changes the id), whether the
 // token can reach that zone's DNS, which SSL mode the zone is in, and whether
 // agents still live in sovereignclaw.xyz after the variables stopped naming it.
+// --strict also treats SSL mode "Full" as a problem: it works, but the edge
+// doesn't verify the origin certificate, and Full (strict) is the target.
 //
 // Exits 1 when something needs fixing, so it can gate a deploy.
 
@@ -27,6 +30,7 @@ import {
 } from "@/lib/agent-zones"
 
 const LIVE = process.argv.includes("--live")
+const STRICT = process.argv.includes("--strict")
 
 function certLine(zone: AgentZone): string {
   try {
@@ -109,7 +113,13 @@ async function liveZoneProblems(zone: AgentZone): Promise<string[]> {
           `redirect loop, and Off serves no HTTPS at all. Set Full (strict) (scripts/cloudflare-bootstrap.ts does it).`,
       )
     } else if (mode === "full") {
-      console.log("    (works, but the edge does not verify the origin cert — Full (strict) is the target)")
+      if (STRICT) {
+        problems.push(
+          `${zone.domain} is in SSL mode "Full": the edge does not verify the origin certificate. Set Full (strict).`,
+        )
+      } else {
+        console.log("    (works, but the edge does not verify the origin cert — Full (strict) is the target)")
+      }
     }
   }
   return problems

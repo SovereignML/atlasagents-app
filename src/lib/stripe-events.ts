@@ -21,7 +21,7 @@ import { clawBackFunds } from "@/lib/billing"
 import { describeVmError } from "@/lib/vm-provider"
 import { usdToCredits } from "@/lib/credit-pricing"
 import { BYOS_SIGNUP_CREDITS } from "@/configs/plans"
-import { notify } from "@/lib/notifications/dispatch"
+import { notify, nothingDelivered } from "@/lib/notifications/dispatch"
 import { createAdminNotification } from "@/lib/admin-notify"
 import { claimEvent, releaseEvent } from "@/lib/idempotency"
 import { posthogServer } from "@/lib/posthog-server"
@@ -630,8 +630,11 @@ export async function handleInvoiceUpcoming(invoice: Stripe.Invoice): Promise<vo
   // One reminder per subscription per renewal period. The route-level
   // claimEvent("stripe", event.id) only dedups exact event redeliveries;
   // this key dedups distinct invoice.upcoming events for the same renewal.
+  // Released below if nothing was delivered, so Stripe's next invoice.upcoming
+  // (or a redelivery) retries rather than the reminder being lost.
   const periodKey = invoice.period_end ?? invoice.next_payment_attempt ?? 0
-  const claimed = await claimEvent("renewal_reminder", `${subId}:${periodKey}`)
+  const reminderKey = `${subId}:${periodKey}`
+  const claimed = await claimEvent("renewal_reminder", reminderKey)
   if (!claimed) return
 
   // Amount comes from the invoice — plans carry no price (pricing lives in Stripe).
@@ -651,7 +654,7 @@ export async function handleInvoiceUpcoming(invoice: Stripe.Invoice): Promise<vo
     : "soon"
 
   const planName = local.plan?.name ?? "your plan"
-  await notify({
+  const result = await notify({
     userId: local.userId,
     category: "billing",
     type: "subscription_renewal_reminder",
@@ -666,6 +669,12 @@ export async function handleInvoiceUpcoming(invoice: Stripe.Invoice): Promise<vo
       periodEnd: periodKey,
     },
   })
+  if (nothingDelivered(result)) {
+    await releaseEvent("renewal_reminder", reminderKey)
+    // Throw so the webhook route releases the event claim too and returns
+    // non-2xx: Stripe redelivers, and the retry sends the reminder.
+    throw new Error(`renewal reminder for ${subId} was not delivered on any channel`)
+  }
 }
 
 // ---------- invoice.payment_failed ----------

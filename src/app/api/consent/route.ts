@@ -14,6 +14,8 @@ import {
   parseConsentCookie,
   serializeConsentCookie,
 } from "@/lib/consent"
+import { readJsonBody } from "@/lib/request-body"
+import { consentSchema } from "@/lib/validations"
 
 export async function GET() {
   const jar = await cookies()
@@ -21,20 +23,12 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  let body: unknown
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: "Invalid body" }, { status: 400 })
-  }
-  const o = (body ?? {}) as Record<string, unknown>
-  if (typeof o.marketing !== "boolean") {
-    return NextResponse.json({ error: "`marketing` boolean required" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, consentSchema)
+  if (!parsed.ok) return parsed.res
 
   const state = {
-    marketing: o.marketing,
-    analytics: typeof o.analytics === "boolean" ? o.analytics : false,
+    marketing: parsed.data.marketing,
+    analytics: parsed.data.analytics ?? false,
     ts: Date.now(),
   }
 

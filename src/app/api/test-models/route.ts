@@ -9,6 +9,8 @@ import {
   isValidOpenRouterSlug,
   routeModel,
 } from "@/lib/model-router"
+import { readJsonBody } from "@/lib/request-body"
+import { modelProbeSchema } from "@/lib/validations"
 
 /**
  * Admin-only OpenRouter debug endpoint, backing the admin "Models" panel.
@@ -178,12 +180,9 @@ export async function POST(req: Request) {
     )
   }
 
-  let body: { model?: string; prompt?: string }
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, modelProbeSchema)
+  if (!parsed.ok) return parsed.res
+  const body = parsed.data
 
   const model = body.model?.trim() ?? ""
   if (!isValidOpenRouterSlug(model)) {

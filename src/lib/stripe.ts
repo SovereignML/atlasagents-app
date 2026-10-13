@@ -14,6 +14,9 @@ function getStripe(): Stripe {
   _stripe = new Stripe(key, {
     apiVersion: "2024-06-20" as Stripe.LatestApiVersion,
     appInfo: { name: BRANDING.name, version: "0.1.0" },
+    // Retried POSTs carry an SDK-generated idempotency key; calls that create
+    // money objects also pass their own (src/lib/stripe-idempotency.ts).
+    maxNetworkRetries: 2,
   })
   return _stripe
 }

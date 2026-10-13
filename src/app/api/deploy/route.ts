@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 import { auth } from "@/auth"
 import { db, eq, and, instances, instanceLogs, sshKeys, users, subscriptions } from "@/db"
 import {
@@ -21,16 +22,13 @@ import { getEffectiveTeam } from "@/lib/effective-user"
 import { createInstanceFromAgentFields } from "@/lib/agent-create"
 import { runtimeDeployDenial } from "@/lib/runtime-access"
 import { deploySchema } from "@/lib/validations"
+import { stripeIdempotencyKey } from "@/lib/stripe-idempotency"
 
 export async function POST(req: NextRequest) {
   try {
     return await handleDeploy(req)
   } catch (err) {
-    console.error("[deploy] unhandled error:", err)
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Deployment failed" },
-      { status: 500 },
-    )
+    return apiError("deploy", err, "Deployment failed.")
   }
 }
 
@@ -221,10 +219,10 @@ async function handleDeploy(req: NextRequest) {
     let stripeCustomerId = userRow?.stripeCustomerId
 
     if (!stripeCustomerId) {
-      const customer = await stripe.customers.create({
-        email: userRow?.email ?? undefined,
-        metadata: { userId: effectiveUserId },
-      })
+      const customer = await stripe.customers.create(
+        { email: userRow?.email ?? undefined, metadata: { userId: effectiveUserId } },
+        { idempotencyKey: stripeIdempotencyKey("customer", effectiveUserId, userRow?.email) },
+      )
       stripeCustomerId = customer.id
       await db
         .update(users)
@@ -262,6 +260,9 @@ async function handleDeploy(req: NextRequest) {
       },
       success_url: `${BRANDING.appUrl}/dashboard/instances/${instance.id}`,
       cancel_url: `${BRANDING.appUrl}/dashboard/deploy`,
+    }, {
+      // One checkout per instance row, however often it is retried.
+      idempotencyKey: stripeIdempotencyKey("deploy-checkout", instance.id),
     })
 
     return NextResponse.json({

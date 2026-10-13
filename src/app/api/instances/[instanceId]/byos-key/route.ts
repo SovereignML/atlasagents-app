@@ -7,6 +7,8 @@ import { canOperateInstance } from "@/lib/instance-access"
 import { reprovisionBotEnv } from "@/lib/provisioner"
 import { logAuditEvent } from "@/lib/audit"
 import { getByoProvider } from "@/configs/llm-providers"
+import { readJsonBody } from "@/lib/request-body"
+import { byosKeySlotSchema } from "@/lib/validations"
 
 /**
  * BYOS bring-your-own-key control. A BYO-key agent runs on the customer's own
@@ -67,20 +69,9 @@ export async function PATCH(
   }
 
   const { instanceId } = await params
-  let body: { slot?: unknown }
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
-  }
-
-  const slot = body.slot
-  if (slot !== "primary" && slot !== "fallback") {
-    return NextResponse.json(
-      { error: 'slot must be "primary" or "fallback"' },
-      { status: 400 },
-    )
-  }
+  const parsed = await readJsonBody(req, byosKeySlotSchema)
+  if (!parsed.ok) return parsed.res
+  const { slot } = parsed.data
 
   const isAdmin = (session.user as { role?: string }).role === "admin"
   const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id

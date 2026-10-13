@@ -14,6 +14,8 @@ import {
   routeModel,
 } from "@/lib/model-router"
 import type { BudgetTier } from "@/lib/agent-config"
+import { readJsonBody } from "@/lib/request-body"
+import { instanceModelSchema } from "@/lib/validations"
 
 /**
  * Per-instance model picker. Lets a user switch which OpenRouter model their agent
@@ -87,21 +89,11 @@ export async function PATCH(
   }
 
   const { instanceId } = await params
-  let body: { modelSlug?: string | null }
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, instanceModelSchema)
+  if (!parsed.ok) return parsed.res
 
   // Accept null/"" (revert to tier default) or a string slug.
-  const raw = body.modelSlug
-  if (raw !== null && raw !== undefined && typeof raw !== "string") {
-    return NextResponse.json(
-      { error: "modelSlug must be a string or null" },
-      { status: 400 },
-    )
-  }
+  const raw = parsed.data.modelSlug
   const modelSlug = typeof raw === "string" && raw.trim() ? raw.trim() : null
 
   const isAdmin = (session.user as { role?: string }).role === "admin"

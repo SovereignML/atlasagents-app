@@ -12,13 +12,18 @@ import Stripe from "stripe"
 import { stripe } from "@/lib/stripe"
 import { db, eq, tenantConfig } from "@/db"
 import { getTenantConfig } from "@/lib/tenant"
+import { stripeIdempotencyKey, windowKey } from "@/lib/stripe-idempotency"
 
 /** Create (or reuse) the tenant's connected Standard account; persist its id. */
 export async function createConnectAccount(tenantTeamId: string): Promise<string> {
   const existing = await getTenantConfig(tenantTeamId)
   if (existing?.stripeConnectAccountId) return existing.stripeConnectAccountId
 
-  const account = await stripe.accounts.create({ type: "standard" })
+  // Keyed by tenant: two concurrent "connect" clicks get one account, not two.
+  const account = await stripe.accounts.create(
+    { type: "standard" },
+    { idempotencyKey: stripeIdempotencyKey("connect-account", tenantTeamId) },
+  )
 
   await db
     .insert(tenantConfig)
@@ -88,7 +93,18 @@ export async function createTenantPrice(args: {
       recurring: { interval: args.interval },
       product_data: { name: args.name },
     } satisfies Stripe.PriceCreateParams,
-    { stripeAccount: args.connectAccountId },
+    {
+      stripeAccount: args.connectAccountId,
+      idempotencyKey: stripeIdempotencyKey(
+        "tenant-price",
+        args.connectAccountId,
+        args.name,
+        args.amountCents,
+        args.interval,
+        args.currency ?? "usd",
+        windowKey(),
+      ),
+    },
   )
   return price.id
 }
@@ -119,7 +135,18 @@ export async function createConnectedCheckout(args: {
       metadata,
       subscription_data: { metadata },
     } satisfies Stripe.Checkout.SessionCreateParams,
-    { stripeAccount: args.connectAccountId },
+    {
+      stripeAccount: args.connectAccountId,
+      idempotencyKey: stripeIdempotencyKey(
+        "connect-checkout",
+        args.connectAccountId,
+        args.childTeamId,
+        args.tenantPlanId,
+        args.priceId,
+        args.customerEmail,
+        windowKey(),
+      ),
+    },
   )
   return { url: session.url }
 }

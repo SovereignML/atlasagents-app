@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 
 import { requireAdmin } from "@/lib/admin-guard"
 import { r2ErrorResponse } from "@/lib/r2-errors"
@@ -29,10 +30,6 @@ export async function POST() {
   } catch (err) {
     const mapped = r2ErrorResponse(err)
     if (mapped) return mapped
-    console.error("[admin/backups] manual backup failed:", err instanceof Error ? err.message : err)
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Backup failed." },
-      { status: 500 },
-    )
+    return apiError("admin/backups", err, "Backup failed.")
   }
 }

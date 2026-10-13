@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server"
+import { NextResponse, type NextRequest } from "next/server"
 import { redirect } from "next/navigation"
 import { auth } from "@/auth"
+import { isValidCronBearer } from "@/lib/cron-auth"
 
 /**
  * Page-level admin gate for server components. Redirects non-admins instead of
@@ -40,4 +41,20 @@ export async function requireAdmin(): Promise<
     return { ok: false, res: NextResponse.json({ error: "Forbidden" }, { status: 403 }) }
   }
   return { ok: true, userId: session.user.id }
+}
+
+/**
+ * Gate a route that both the scheduler and an admin may call: a bearer token
+ * matching `cronToken`, or an admin-role session. `userId` is null for a cron
+ * call.
+ *
+ *   const guard = await requireAdminOrCron(req, process.env.RECONCILE_CRON_TOKEN)
+ *   if (!guard.ok) return guard.res
+ */
+export async function requireAdminOrCron(
+  req: NextRequest,
+  cronToken: string | undefined,
+): Promise<{ ok: true; userId: string | null } | { ok: false; res: NextResponse }> {
+  if (isValidCronBearer(req, cronToken)) return { ok: true, userId: null }
+  return requireAdmin()
 }

@@ -6,6 +6,10 @@ import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { canOperateInstance } from "@/lib/instance-access"
 import { syncKnowledgeBase } from "@/lib/provisioner"
 import { logAuditEvent } from "@/lib/audit"
+import { readJsonBody } from "@/lib/request-body"
+import { knowledgeSourceSchema } from "@/lib/validations"
+import { publicFetch } from "@/lib/public-fetch"
+import { BlockedHostError } from "@/lib/net-guard"
 
 /** Max stored text per source — sources are small references, not corpora. */
 const MAX_TEXT_BYTES = 200_000
@@ -82,17 +86,9 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
-  const body = await req.json()
-  const { type, name, sourceUrl, textContent } = body as {
-    type?: unknown
-    name?: unknown
-    sourceUrl?: unknown
-    textContent?: unknown
-  }
-
-  if (type !== "url" && type !== "file") {
-    return NextResponse.json({ error: 'type must be "url" or "file"' }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, knowledgeSourceSchema)
+  if (!parsed.ok) return parsed.res
+  const { type, name, sourceUrl, textContent } = parsed.data
 
   let resolvedName = typeof name === "string" ? name.trim() : ""
   let text = typeof textContent === "string" ? textContent : ""
@@ -104,16 +100,19 @@ export async function POST(
     }
     url = sourceUrl.trim()
     if (!resolvedName) resolvedName = url
-    // Fetch + extract if the client didn't supply text.
+    // Fetch + extract if the client didn't supply text. publicFetch refuses
+    // private addresses at connect time: the fetched text is stored and shown
+    // back to the user, so a URL pointing at loopback or the cloud metadata
+    // service would otherwise read internal endpoints.
     if (!text) {
       try {
-        const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), 15_000)
-        const res = await fetch(url, { signal: controller.signal, redirect: "follow" })
-        clearTimeout(timer)
-        if (res.ok) text = htmlToText(await res.text())
-      } catch {
-        // Leave text empty — the source is still saved (name + URL header).
+        const res = await publicFetch(url, { timeoutMs: 15_000, maxBytes: 2_000_000 })
+        if (res.ok) text = htmlToText(res.text)
+      } catch (err) {
+        if (err instanceof BlockedHostError) {
+          return NextResponse.json({ error: "That URL points at a private address." }, { status: 400 })
+        }
+        // Otherwise leave text empty — the source is still saved (name + URL header).
       }
     }
   } else {

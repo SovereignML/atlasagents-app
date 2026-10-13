@@ -7,6 +7,8 @@ import { isGoogleOAuthConfigured } from "@/lib/oauth"
 import { normalizeHost, isCanonicalHost } from "@/lib/host"
 import { notify } from "@/lib/notifications/dispatch"
 import { BRANDING } from "@/configs/branding"
+import { readJsonBody } from "@/lib/request-body"
+import { accountUpdateSchema } from "@/lib/validations"
 
 export async function GET() {
   try {
@@ -66,19 +68,18 @@ export async function PATCH(request: Request) {
     const session = await auth()
     if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-    const body = await request.json()
-    const { action } = body
+    const parsed = await readJsonBody(request, accountUpdateSchema)
+    if (!parsed.ok) return parsed.res
+    const body = parsed.data
 
-    if (action === "update-name") {
+    if (body.action === "update-name") {
       const { name } = body
-      if (!name || name.length < 2) return NextResponse.json({ error: "Name must be at least 2 characters" }, { status: 400 })
       await db.update(users).set({ name }).where(eq(users.id, session.user.id))
       return NextResponse.json({ message: "Name updated" })
     }
 
-    if (action === "update-password") {
+    if (body.action === "update-password") {
       const { currentPassword, newPassword } = body
-      if (!newPassword || newPassword.length < 6) return NextResponse.json({ error: "New password must be at least 6 characters" }, { status: 400 })
 
       const user = await db.query.users.findFirst({
         where: eq(users.id, session.user.id),
@@ -106,7 +107,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ message: "Password updated" })
     }
 
-    if (action === "update-socials") {
+    if (body.action === "update-socials") {
       const { telegramId, twitterHandle, discordId } = body
       await db
         .update(users)

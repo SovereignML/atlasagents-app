@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import {
   getBillingHealthSnapshot,
   runBillingReconcile,
   alertBillingReconcile,
 } from "@/lib/billing-reconcile"
-import { isValidCronBearer } from "@/lib/cron-auth"
+import { requireAdminOrCron } from "@/lib/admin-guard"
 
 /**
  * GET /api/admin/billing/health
@@ -21,16 +20,8 @@ import { isValidCronBearer } from "@/lib/cron-auth"
  * RECONCILE_CRON_TOKEN (same token the reconcile cron uses).
  */
 export async function GET(req: NextRequest) {
-  const isCron = isValidCronBearer(req, process.env.RECONCILE_CRON_TOKEN)
-  if (!isCron) {
-    const session = await auth()
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-    if ((session.user as { role?: string }).role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
-  }
+  const guard = await requireAdminOrCron(req, process.env.RECONCILE_CRON_TOKEN)
+  if (!guard.ok) return guard.res
 
   const full = req.nextUrl.searchParams.get("full") === "1"
   if (full) {

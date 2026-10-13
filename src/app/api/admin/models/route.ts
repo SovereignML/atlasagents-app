@@ -3,12 +3,13 @@ import { NextResponse } from "next/server"
 import { requireAdmin } from "@/lib/admin-guard"
 import {
   addAllowedModel,
-  isAllowedModelKind,
   listAllowedModels,
   removeAllowedModel,
   syncModelMetadata,
   updateAllowedModel,
 } from "@/lib/allowed-models"
+import { readJsonBody } from "@/lib/request-body"
+import { adminModelAddSchema, adminModelEditSchema, adminModelRemoveSchema } from "@/lib/validations"
 
 /**
  * Admin CRUD for the OpenRouter account-allowlist mirror (AllowedModel).
@@ -32,18 +33,9 @@ export async function POST(req: Request) {
   const guard = await requireAdmin()
   if (!guard.ok) return guard.res
 
-  let body: {
-    action?: string
-    slug?: string
-    label?: string
-    kind?: string
-    contextLength?: number | null
-  }
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, adminModelAddSchema)
+  if (!parsed.ok) return parsed.res
+  const body = parsed.data
 
   // Refresh contextLength for every row from the public OpenRouter catalog.
   if (body.action === "sync") {
@@ -55,17 +47,8 @@ export async function POST(req: Request) {
     }
   }
 
-  const slug = body.slug?.trim() ?? ""
-  if (!slug) {
-    return NextResponse.json({ error: "slug is required" }, { status: 400 })
-  }
+  const slug = body.slug
   const kind = body.kind ?? "chat"
-  if (!isAllowedModelKind(kind)) {
-    return NextResponse.json(
-      { error: "kind must be chat | image | moderation" },
-      { status: 400 },
-    )
-  }
 
   try {
     const model = await addAllowedModel({
@@ -85,33 +68,14 @@ export async function PATCH(req: Request) {
   const guard = await requireAdmin()
   if (!guard.ok) return guard.res
 
-  let body: {
-    slug?: string
-    label?: string
-    kind?: string
-    enabled?: boolean
-  }
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
-  }
-  const slug = body.slug?.trim() ?? ""
-  if (!slug) {
-    return NextResponse.json({ error: "slug is required" }, { status: 400 })
-  }
-  if (body.kind !== undefined && !isAllowedModelKind(body.kind)) {
-    return NextResponse.json(
-      { error: "kind must be chat | image | moderation" },
-      { status: 400 },
-    )
-  }
+  const parsed = await readJsonBody(req, adminModelEditSchema)
+  if (!parsed.ok) return parsed.res
+  const body = parsed.data
+  const slug = body.slug
 
   const model = await updateAllowedModel(slug, {
     ...(body.label !== undefined ? { label: body.label.trim() } : {}),
-    ...(body.kind !== undefined && isAllowedModelKind(body.kind)
-      ? { kind: body.kind }
-      : {}),
+    ...(body.kind !== undefined ? { kind: body.kind } : {}),
     ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
   })
   if (!model) {
@@ -124,16 +88,9 @@ export async function DELETE(req: Request) {
   const guard = await requireAdmin()
   if (!guard.ok) return guard.res
 
-  let body: { slug?: string }
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
-  }
-  const slug = body.slug?.trim() ?? ""
-  if (!slug) {
-    return NextResponse.json({ error: "slug is required" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, adminModelRemoveSchema)
+  if (!parsed.ok) return parsed.res
+  const slug = parsed.data.slug
 
   const removed = await removeAllowedModel(slug)
   if (!removed) {

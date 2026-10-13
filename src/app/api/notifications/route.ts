@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { db, notifications, eq, and, desc, lt, isNull, isNotNull, sql } from "@/db"
+import { readJsonBody } from "@/lib/request-body"
+import { notificationReadSchema } from "@/lib/validations"
 
 /**
  * GET /api/notifications
@@ -54,12 +56,9 @@ export async function PATCH(req: NextRequest) {
   }
   const userId = session.user.id
 
-  let body: { id?: string; all?: boolean }
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, notificationReadSchema)
+  if (!parsed.ok) return parsed.res
+  const body = parsed.data
 
   if (body.all) {
     await db

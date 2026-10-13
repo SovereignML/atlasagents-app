@@ -114,9 +114,10 @@ describe("daily billing — claim lifecycle (DB-backed)", () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     pauseBot.mockImplementation(async () => {})
-    // Instance → Team/User and Wallet → User are ON DELETE CASCADE, so clearing
-    // users clears the fixture. ProcessedEvent has no FK, so truncate it too.
-    await db.execute(sql`DELETE FROM "User"`)
+    // Truncating users with CASCADE clears the fixture (Wallet → User is
+    // RESTRICT, so a plain DELETE would fail). ProcessedEvent has no FK, so
+    // truncate it too.
+    await db.execute(sql`TRUNCATE TABLE "User" CASCADE`)
     await db.execute(sql`DELETE FROM "Region"`)
     await db.execute(sql`DELETE FROM "ServerConfig"`)
     await db.execute(sql`TRUNCATE TABLE "ProcessedEvent"`)

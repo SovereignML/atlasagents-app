@@ -85,10 +85,8 @@ async function handle(req: NextRequest, params: { id8: string; path: string[] })
       signal: AbortSignal.timeout(60_000),
     })
   } catch (err) {
-    return NextResponse.json(
-      { error: `upstream unreachable: ${err instanceof Error ? err.message : String(err)}` },
-      { status: 502 }
-    )
+    console.warn(`[g] upstream ${inst.id} unreachable:`, err)
+    return NextResponse.json({ error: "upstream unreachable" }, { status: 502 })
   }
 
   const respHeaders = new Headers()

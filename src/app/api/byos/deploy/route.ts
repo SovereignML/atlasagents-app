@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 import { auth } from "@/auth"
 import { db, eq, and, asc, byosServers, instances, instanceLogs, regions, serverConfigs } from "@/db"
 import { logAuditEvent } from "@/lib/audit"
@@ -17,6 +18,9 @@ import { findByosPlan } from "@/lib/byos-plan"
 import { recoverByosPlanCheckout } from "@/lib/checkout-recovery"
 import { claimEvent, releaseEvent } from "@/lib/idempotency"
 import { isTeamSuspended } from "@/lib/tenant"
+import { canDeploy, DEPLOY_ROLE_DENIED } from "@/lib/team"
+import { readJsonBody } from "@/lib/request-body"
+import { byosDeploySchema } from "@/lib/validations"
 import { getTeamAgentLimit, countTeamAgents } from "@/lib/seats"
 import { runtimeCaps } from "@/lib/runtimes/labels"
 import { runtimeDeployDenial } from "@/lib/runtime-access"
@@ -72,11 +76,7 @@ export async function POST(req: NextRequest) {
   try {
     return await handleByosDeploy(req)
   } catch (err) {
-    console.error("[byos/deploy] unhandled error:", err)
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Deployment failed" },
-      { status: 500 },
-    )
+    return apiError("byos/deploy", err, "Deployment failed.")
   }
 }
 
@@ -98,8 +98,20 @@ async function handleByosDeploy(req: NextRequest) {
     return NextResponse.json({ error: "No active team" }, { status: 403 })
   }
   const { effectiveUserId, actorUserId, teamId } = ctx
+  // Same role gate as the managed deploy path (createInstanceFromAgentFields).
+  if (!canDeploy(ctx.role)) {
+    return NextResponse.json({ error: DEPLOY_ROLE_DENIED }, { status: 403 })
+  }
 
-  const body = await req.json()
+  // The connected server to install onto is named by id: the connection (host,
+  // port, user) is read off that row, never accepted from the caller, so an
+  // agent can only land on a server this team has connected. `ownProvider` is
+  // the catalog id the own key is for (default "openrouter"); `ownBaseUrl` is
+  // only for "custom"; `ownModel` is required for a non-OpenRouter provider.
+  // There is deliberately no "fallback = managed OpenRouter": a BYO-key agent
+  // never falls back to our minted key. Managed access is llmMode only.
+  const parsedBody = await readJsonBody(req, byosDeploySchema)
+  if (!parsedBody.ok) return parsedBody.res
   const {
     name,
     byosServerId,
@@ -112,30 +124,7 @@ async function handleByosDeploy(req: NextRequest) {
     fallbackApiKey,
     fallbackBaseUrl,
     agentConfig: agentConfigInput,
-  } = body as {
-    name: string
-    // The connected server to install onto. The connection (host, port, user)
-    // is read off that row — it is deliberately NOT accepted from the caller,
-    // so an agent can only ever land on a server this team has connected.
-    byosServerId: string
-    llmMode: "managed_credits" | "own_key"
-    ownApiKey?: string
-    // Which provider the own key is for (catalog id). Defaults to "openrouter".
-    ownProvider?: string
-    // OpenAI-compatible base URL — only for ownProvider === "custom".
-    ownBaseUrl?: string
-    // Model slug (persisted to modelSlug) — REQUIRED for a non-OpenRouter
-    // provider, which has no default catalog. Ignored for OpenRouter (tier
-    // default / post-deploy picker applies).
-    ownModel?: string
-    // Optional user-supplied fallback (their OWN second key). NOTE: there is
-    // deliberately no "fallback = managed OpenRouter" option — a BYO-key agent
-    // never falls back to our minted key. Managed access is llmMode only.
-    fallbackProvider?: string
-    fallbackApiKey?: string
-    fallbackBaseUrl?: string
-    agentConfig?: unknown
-  }
+  } = parsedBody.data
 
   // ── Validate ──────────────────────────────────────────────────────
   if (!name || !byosServerId) {

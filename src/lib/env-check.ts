@@ -8,6 +8,8 @@
 // Keep this aligned with .env.example — every error here should map to a
 // documented variable there.
 
+import { isTurnstileConfigured, mayRunWithoutTurnstile } from "@/lib/turnstile"
+
 const set = (name: string): boolean => !!process.env[name]?.trim()
 
 /** INSTANCE_ENCRYPTION_KEY must decode to 32 bytes (same rule as crypto-secret.ts). */
@@ -78,10 +80,16 @@ function collect(): CheckResult {
     }
   }
 
-  // ── Turnstile: half-configured is always a mistake ──
+  // ── Turnstile: half-configured is always a mistake, and production needs
+  //    it on or explicitly off (src/lib/turnstile.ts fails closed) ──
   if (set("NEXT_PUBLIC_TURNSTILE_SITE_KEY") !== set("TURNSTILE_SECRET_KEY")) {
     warnings.push(
       "Only one of NEXT_PUBLIC_TURNSTILE_SITE_KEY / TURNSTILE_SECRET_KEY is set — Turnstile needs both (or neither).",
+    )
+  }
+  if (!isTurnstileConfigured() && !mayRunWithoutTurnstile()) {
+    errors.push(
+      "Turnstile keys (NEXT_PUBLIC_TURNSTILE_SITE_KEY + TURNSTILE_SECRET_KEY) are not set — sign-in would reject every request. Set both, or TURNSTILE_DISABLED=true to run without bot protection.",
     )
   }
 

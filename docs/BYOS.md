@@ -59,6 +59,20 @@ The defining difference from the managed-VPS path: **no provider VM is allocated
 
 ### Prebake at connect ([`src/lib/byos-prebake.ts`](../src/lib/byos-prebake.ts))
 
+> **Off unless `BYOS_PREBAKE_ENABLED=true`.** Two product questions in plan 007
+> are open: which engine is the default (the prebake favours Hermes while the
+> deploy wizard defaults to OpenClaw), and the terms wording for preinstalling
+> on a customer's server. With the flag off, the connect form shows no consent
+> checkbox, nothing runs, and the BYOS deploy script is unchanged.
+>
+> Wired in [`byos-prebake-job.ts`](../src/lib/byos-prebake-job.ts): the connect
+> form records consent, `POST /api/byos/servers` schedules `runPrebake()` with
+> `after()` once the response is sent, and `provisionByosBot()` calls
+> `checkPrebakedServer()` before the bootstrap. Prebake and deploy share an
+> `flock` on `/var/lock/atlas-install.lock`: the prebake gives up if anything
+> else is installing, and a deploy waits up to 10 minutes for a running
+> prebake.
+
 A BYOS box gets no warm pool and no golden image, so historically every deploy
 built from scratch inside the window the customer sat watching — an estimated
 6–10 minutes for OpenClaw and 10–15 for Hermes + Open WebUI.
@@ -201,5 +215,7 @@ BYOS deploys preflight these and return `503` if any are missing:
 | `SSH_FLEET_PUBLIC_KEY` | Surfaced to the user to paste into their server. |
 | `SSH_FLEET_PRIVATE_KEY` | Used to connect to the user's server. |
 | `INSTANCE_ENCRYPTION_KEY` | Encrypts the gateway token, admin password, and the optional own API key. |
+
+Optional: `BYOS_PREBAKE_ENABLED=true` turns on the connect-time prebake (above).
 
 BYOS deliberately does **not** require `OPENROUTER_API_KEY`: `managed_credits` instances mint per-instance keys via `OPENROUTER_PROVISIONING_KEY` (see [BILLING.md](BILLING.md)), and `own_key` instances bring their own.

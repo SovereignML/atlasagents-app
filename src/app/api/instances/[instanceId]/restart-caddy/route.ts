@@ -6,6 +6,8 @@ import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { canOperateInstance } from "@/lib/instance-access"
 import { restartCaddy } from "@/lib/provisioner"
 import { logAuditEvent } from "@/lib/audit"
+import { readJsonBody } from "@/lib/request-body"
+import { caddyRestartSchema } from "@/lib/validations"
 
 export async function POST(
   req: NextRequest,
@@ -20,8 +22,9 @@ export async function POST(
   const isAdmin = (session.user as { role?: string }).role === "admin"
   const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
 
-  const body = (await req.json().catch(() => ({}))) as { mode?: unknown }
-  const mode = body.mode === "restart" ? "restart" : "reload"
+  const parsed = await readJsonBody(req, caddyRestartSchema, { allowEmpty: true })
+  if (!parsed.ok) return parsed.res
+  const mode = parsed.data.mode ?? "reload"
 
   const instance = await db.query.instances.findFirst({
     where: isAdmin ? eq(instances.id, instanceId) : whereUserInstanceVisible(effectiveUserId, instanceId),

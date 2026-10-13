@@ -6,6 +6,8 @@ import { logAuditEvent } from "@/lib/audit"
 import { encryptSecret } from "@/lib/crypto-secret"
 import { verifyToken, listZones } from "@/lib/cloudflare"
 import { cloudflareErrorResponse } from "@/lib/cloudflare-errors"
+import { readJsonBody } from "@/lib/request-body"
+import { cloudflareConnectSchema } from "@/lib/validations"
 
 /**
  * POST /api/integrations/cloudflare/connect
@@ -30,11 +32,9 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const body = (await req.json().catch(() => ({}))) as { token?: string }
-  const apiToken = body.token?.trim()
-  if (!apiToken) {
-    return NextResponse.json({ error: "Missing API token" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, cloudflareConnectSchema)
+  if (!parsed.ok) return parsed.res
+  const apiToken = parsed.data.token
 
   let zonesCount = 0
   try {

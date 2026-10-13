@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAdmin } from "@/lib/admin-guard"
 import { logAuditEvent } from "@/lib/audit"
 import { db, providers, eq } from "@/db"
 import { instantiateProvider } from "@/lib/providers"
@@ -11,13 +11,8 @@ export async function POST(
   _request: Request,
   { params }: { params: Promise<{ providerId: string }> },
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-  if ((session.user as { role?: string }).role !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
+  const guard = await requireAdmin()
+  if (!guard.ok) return guard.res
 
   const { providerId } = await params
   const provider = await db.query.providers.findFirst({ where: eq(providers.id, providerId) })
@@ -28,7 +23,7 @@ export async function POST(
   const health = await checkProviderHealth(providerId, instantiateProvider(provider.slug))
 
   await logAuditEvent({
-    userId: session.user.id as string,
+    userId: guard.userId,
     action: "admin.provider.health_check",
     targetType: "provider",
     targetId: providerId,

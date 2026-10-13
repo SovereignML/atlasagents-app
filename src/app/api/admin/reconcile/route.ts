@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { runReconcilerLocked } from "@/lib/reconciler"
 import { runProviderHealthChecks } from "@/lib/provider-health"
 import { runProviderBillingSync } from "@/lib/provider-billing"
 import { runBillingReconcile, alertBillingReconcile } from "@/lib/billing-reconcile"
-import { isValidCronBearer } from "@/lib/cron-auth"
+import { requireAdminOrCron } from "@/lib/admin-guard"
 
 // POST /api/admin/reconcile
 //
@@ -16,17 +15,8 @@ import { isValidCronBearer } from "@/lib/cron-auth"
 // passes one per endpoint). Overlapping runs are serialized by an advisory
 // lock and return `skipped: true` rather than double-deleting VMs.
 export async function POST(req: NextRequest) {
-  const isCron = isValidCronBearer(req, process.env.RECONCILE_CRON_TOKEN)
-
-  if (!isCron) {
-    const session = await auth()
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-    if ((session.user as { role?: string }).role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
-  }
+  const guard = await requireAdminOrCron(req, process.env.RECONCILE_CRON_TOKEN)
+  if (!guard.ok) return guard.res
 
   // ?scope=fast runs only what bounds money or gates a provisioning decision;
   // the default "full" adds the expensive, not-time-critical housekeeping.

@@ -8,8 +8,8 @@ import { lookup } from "node:dns/promises"
  * fleet key. Without validation a user could point us at loopback, the cloud
  * metadata endpoint (169.254.169.254), or an RFC1918 neighbour and have the
  * platform connect on their behalf. We reject any address that isn't publicly
- * routable, resolving DNS names and re-checking every resolved IP to blunt
- * rebinding tricks.
+ * routable, resolving DNS names and checking every resolved IP, and hand back
+ * the vetted IP so the connection can't re-resolve to something else.
  *
  * Set BYOS_HOST_ALLOWLIST (comma-separated hosts) to bypass the check for
  * trusted internal test targets.
@@ -66,19 +66,25 @@ export function privateIpReason(ip: string): string | null {
 }
 
 /**
- * Throws BlockedHostError if `host` is empty, a private/loopback/link-local IP,
- * or a hostname that resolves to one. Allowlisted hosts pass unchecked.
+ * Resolve `host` and return the address to dial, after checking it. Throws
+ * BlockedHostError if `host` is empty, a private/loopback/link-local IP, or a
+ * hostname with any non-public record. Allowlisted hosts are returned as given.
+ *
+ * Callers must connect to the returned address, not re-resolve the name: a DNS
+ * server can answer the check with a public IP and the connection with a
+ * private one (DNS rebinding). Every record is checked, and the first is
+ * returned.
  */
-export async function assertPublicHost(host: string): Promise<void> {
+export async function resolvePublicHost(host: string): Promise<string> {
   const trimmed = host.trim()
   if (!trimmed) throw new BlockedHostError(host, "empty host")
-  if (allowlist().has(trimmed.toLowerCase())) return
+  if (allowlist().has(trimmed.toLowerCase())) return trimmed
 
   // Literal IP: validate directly.
   if (isIP(trimmed)) {
     const reason = privateIpReason(trimmed)
     if (reason) throw new BlockedHostError(trimmed, reason)
-    return
+    return trimmed
   }
 
   // Hostname: resolve every A/AAAA record and reject if any is non-public.
@@ -93,4 +99,16 @@ export async function assertPublicHost(host: string): Promise<void> {
     const reason = privateIpReason(address)
     if (reason) throw new BlockedHostError(trimmed, `resolves to ${address} — ${reason}`)
   }
+  return records[0].address
+}
+
+/**
+ * Throws BlockedHostError if `host` is empty, a private/loopback/link-local IP,
+ * or a hostname that resolves to one. Allowlisted hosts pass unchecked.
+ *
+ * A check only: anything that then connects must use resolvePublicHost() and
+ * dial the address it returns (see sshDialHost in src/lib/ssh.ts).
+ */
+export async function assertPublicHost(host: string): Promise<void> {
+  await resolvePublicHost(host)
 }

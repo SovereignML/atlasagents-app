@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import type { SQL } from "drizzle-orm"
-import { auth } from "@/auth"
+import { requireAdmin } from "@/lib/admin-guard"
 import {
   db,
   teams,
@@ -30,13 +30,8 @@ import {
  */
 export async function GET(request: Request) {
   try {
-    const session = await auth()
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-    if ((session.user as { role?: string }).role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
+    const guard = await requireAdmin()
+    if (!guard.ok) return guard.res
 
     const { searchParams } = new URL(request.url)
     const search = searchParams.get("search")?.trim() || ""
