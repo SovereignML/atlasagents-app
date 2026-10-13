@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
-import { auth } from "@/auth"
+import { requireAdmin } from "@/lib/admin-guard"
 import { db, eq, or, users } from "@/db"
 import { adminAdjustCredits } from "@/lib/billing"
 import { logAuditEvent } from "@/lib/audit"
@@ -29,13 +29,8 @@ const schema = z.object({
  * negative removes (settlement). The user is notified of the change.
  */
 export async function POST(req: Request) {
-  const session = await auth()
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-  if ((session.user as { role?: string }).role !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
+  const guard = await requireAdmin()
+  if (!guard.ok) return guard.res
 
   const parsed = schema.safeParse(await req.json().catch(() => null))
   if (!parsed.success) {
@@ -62,7 +57,7 @@ export async function POST(req: Request) {
   const result = await adminAdjustCredits(target.id, credits, `Admin adjustment: ${reason}`)
 
   await logAuditEvent({
-    userId: session.user.id,
+    userId: guard.userId,
     action: "admin.credit_adjust",
     targetType: "user",
     targetId: target.id,

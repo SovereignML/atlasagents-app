@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAdmin } from "@/lib/admin-guard"
 import { db, eq, users } from "@/db"
 import { hashPassword } from "@/lib/password"
 import { logAuditEvent } from "@/lib/audit"
@@ -14,13 +14,8 @@ export async function POST(
   { params }: { params: Promise<{ userId: string }> }
 ) {
   try {
-    const session = await auth()
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-    if ((session.user as { role: string }).role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
+    const guard = await requireAdmin()
+    if (!guard.ok) return guard.res
 
     const { userId } = await params
 
@@ -49,7 +44,7 @@ export async function POST(
       .where(eq(users.id, userId))
 
     await logAuditEvent({
-      userId: session.user.id as string,
+      userId: guard.userId,
       action: "admin.reset_password",
       targetType: "user",
       targetId: userId,

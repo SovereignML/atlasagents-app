@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
 
-import { auth } from "@/auth"
-import { isValidCronBearer } from "@/lib/cron-auth"
+import { requireAdminOrCron } from "@/lib/admin-guard"
 import { runDatabaseBackup } from "@/lib/db-backup"
 import { r2ErrorResponse } from "@/lib/r2-errors"
 
@@ -18,19 +17,9 @@ export const maxDuration = 300
  *   2. An admin-role session (manual trigger from the panel).
  */
 export async function POST(req: NextRequest) {
-  const isCron = isValidCronBearer(req, process.env.BACKUP_CRON_TOKEN)
-
-  let userId: string | null = null
-  if (!isCron) {
-    const session = await auth()
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-    if ((session.user as { role?: string }).role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
-    userId = session.user.id
-  }
+  const guard = await requireAdminOrCron(req, process.env.BACKUP_CRON_TOKEN)
+  if (!guard.ok) return guard.res
+  const userId = guard.userId
 
   try {
     const result = await runDatabaseBackup({ trigger: "scheduled", userId })

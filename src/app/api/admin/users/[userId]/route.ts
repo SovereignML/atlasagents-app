@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { requireAdmin } from "@/lib/admin-guard";
 import { userUpdateSchema } from "@/lib/validations";
 import { db, users, eq } from "@/db";
 import { forgetAccountStatus } from "@/lib/account-status";
@@ -9,16 +9,11 @@ export async function PATCH(
   { params }: { params: Promise<{ userId: string }> }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    if ((session.user as { role: string }).role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const guard = await requireAdmin();
+    if (!guard.ok) return guard.res;
 
     const { userId } = await params;
-    const adminId = session.user.id as string;
+    const adminId = guard.userId;
 
     const body = await request.json();
     const validation = userUpdateSchema.safeParse(body);
@@ -130,16 +125,11 @@ export async function DELETE(
   { params }: { params: Promise<{ userId: string }> }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    if ((session.user as { role: string }).role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const guard = await requireAdmin();
+    if (!guard.ok) return guard.res;
 
     const { userId } = await params;
-    const adminId = session.user.id as string;
+    const adminId = guard.userId;
 
     if (userId === adminId) {
       return NextResponse.json(

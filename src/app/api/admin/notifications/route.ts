@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAdmin } from "@/lib/admin-guard"
 import { db, adminNotifications, eq, desc } from "@/db"
-
-function isAdmin(session: { user?: { role?: string } } | null): boolean {
-  return (session?.user as { role?: string } | undefined)?.role === "admin"
-}
 
 /**
  * GET /api/admin/notifications
@@ -14,10 +10,8 @@ function isAdmin(session: { user?: { role?: string } } | null): boolean {
  *   ?limit=50
  */
 export async function GET(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user?.id || !isAdmin(session)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
+  const guard = await requireAdmin()
+  if (!guard.ok) return guard.res
 
   const url = new URL(req.url)
   const showResolved = url.searchParams.get("resolved") === "true"
@@ -42,10 +36,8 @@ export async function GET(req: NextRequest) {
  * Body: { id: string }
  */
 export async function PATCH(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user?.id || !isAdmin(session)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
+  const guard = await requireAdmin()
+  if (!guard.ok) return guard.res
 
   let body: { id?: string }
   try {
@@ -70,7 +62,7 @@ export async function PATCH(req: NextRequest) {
     .set({
       resolved: true,
       resolvedAt: new Date(),
-      resolvedBy: session.user.id,
+      resolvedBy: guard.userId,
     })
     .where(eq(adminNotifications.id, body.id))
 

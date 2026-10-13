@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAdmin } from "@/lib/admin-guard"
 import { db, eq, subscriptions } from "@/db"
 
 export async function PATCH(
@@ -7,13 +7,8 @@ export async function PATCH(
   { params }: { params: Promise<{ subscriptionId: string }> }
 ) {
   try {
-    const session = await auth()
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-    if ((session.user as { role: string }).role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
+    const guard = await requireAdmin()
+    if (!guard.ok) return guard.res
 
     const { subscriptionId } = await params
     const body = await request.json()
@@ -48,13 +43,8 @@ export async function DELETE(
   { params }: { params: Promise<{ subscriptionId: string }> }
 ) {
   try {
-    const session = await auth()
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-    if ((session.user as { role: string }).role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
+    const guard = await requireAdmin()
+    if (!guard.ok) return guard.res
 
     const { subscriptionId } = await params
 
