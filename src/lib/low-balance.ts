@@ -8,8 +8,8 @@
 // usage-sync cadence can't spam them.
 
 import { db, wallets, eq } from "@/db"
-import { claimEvent } from "@/lib/idempotency"
-import { notify } from "@/lib/notifications/dispatch"
+import { claimEvent, releaseEvent } from "@/lib/idempotency"
+import { notify, nothingDelivered } from "@/lib/notifications/dispatch"
 import { formatCredits } from "@/lib/credit-pricing"
 
 const WARN_MULTIPLIER = ((): number => {
@@ -38,11 +38,15 @@ export async function maybeWarnLowBalance(userId: string): Promise<boolean> {
   // (from daily-billing / usage-sync enforcement) is the right message.
   if (balance <= minimum || balance > warnAt) return false
 
+  // Claim-with-release: the claim stops a busy usage-sync cadence from sending
+  // twice, and is released if nothing was delivered, so the next check retries
+  // instead of the warning being lost for the day.
   const day = new Date().toISOString().slice(0, 10)
-  const claimed = await claimEvent("low_balance_warning", `${userId}:${day}`)
+  const key = `${userId}:${day}`
+  const claimed = await claimEvent("low_balance_warning", key)
   if (!claimed) return false
 
-  await notify({
+  const result = await notify({
     userId,
     category: "billing",
     type: "low_balance_warning",
@@ -52,5 +56,9 @@ export async function maybeWarnLowBalance(userId: string): Promise<boolean> {
     )}. Top up to avoid interruption.`,
     url: "/dashboard/billing",
   })
+  if (nothingDelivered(result)) {
+    await releaseEvent("low_balance_warning", key)
+    return false
+  }
   return true
 }
