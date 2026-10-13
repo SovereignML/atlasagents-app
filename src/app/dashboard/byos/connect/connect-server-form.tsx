@@ -24,12 +24,20 @@ type Issue = { code: string; message: string; fix: string | null }
  * agent configuration. We check the machine and show them what we found; they
  * choose an agent afterwards, and that is when anything is charged.
  */
-export function ConnectServerForm({ fleetPublicKey }: { fleetPublicKey: string | null }) {
+export function ConnectServerForm({
+  fleetPublicKey,
+  prebakeEnabled = false,
+}: {
+  fleetPublicKey: string | null
+  /** BYOS_PREBAKE_ENABLED: offer to preinstall in the background after connecting. */
+  prebakeEnabled?: boolean
+}) {
   const router = useRouter()
   const [host, setHost] = useState("")
   const [port, setPort] = useState("22")
   const [sshUser, setSshUser] = useState("root")
   const [label, setLabel] = useState("")
+  const [prebakeConsent, setPrebakeConsent] = useState(false)
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
   const [blockers, setBlockers] = useState<Issue[]>([])
@@ -64,6 +72,7 @@ export function ConnectServerForm({ fleetPublicKey }: { fleetPublicKey: string |
           port: portNum,
           sshUser: sshUser.trim() || "root",
           label: label.trim() || undefined,
+          ...(prebakeEnabled ? { prebakeConsent } : {}),
         }),
       })
       const data = await res.json()
@@ -74,7 +83,11 @@ export function ConnectServerForm({ fleetPublicKey }: { fleetPublicKey: string |
         return
       }
       setConflicts(data.conflicts ?? [])
-      toast.success("Server connected — nothing was installed or charged")
+      toast.success(
+        prebakeEnabled && prebakeConsent
+          ? "Server connected — preinstalling in the background, nothing charged"
+          : "Server connected — nothing was installed or charged",
+      )
       router.push("/dashboard/byos")
       router.refresh()
     } catch (err) {
@@ -181,6 +194,27 @@ export function ConnectServerForm({ fleetPublicKey }: { fleetPublicKey: string |
               />
             </Field>
           </FieldGroup>
+
+          {prebakeEnabled && (
+            <label className="mt-5 flex items-start gap-3 rounded-lg border border-border p-4 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 accent-primary"
+                checked={prebakeConsent}
+                onChange={(e) => setPrebakeConsent(e.target.checked)}
+              />
+              <span>
+                <span className="font-medium text-foreground">Preinstall now so deploying is faster</span>
+                <span className="mt-1 block text-muted-foreground">
+                  We&apos;ll install system packages, Caddy, Node.js and the Hermes engine on this server in the
+                  background, before you add an agent. Only tick this if the server isn&apos;t running anything else
+                  you depend on: Atlas Agents can&apos;t take full responsibility for software already on a shared
+                  machine. If the server already runs a web server or uses port 443, we skip this and install at
+                  deploy time instead.
+                </span>
+              </span>
+            </label>
+          )}
 
           {blockers.length > 0 && (
             <div className="mt-5 rounded-lg border border-destructive/40 bg-destructive/10 p-4">

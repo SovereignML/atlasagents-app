@@ -111,6 +111,7 @@ import {
 import type { TerminalSpec, ToolService, ToolServiceRoute } from "@/lib/runtimes/types"
 import { claimWarmVm, isPoolEnabled } from "@/lib/warm-pool"
 import { platformOwnsHostVm } from "@/lib/byos-install"
+import { byosPrebakeEnabled, checkPrebakedServer, withInstallLock } from "@/lib/byos-prebake-job"
 
 type Instance = InferSelectModel<typeof instances>
 
@@ -2914,8 +2915,32 @@ async function provisionByosBot(instance: Instance): Promise<ProvisionResult> {
       stage: currentStage,
       message: PROVISION_EVENT.bootstrapping,
     })
-    const pins = await resolveAndRecordVersions(instance, runtime)
-    const bootstrapScript = runtime.renderBootstrap({
+    let pins = await resolveAndRecordVersions(instance, runtime)
+    // Connect-time prebake (BYOS_PREBAKE_ENABLED; byos-prebake-job.ts): reuse
+    // the versions it installed and say whether the box still matches. The
+    // full bootstrap below runs regardless and self-heals any drift.
+    const prebake = await checkPrebakedServer(instance.byosServerId, runtime.id, target)
+    if (prebake) {
+      await logInstanceEvent({
+        instanceId: instance.id,
+        stage: currentStage,
+        action: "prebake_check",
+        result: prebake.fastPath ? "ok" : "error",
+        level: prebake.fastPath ? "info" : "warn",
+        message: prebake.message,
+      })
+      if (prebake.pins.runtimeVersion || prebake.pins.sidecarVersion) {
+        pins = { ...pins, ...prebake.pins }
+        await db
+          .update(instances)
+          .set({
+            ...(prebake.pins.runtimeVersion ? { runtimeVersion: prebake.pins.runtimeVersion } : {}),
+            ...(prebake.pins.sidecarVersion ? { sidecarVersion: prebake.pins.sidecarVersion } : {}),
+          })
+          .where(eq(instances.id, instance.id))
+      }
+    }
+    const renderedBootstrap = runtime.renderBootstrap({
       gatewayPort: runtime.gatewayPort,
       webuiEnabled: Boolean(instance.webuiEnabled) && Boolean(runtime.sidecar),
       browserDeps: wantsBrowserDeps(instance, runtime),
@@ -2926,6 +2951,12 @@ async function provisionByosBot(instance: Instance): Promise<ProvisionResult> {
       sshPort: port,
       manageFirewall: false,
     })
+    // With prebake on, wait for a prebake that is still installing rather than
+    // racing it for apt's lock. Off, the script is unchanged.
+    const PREBAKE_LOCK_WAIT_S = 600
+    const bootstrapScript = byosPrebakeEnabled()
+      ? withInstallLock(renderedBootstrap, PREBAKE_LOCK_WAIT_S)
+      : renderedBootstrap
     const bootstrapStep = await sshRunScriptLogged(
       target,
       bootstrapScript,
@@ -2934,7 +2965,8 @@ async function provisionByosBot(instance: Instance): Promise<ProvisionResult> {
       // A customer box builds everything from source (no cloud-init, no warm
       // pool) and may sit behind a slow mirror; 600s was tight enough that a
       // Hermes + Open WebUI install could be killed just short of finishing.
-      { timeoutMs: 900_000 },
+      // Plus the time it may wait on a running prebake's lock.
+      { timeoutMs: 900_000 + (byosPrebakeEnabled() ? PREBAKE_LOCK_WAIT_S * 1000 : 0) },
     )
     await logSshStep(instance.id, bootstrapStep)
     if (bootstrapStep.exitCode !== 0 && bootstrapStep.exitCode !== null) {

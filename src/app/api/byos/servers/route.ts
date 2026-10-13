@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextRequest, NextResponse, after } from "next/server"
 import { auth } from "@/auth"
 import { getEffectiveTeam } from "@/lib/effective-user"
 import { isTeamSuspended } from "@/lib/tenant"
@@ -12,6 +12,7 @@ import {
 import { apiError } from "@/lib/api-error"
 import { readJsonBody } from "@/lib/request-body"
 import { byosServerConnectSchema } from "@/lib/validations"
+import { byosPrebakeEnabled, runPrebake } from "@/lib/byos-prebake-job"
 
 /**
  * Connect a server the customer already owns.
@@ -53,7 +54,11 @@ export async function POST(req: NextRequest) {
       port: body.port,
       sshUser: body.sshUser,
       label: body.label,
+      prebakeConsent: byosPrebakeEnabled() && body.prebakeConsent === true,
     })
+    // Prebake after the response: it takes minutes and must never hold up the
+    // connect. runPrebake re-checks the flag, consent and conflicts itself.
+    if (byosPrebakeEnabled()) after(() => runPrebake(server.id, verdict.facts))
     // Conflicts are returned alongside a successful connect: they describe what
     // installing an agent would disturb, which the user decides about at
     // install time, not now.

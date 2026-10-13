@@ -118,6 +118,12 @@ export type ConnectServerInput = {
   port?: number
   sshUser?: string
   label?: string
+  /**
+   * The owner ticked "preinstall" (src/lib/byos-prebake-job.ts). Recorded as
+   * `prebakeConsentAt`; leaving it unticked on a re-probe keeps an earlier
+   * consent rather than revoking it.
+   */
+  prebakeConsent?: boolean
 }
 
 export type ConnectServerResult = {
@@ -235,6 +241,7 @@ export async function connectServer(input: ConnectServerInput): Promise<ConnectS
       ramTotalMb: f.ramTotalMb,
       diskTotalGb: f.diskTotalGb,
     }),
+    ...(input.prebakeConsent ? { prebakeConsentAt: new Date() } : {}),
   }
 
   const [server] = existing
