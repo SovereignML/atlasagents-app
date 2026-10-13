@@ -3,6 +3,9 @@ import { requireAdmin } from "@/lib/admin-guard";
 import { userUpdateSchema } from "@/lib/validations";
 import { db, users, eq } from "@/db";
 import { forgetAccountStatus } from "@/lib/account-status";
+import { closeUserAccount } from "@/lib/account-closure";
+import { logAuditEvent } from "@/lib/audit";
+import { apiError } from "@/lib/api-error";
 
 export async function PATCH(
   request: Request,
@@ -120,6 +123,11 @@ export async function PATCH(
   }
 }
 
+/**
+ * "Delete" a user: closes the account (src/lib/account-closure.ts). The row
+ * is anonymized and kept, with its wallet, ledger, subscriptions and audit
+ * trail; a hard delete would erase that money trail.
+ */
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ userId: string }> }
@@ -140,20 +148,24 @@ export async function DELETE(
 
     const user = await db.query.users.findFirst({
       where: eq(users.id, userId),
+      columns: { email: true },
+    });
+    const result = await closeUserAccount(userId);
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    }
+    forgetAccountStatus(userId);
+    await logAuditEvent({
+      userId: adminId,
+      action: "admin.delete_user",
+      targetType: "user",
+      targetId: userId,
+      targetLabel: user?.email,
+      meta: { mode: "closed" },
     });
 
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
-    await db.delete(users).where(eq(users.id, userId));
-
-    return NextResponse.json({ message: "User deleted successfully" });
+    return NextResponse.json({ message: "Account closed. Billing and audit records are kept." });
   } catch (error) {
-    console.error("Failed to delete user:", error);
-    return NextResponse.json(
-      { error: "Failed to delete user" },
-      { status: 500 }
-    );
+    return apiError(`admin/users delete ${(await params).userId}`, error, "Failed to delete user.");
   }
 }

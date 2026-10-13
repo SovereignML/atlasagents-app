@@ -133,7 +133,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         })
 
         if (!user || !user.hashedPassword) return null
-        if (user.isBanned) return null
+        if (user.isBanned || user.deletedAt) return null
 
         const isValid = await verifyPassword(
           credentials.password as string,

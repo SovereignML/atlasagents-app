@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { Search, X } from "lucide-react"
+import { toast } from "sonner"
 
 import {
   AlertDialog,
@@ -234,7 +235,12 @@ export default function AdminUsersPage() {
 
   async function handleDelete(user: User) {
     setActionLoading(user.id)
-    await fetch(`/api/admin/users/${user.id}`, { method: "DELETE" })
+    const res = await fetch(`/api/admin/users/${user.id}`, { method: "DELETE" })
+    if (!res.ok) {
+      // Refusals explain what to do first (delete agents, cancel a plan, …).
+      const body = (await res.json().catch(() => ({}))) as { error?: string }
+      toast.error(body.error ?? "Could not close the account.")
+    }
     if (expandedUserId === user.id) {
       setExpandedUserId(null)
       setNotes([])
@@ -545,7 +551,9 @@ export default function AdminUsersPage() {
                                   <AlertDialogHeader>
                                     <AlertDialogTitle>Delete {user.email}?</AlertDialogTitle>
                                     <AlertDialogDescription>
-                                      This permanently removes the user. This cannot be undone.
+                                      Closes the account: sign-in is removed and personal details are
+                                      anonymized. Billing and audit records are kept. Their agents must
+                                      be deleted and subscriptions canceled first. This cannot be undone.
                                     </AlertDialogDescription>
                                   </AlertDialogHeader>
                                   <AlertDialogFooter>

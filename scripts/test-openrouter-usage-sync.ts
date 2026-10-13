@@ -18,7 +18,7 @@
 // Creates and cleans up a throwaway user + wallet.
 
 import { randomUUID } from "node:crypto"
-import { db, users, wallets, eq } from "@/db"
+import { db, users, wallets, eq, creditLedger, usageEvents, subscriptions, auditLogs } from "@/db"
 import {
   OPENROUTER_MARGIN,
   keyLimitUsdFromCredits,
@@ -108,7 +108,13 @@ async function main() {
     funded = await getLifetimeFundedCredits(user.id)
     if (funded !== 800) fail.push(`lifetimeFunded after spend = ${funded}, want 800 (unchanged)`)
   } finally {
-    // Wallet cascades on user delete (FK onDelete: cascade).
+    // Wallet, ledger, usage, subscription and audit rows RESTRICT deleting a
+    // user (they are the money trail; accounts are closed, not deleted). This
+    // throwaway fixture removes them first.
+    await db.delete(creditLedger).where(eq(creditLedger.userId, user.id))
+    await db.delete(usageEvents).where(eq(usageEvents.userId, user.id))
+    await db.delete(subscriptions).where(eq(subscriptions.userId, user.id))
+    await db.delete(auditLogs).where(eq(auditLogs.userId, user.id))
     await db.delete(wallets).where(eq(wallets.userId, user.id))
     await db.delete(users).where(eq(users.id, user.id))
   }

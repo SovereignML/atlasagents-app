@@ -85,6 +85,11 @@ export const users = pgTable(
     // ad-conversion data is transmitted to Meta/Google. See src/lib/consent.
     marketingConsent: boolean(),
     consentUpdatedAt: timestamp({ mode: "date", withTimezone: false }),
+    // Set when an admin closes the account (src/lib/account-closure.ts). Users
+    // are never hard-deleted: their wallet, credit ledger, subscriptions, usage
+    // and audit trail are kept for accounting, chargebacks and investigations,
+    // and the personal fields on this row are anonymized instead.
+    deletedAt: timestamp({ mode: "date", withTimezone: false }),
   },
   (t) => [
     uniqueIndex("User_email_key").on(t.email),
@@ -176,7 +181,9 @@ export const subscriptions = pgTable(
     id: cuid().primaryKey(),
     userId: text()
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      // restrict, not cascade: users are closed, never hard-deleted
+      // (src/lib/account-closure.ts), so the money and audit trail survives.
+      .references(() => users.id, { onDelete: "restrict" }),
     // Nullable: platform subscriptions reference a platform Plan, but reseller
     // (connected-account) subscriptions are priced on the TENANT's own Stripe
     // and don't map to a platform plan — those rows leave planId null and carry
@@ -1010,7 +1017,9 @@ export const wallets = pgTable(
     id: cuid().primaryKey(),
     userId: text()
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      // restrict, not cascade: users are closed, never hard-deleted
+      // (src/lib/account-closure.ts), so the money and audit trail survives.
+      .references(() => users.id, { onDelete: "restrict" }),
     balance: doublePrecision().default(0).notNull(),
     minimumBalance: doublePrecision().default(200).notNull(),
     // Cumulative credits ever funded into this wallet (topup + plan_deposit +
@@ -1171,7 +1180,9 @@ export const usageEvents = pgTable(
       .references(() => instances.id, { onDelete: "cascade" }),
     userId: text()
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      // restrict, not cascade: users are closed, never hard-deleted
+      // (src/lib/account-closure.ts), so the money and audit trail survives.
+      .references(() => users.id, { onDelete: "restrict" }),
     kind: text().notNull(),
     amount: integer().notNull(),
     meta: jsonb(),
@@ -1189,7 +1200,9 @@ export const creditLedger = pgTable(
     id: cuid().primaryKey(),
     userId: text()
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      // restrict, not cascade: users are closed, never hard-deleted
+      // (src/lib/account-closure.ts), so the money and audit trail survives.
+      .references(() => users.id, { onDelete: "restrict" }),
     delta: integer().notNull(),
     reason: text().notNull(),
     balance: integer().notNull(),
@@ -1674,7 +1687,9 @@ export const auditLogs = pgTable(
     id: cuid().primaryKey(),
     userId: text()
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      // restrict, not cascade: users are closed, never hard-deleted
+      // (src/lib/account-closure.ts), so the money and audit trail survives.
+      .references(() => users.id, { onDelete: "restrict" }),
     teamId: text(),
     action: text().notNull(),
     targetType: text(),

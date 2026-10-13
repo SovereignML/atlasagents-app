@@ -29,9 +29,10 @@ export async function getAccountStatus(userId: string): Promise<AccountStatus> {
 
   const row = await db.query.users.findFirst({
     where: eq(users.id, userId),
-    columns: { isBanned: true, role: true },
+    columns: { isBanned: true, role: true, deletedAt: true },
   })
-  const status: AccountStatus = !row
+  // A closed account (src/lib/account-closure.ts) is treated as gone.
+  const status: AccountStatus = !row || row.deletedAt
     ? { kind: "missing" }
     : row.isBanned
       ? { kind: "banned" }

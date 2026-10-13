@@ -17,15 +17,7 @@
 import { randomUUID } from "node:crypto"
 import { getOrMintInstanceOpenRouterKey } from "@/lib/provisioner"
 import type { mintRuntimeKey as RealMintFn } from "@/lib/openrouter-provisioning"
-import {
-  db,
-  instances,
-  regions,
-  serverConfigs,
-  teams,
-  users,
-  eq,
-} from "@/db"
+import { db, instances, regions, serverConfigs, teams, users, eq, creditLedger, usageEvents, subscriptions, auditLogs, wallets } from "@/db"
 
 async function main() {
   const fail: string[] = []
@@ -139,6 +131,14 @@ async function main() {
   } finally {
     // Cleanup: drop instance (cascade removes anything else), then the user.
     await db.delete(instances).where(eq(instances.id, inst.id))
+    // Wallet, ledger, usage, subscription and audit rows RESTRICT deleting a
+    // user (they are the money trail; accounts are closed, not deleted). This
+    // throwaway fixture removes them first.
+    await db.delete(creditLedger).where(eq(creditLedger.userId, user.id))
+    await db.delete(usageEvents).where(eq(usageEvents.userId, user.id))
+    await db.delete(subscriptions).where(eq(subscriptions.userId, user.id))
+    await db.delete(auditLogs).where(eq(auditLogs.userId, user.id))
+    await db.delete(wallets).where(eq(wallets.userId, user.id))
     await db.delete(users).where(eq(users.id, user.id))
   }
 
