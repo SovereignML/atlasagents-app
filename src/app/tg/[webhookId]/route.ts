@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import crypto from "node:crypto"
 import { db, eq, instances } from "@/db"
 import { decryptSecret } from "@/lib/crypto-secret"
+import { legacyTokenWebhookAllowed } from "@/lib/telegram-webhook"
 
 /**
  * Centralized Telegram webhook router.
@@ -14,7 +15,10 @@ import { decryptSecret } from "@/lib/crypto-secret"
  *
  * Legacy bots connected before the secret existed used /tg/<botToken>; we keep
  * resolving those by botToken (no secret to check) so they keep working until
- * the owner reconnects and migrates to the secure URL.
+ * they move to the secure URL (reconnect, or scripts/migrate-legacy-tg-webhooks.ts).
+ * A bot that has moved is never served on the token path again, since its old
+ * URL may sit in access logs, and TG_LEGACY_TOKEN_WEBHOOKS=off closes the path
+ * for everyone once the migration is done.
  *
  * Telegram expects a 200 OK — a non-200 makes it retry — so we always return
  * 200 and just decline to forward anything we can't authenticate.
@@ -34,6 +38,7 @@ export async function POST(
       ipAddress: true,
       containerPort: true,
       botToken: true,
+      telegramWebhookId: true,
       telegramWebhookSecretEnc: true,
     },
   })
@@ -49,6 +54,7 @@ export async function POST(
         ipAddress: true,
         containerPort: true,
         botToken: true,
+        telegramWebhookId: true,
         telegramWebhookSecretEnc: true,
       },
     })
@@ -57,6 +63,14 @@ export async function POST(
 
   if (!instance) {
     return NextResponse.json({ ok: true, warning: "unknown webhook" })
+  }
+  if (legacy) {
+    if (!legacyTokenWebhookAllowed(instance)) {
+      console.warn(`[tg] refused legacy token-path update for instance ${instance.id}`)
+      return NextResponse.json({ ok: true, warning: "legacy webhook path closed" })
+    }
+    // Counted in the logs so we can tell when the last bot has moved.
+    console.warn(`[tg] legacy token-path update for instance ${instance.id}; run migrate-legacy-tg-webhooks`)
   }
 
   // Verify the secret_token header for the secure path. Decline (but 200)
