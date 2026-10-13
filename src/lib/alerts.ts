@@ -5,12 +5,12 @@
 // shared notify() dispatcher under the "monitoring" category.
 //
 // Metrics read the same real fields the dashboard shows (Kuma snapshot + per-
-// instance OpenRouter spend); error_rate reads the AgentEvent stream (0 until
-// the emit pipeline is live).
+// instance OpenRouter spend); error_rate reads the AgentEvent stream (no
+// events, no rate, until the emit pipeline is live).
 
 import { db, alertRules, instances, agentEvents, and, eq, ne, gte, inArray, sql } from "@/db"
 import { notify } from "@/lib/notifications/dispatch"
-import { compare } from "@/lib/alert-metrics"
+import { ERROR_RATE_EVENT_TYPES, compare, errorRate } from "@/lib/alert-metrics"
 
 type TargetRow = {
   id: string
@@ -55,21 +55,24 @@ async function breaches(rule: AlertRuleRow, t: TargetRow, since: Date): Promise<
       // event pipeline). Compared against the configured USD threshold.
       return compare(t.openRouterUsageUsd ?? 0, rule.comparator, rule.threshold)
     case "error_rate": {
+      // Failures arrive as type "error" events as well as status "error" on a
+      // run or tool call. Counting only the latter (as this used to) left the
+      // ratio at 0 for every agent, so the rule could never fire.
       const [row] = await db
         .select({
           total: sql<number>`count(*)::int`,
-          errors: sql<number>`count(*) filter (where ${agentEvents.status} = 'error')::int`,
+          failed: sql<number>`count(*) filter (where ${agentEvents.type} = 'error' or ${agentEvents.status} = 'error')::int`,
         })
         .from(agentEvents)
         .where(
           and(
             eq(agentEvents.instanceId, t.id),
             gte(agentEvents.createdAt, since),
-            inArray(agentEvents.type, ["run.finished", "tool.called"]),
+            inArray(agentEvents.type, [...ERROR_RATE_EVENT_TYPES]),
           ),
         )
-      if (!row || row.total === 0) return false
-      return compare(row.errors / row.total, rule.comparator, rule.threshold)
+      const rate = row ? errorRate(row) : null
+      return rate != null && compare(rate, rule.comparator, rule.threshold)
     }
     default:
       return false
