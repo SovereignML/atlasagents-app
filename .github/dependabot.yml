@@ -1,9 +1,13 @@
-# Dependabot version updates. npm minor and patch bumps arrive as one grouped
-# PR a week; a major bump gets its own PR. CI runs on each, including the
-# critical-advisory audit.
+# Dependabot keeps dependencies patched without proposing breaking upgrades.
 #
-# Per-advisory security PRs are a separate switch: "Dependabot security
-# updates" in the repo's Settings → Code security.
+# - Version updates: minor and patch only. npm bumps arrive as one grouped PR a
+#   week. Major versions are ignored for every ecosystem; upgrade those
+#   deliberately, by hand.
+# - Security updates: a PR per advisory, from "Dependabot security updates"
+#   (on in the repo's Settings → Advanced Security). The major-version ignore
+#   below names `version-update:*` types, which scope it to version updates.
+#
+# CI runs on every Dependabot PR, including the critical-advisory audit.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -15,6 +19,8 @@ updates:
       npm-minor-and-patch:
         update-types: [minor, patch]
     ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
       # typescript-eslint (via eslint-config-next) supports TypeScript < 6.1, and
       # lint fails outright on TypeScript 7 ("typescript-eslint does not support
       # TS 7.0"). package.json pins ~6.0.3 for the same reason. Lift this once a
@@ -26,3 +32,6 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
