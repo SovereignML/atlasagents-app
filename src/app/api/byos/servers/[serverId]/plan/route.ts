@@ -10,6 +10,8 @@ import { apiError } from "@/lib/api-error"
 import { planUnitAmountCents } from "@/lib/pricing"
 import { findPlanBySlug } from "@/configs/plans"
 import { BRANDING } from "@/configs/branding"
+import { readJsonBody } from "@/lib/request-body"
+import { byosPlanCheckoutSchema } from "@/lib/validations"
 
 /**
  * Buy a BYOS plan for one connected server.
@@ -45,8 +47,9 @@ export async function POST(
     })
     if (!server) return NextResponse.json({ error: "Server not found" }, { status: 404 })
 
-    const body = (await req.json().catch(() => ({}))) as { interval?: string }
-    const interval: "month" | "year" = body.interval === "year" ? "year" : "month"
+    const body = await readJsonBody(req, byosPlanCheckoutSchema, { allowEmpty: true })
+    if (!body.ok) return body.res
+    const interval: "month" | "year" = body.data.interval ?? "month"
 
     if (await isTeamSuspended(teamId)) {
       return NextResponse.json(

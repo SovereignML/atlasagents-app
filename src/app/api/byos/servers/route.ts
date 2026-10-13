@@ -10,6 +10,8 @@ import {
   MAX_IDLE_SERVERS_PER_TEAM,
 } from "@/lib/byos-server"
 import { apiError } from "@/lib/api-error"
+import { readJsonBody } from "@/lib/request-body"
+import { byosServerConnectSchema } from "@/lib/validations"
 
 /**
  * Connect a server the customer already owns.
@@ -39,18 +41,15 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  let body: { host?: string; port?: number; sshUser?: string; label?: string }
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: "Invalid request body" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, byosServerConnectSchema)
+  if (!parsed.ok) return parsed.res
+  const body = parsed.data
 
   try {
     const { server, verdict } = await connectServer({
       teamId: ctx.teamId,
       userId: ctx.effectiveUserId,
-      host: String(body.host ?? ""),
+      host: body.host,
       port: body.port,
       sshUser: body.sshUser,
       label: body.label,

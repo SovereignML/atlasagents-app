@@ -7,11 +7,8 @@ import { canOperateInstance } from "@/lib/instance-access"
 import { encryptSecret } from "@/lib/crypto-secret"
 import { reprovisionBotEnv } from "@/lib/provisioner"
 import { registerTelegramWebhook, telegramApi } from "@/lib/telegram-webhook"
-
-type ConnectBody = {
-  kind: "telegram"
-  token: string
-}
+import { readJsonBody } from "@/lib/request-body"
+import { telegramConnectSchema } from "@/lib/validations"
 
 type TelegramUser = { id: number; username?: string; first_name?: string }
 
@@ -45,10 +42,9 @@ export async function POST(
     )
   }
 
-  const body = (await req.json()) as ConnectBody
-  if (body.kind !== "telegram" || !body.token || typeof body.token !== "string") {
-    return NextResponse.json({ error: "Invalid body" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, telegramConnectSchema)
+  if (!parsed.ok) return parsed.res
+  const body = parsed.data
 
   // Validate token via getMe.
   const me = await telegramApi<TelegramUser>(body.token, "getMe")

@@ -13,6 +13,8 @@ import {
   MIN_TOPUP_CREDITS,
   creditsToUsd,
 } from "@/lib/credit-pricing"
+import { readJsonBody } from "@/lib/request-body"
+import { walletTopupSchema } from "@/lib/validations"
 
 /**
  * GET /api/billing/wallet
@@ -63,14 +65,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  let body: { credits?: number }
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
-  }
+  const body = await readJsonBody(req, walletTopupSchema)
+  if (!body.ok) return body.res
 
-  const credits = Math.round(body.credits ?? 0)
+  const credits = body.data.credits
   if (!credits || credits < MIN_TOPUP_CREDITS) {
     return NextResponse.json(
       { error: `Minimum top-up is ${MIN_TOPUP_CREDITS} credits` },

@@ -4,17 +4,14 @@ import { hashPassword } from "@/lib/password"
 import { rateLimit } from "@/lib/rate-limit"
 import { clientIp } from "@/lib/client-ip"
 import crypto from "crypto"
+import { readJsonBody } from "@/lib/request-body"
+import { resetPasswordSchema } from "@/lib/validations"
 
 export async function POST(request: Request) {
   try {
-    const { token, email, password } = await request.json()
-
-    if (!token || !email || !password) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
-    }
-    if (password.length < 6) {
-      return NextResponse.json({ error: "Password must be at least 6 characters" }, { status: 400 })
-    }
+    const body = await readJsonBody(request, resetPasswordSchema)
+    if (!body.ok) return body.res
+    const { token, email, password } = body.data
 
     // Throttle token guessing before any DB work: per-email (an attacker who
     // knows the address can't brute-force the token) and per-IP.

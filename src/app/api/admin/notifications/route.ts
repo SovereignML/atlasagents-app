@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAdmin } from "@/lib/admin-guard"
 import { db, adminNotifications, eq, desc } from "@/db"
+import { readJsonBody } from "@/lib/request-body"
+import { adminNotificationResolveSchema } from "@/lib/validations"
 
 /**
  * GET /api/admin/notifications
@@ -39,16 +41,9 @@ export async function PATCH(req: NextRequest) {
   const guard = await requireAdmin()
   if (!guard.ok) return guard.res
 
-  let body: { id?: string }
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
-  }
-
-  if (!body.id) {
-    return NextResponse.json({ error: "id is required" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, adminNotificationResolveSchema)
+  if (!parsed.ok) return parsed.res
+  const body = parsed.data
 
   const existing = await db.query.adminNotifications.findFirst({
     where: eq(adminNotifications.id, body.id),

@@ -10,6 +10,8 @@ import { AGENT_CATEGORIES } from "@/configs/agent-categories"
 import { selectSkills } from "@/configs/skill-map"
 import { generateSoul } from "@/lib/soul"
 import type { AgentConfig } from "@/lib/agent-config"
+import { readJsonBody } from "@/lib/request-body"
+import { agentTypeSchema } from "@/lib/validations"
 
 export async function PATCH(
   req: NextRequest,
@@ -21,12 +23,9 @@ export async function PATCH(
   }
 
   const { instanceId } = await params
-  const body = await req.json()
-  const { agentType } = body as { agentType?: string }
-
-  if (!agentType || typeof agentType !== "string") {
-    return NextResponse.json({ error: "agentType is required" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, agentTypeSchema)
+  if (!parsed.ok) return parsed.res
+  const { agentType } = parsed.data
 
   const validSlugs = AGENT_CATEGORIES.map((c) => c.slug)
   if (!validSlugs.includes(agentType)) {

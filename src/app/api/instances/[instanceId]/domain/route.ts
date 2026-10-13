@@ -11,6 +11,8 @@ import {
   lookupDomainNs,
   normalizeHostname,
 } from "@/lib/domain-dns"
+import { readJsonBody } from "@/lib/request-body"
+import { instanceDomainSchema } from "@/lib/validations"
 
 export async function POST(
   req: NextRequest,
@@ -41,11 +43,10 @@ export async function POST(
     return NextResponse.json({ error: "Instance has no IP address" }, { status: 400 })
   }
 
-  const body = await req.json().catch(() => ({})) as {
-    domain?: string
-    /** When true, only run format + NS (+ optional A) checks — no Caddy/DB write. */
-    checkOnly?: boolean
-  }
+  // `checkOnly`: run format + NS (+ optional A) checks only — no Caddy/DB write.
+  const parsed = await readJsonBody(req, instanceDomainSchema, { allowEmpty: true })
+  if (!parsed.ok) return parsed.res
+  const body = parsed.data
   const domain = body.domain ? normalizeHostname(body.domain) || null : null
 
   if (domain && !isValidHostname(domain)) {

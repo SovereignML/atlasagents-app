@@ -6,14 +6,14 @@ import {
 } from "@/lib/email-verification"
 import { rateLimit } from "@/lib/rate-limit"
 import { clientIp } from "@/lib/client-ip"
+import { readJsonBody } from "@/lib/request-body"
+import { verifyEmailSchema } from "@/lib/validations"
 
 export async function POST(request: Request) {
   try {
-    const { token, email } = await request.json()
-
-    if (!token || !email) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
-    }
+    const body = await readJsonBody(request, verifyEmailSchema)
+    if (!body.ok) return body.res
+    const { token, email } = body.data
 
     // Throttle token guessing before any DB work: per-email and per-IP.
     const ip = clientIp(request.headers)

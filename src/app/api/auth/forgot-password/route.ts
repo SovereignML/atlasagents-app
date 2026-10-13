@@ -5,13 +5,14 @@ import { sendPasswordResetEmail } from "@/lib/email"
 import { verifyTurnstileToken } from "@/lib/turnstile"
 import { clientIp } from "@/lib/client-ip"
 import crypto from "crypto"
+import { readJsonBody } from "@/lib/request-body"
+import { forgotPasswordSchema } from "@/lib/validations"
 
 export async function POST(request: Request) {
   try {
-    const { email, turnstileToken } = await request.json()
-    if (!email || typeof email !== "string") {
-      return NextResponse.json({ error: "Email is required" }, { status: 400 })
-    }
+    const body = await readJsonBody(request, forgotPasswordSchema)
+    if (!body.ok) return body.res
+    const { email, turnstileToken } = body.data
 
     // Rate limit: 3 per email per hour
     if (!(await rateLimit(`forgot-password:${email.toLowerCase()}`, 3, 60 * 60 * 1000))) {

@@ -12,6 +12,8 @@ import {
   encryptTotpSecret,
   generateBackupCodes,
 } from "@/lib/two-factor"
+import { readJsonBody } from "@/lib/request-body"
+import { twoFactorActionSchema } from "@/lib/validations"
 
 async function getCurrentUser() {
   const session = await auth()
@@ -45,8 +47,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 })
   }
 
-  const body = await request.json().catch(() => ({}))
-  const action = body?.action as string | undefined
+  const parsed = await readJsonBody(request, twoFactorActionSchema)
+  if (!parsed.ok) return parsed.res
+  const body = parsed.data
+  const action = body.action
 
   if (action === "setup") {
     if (user.twoFactorEnabled) {

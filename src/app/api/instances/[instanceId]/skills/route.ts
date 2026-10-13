@@ -19,6 +19,8 @@ import {
 import { generateSoul } from "@/lib/soul"
 import type { AgentConfig } from "@/lib/agent-config"
 import type { RuntimeId } from "@/lib/runtimes"
+import { readJsonBody } from "@/lib/request-body"
+import { instanceSkillsSchema } from "@/lib/validations"
 
 /** GET — enabled skills + the full catalog + the agent's current enabled tools. */
 export async function GET(
@@ -61,20 +63,10 @@ export async function PATCH(
   }
 
   const { instanceId } = await params
-  const body = await req.json()
-  const { enabledSkills } = body as { enabledSkills?: unknown }
-
-  if (
-    !Array.isArray(enabledSkills) ||
-    !enabledSkills.every((s) => typeof s === "string")
-  ) {
-    return NextResponse.json(
-      { error: "enabledSkills must be an array of strings" },
-      { status: 400 },
-    )
-  }
+  const parsed = await readJsonBody(req, instanceSkillsSchema)
+  if (!parsed.ok) return parsed.res
   // De-dupe while preserving order.
-  const ids = [...new Set(enabledSkills as string[])]
+  const ids = [...new Set(parsed.data.enabledSkills)]
 
   const isAdmin = (session.user as { role?: string }).role === "admin"
   const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
