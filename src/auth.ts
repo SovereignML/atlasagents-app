@@ -226,10 +226,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // proxy can send it to /banned (see auth.config.ts).
       if (!user && token.id) {
         const status = await getAccountStatus(token.id as string)
-        if (status.kind === "missing") return null
-        if (status.kind === "banned") {
+        if (status?.kind === "missing") return null
+        if (status?.kind === "banned") {
           token.banned = true
-        } else {
+        } else if (status?.kind === "active") {
           delete token.banned
           token.role = status.role
         }

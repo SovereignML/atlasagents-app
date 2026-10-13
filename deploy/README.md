@@ -85,6 +85,16 @@ and restart. The sync is non-fatal: if it fails, the entrypoint logs a warning
 and starts the server anyway with the existing schema, so a schema-tool problem
 degrades to a couple of erroring pages rather than a full crash-loop.
 
+`push --force` drops any table or column the schema doesn't define, without
+asking. So the entrypoint first runs `scripts/schema-guard.ts`, which lists
+what the push would drop and **skips the push** if anything would be, starting
+the server on the existing schema instead (look for `schema sync SKIPPED` in
+the log). New columns are then not applied, so resolve it before relying on
+the deploy: add the table or column to `src/db/schema.ts` to keep it, or back
+it up and list it in `SCHEMA_GUARD_ALLOW_DROP` (comma-separated `Table` or
+`Table.column`) to let the push drop it. Run the guard by hand with
+`node --env-file=.env --import tsx scripts/schema-guard.ts`.
+
 ### pm2
 
 ```bash

@@ -23,10 +23,24 @@ type Entry = { status: AccountStatus; at: number }
 const g = globalThis as unknown as { __atlasAccountStatus?: Map<string, Entry> }
 const cache = (g.__atlasAccountStatus ??= new Map<string, Entry>())
 
-export async function getAccountStatus(userId: string): Promise<AccountStatus> {
+/**
+ * The user's standing, or null when it can't be read (database down, or a
+ * deploy whose schema sync was skipped so a column is missing). Callers keep
+ * the session as it was on null: a failed check must not sign everyone out.
+ */
+export async function getAccountStatus(userId: string): Promise<AccountStatus | null> {
   const hit = cache.get(userId)
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.status
 
+  try {
+    return await readAccountStatus(userId)
+  } catch (err) {
+    console.error("[account-status] could not read account standing:", err)
+    return null
+  }
+}
+
+async function readAccountStatus(userId: string): Promise<AccountStatus> {
   const row = await db.query.users.findFirst({
     where: eq(users.id, userId),
     columns: { isBanned: true, role: true, deletedAt: true },
