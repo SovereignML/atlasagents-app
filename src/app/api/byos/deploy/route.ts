@@ -17,6 +17,7 @@ import { findByosPlan } from "@/lib/byos-plan"
 import { recoverByosPlanCheckout } from "@/lib/checkout-recovery"
 import { claimEvent, releaseEvent } from "@/lib/idempotency"
 import { isTeamSuspended } from "@/lib/tenant"
+import { canDeploy, DEPLOY_ROLE_DENIED } from "@/lib/team"
 import { getTeamAgentLimit, countTeamAgents } from "@/lib/seats"
 import { runtimeCaps } from "@/lib/runtimes/labels"
 import { runtimeDeployDenial } from "@/lib/runtime-access"
@@ -98,6 +99,10 @@ async function handleByosDeploy(req: NextRequest) {
     return NextResponse.json({ error: "No active team" }, { status: 403 })
   }
   const { effectiveUserId, actorUserId, teamId } = ctx
+  // Same role gate as the managed deploy path (createInstanceFromAgentFields).
+  if (!canDeploy(ctx.role)) {
+    return NextResponse.json({ error: DEPLOY_ROLE_DENIED }, { status: 403 })
+  }
 
   const body = await req.json()
   const {
