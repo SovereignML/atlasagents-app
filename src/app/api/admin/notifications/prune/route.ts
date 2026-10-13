@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { db, adminNotifications, and, eq, lt } from "@/db"
-import { isValidCronBearer } from "@/lib/cron-auth"
+import { requireAdminOrCron } from "@/lib/admin-guard"
 import { ADMIN_NOTIFICATION_RETENTION_DAYS } from "@/lib/audit"
 
 /**
@@ -14,17 +13,8 @@ import { ADMIN_NOTIFICATION_RETENTION_DAYS } from "@/lib/audit"
  *   2. A bearer token matching ADMIN_NOTIFICATION_RETENTION_CRON_TOKEN (cron).
  */
 export async function POST(req: NextRequest) {
-  const isCron = isValidCronBearer(req, process.env.ADMIN_NOTIFICATION_RETENTION_CRON_TOKEN)
-
-  if (!isCron) {
-    const session = await auth()
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-    if ((session.user as { role?: string }).role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
-  }
+  const guard = await requireAdminOrCron(req, process.env.ADMIN_NOTIFICATION_RETENTION_CRON_TOKEN)
+  if (!guard.ok) return guard.res
 
   const cutoff = new Date(Date.now() - ADMIN_NOTIFICATION_RETENTION_DAYS * 86_400_000)
   const result = await db

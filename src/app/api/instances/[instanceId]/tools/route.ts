@@ -16,6 +16,8 @@ import { N8N_PATH_PREFIX, N8N_SYSTEM_USER } from "@/lib/runtimes/n8n-service"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
 import { decryptSecret } from "@/lib/crypto-secret"
 import type { RuntimeId } from "@/lib/runtimes"
+import { readJsonBody } from "@/lib/request-body"
+import { instanceToolsSchema } from "@/lib/validations"
 
 /** GET — enabled tools + the full catalog + this agent's runtime (for availability). */
 export async function GET(
@@ -81,21 +83,12 @@ export async function PATCH(
   }
 
   const { instanceId } = await params
-  const body = await req.json()
-  const { enabledTools } = body as { enabledTools?: unknown }
-
-  if (
-    !Array.isArray(enabledTools) ||
-    !enabledTools.every((t) => typeof t === "string")
-  ) {
-    return NextResponse.json(
-      { error: "enabledTools must be an array of strings" },
-      { status: 400 },
-    )
-  }
+  const parsed = await readJsonBody(req, instanceToolsSchema)
+  if (!parsed.ok) return parsed.res
+  const { enabledTools } = parsed.data
   // De-dupe while preserving order, then pull in any implied tools (e.g. n8n
   // auto-enables browser, which the agent uses to drive the n8n UI).
-  const ids = expandAutoEnabledTools([...new Set(enabledTools as string[])])
+  const ids = expandAutoEnabledTools([...new Set(enabledTools)])
 
   const isAdmin = (session.user as { role?: string }).role === "admin"
   const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id

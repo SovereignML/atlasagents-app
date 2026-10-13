@@ -15,27 +15,19 @@ import {
 } from "@/db"
 import { createId } from "@paralleldrive/cuid2"
 
-export const ROLES = ["owner", "admin", "developer", "viewer"] as const
-export type TeamRole = (typeof ROLES)[number]
+export {
+  ROLES,
+  type TeamRole,
+  canManageTeam,
+  canAssignRole,
+  rankRole,
+  canDeploy,
+  DEPLOY_ROLE_DENIED,
+} from "@/lib/team-roles"
+import { canManageTeam, type TeamRole } from "@/lib/team-roles"
 
 /** Max teams a single user may own (excludes teams they were invited into). */
 export const MAX_TEAMS_PER_USER = 5
-
-const RANK: Record<TeamRole, number> = { owner: 4, admin: 3, developer: 2, viewer: 1 }
-
-export function canManageTeam(role: TeamRole | null | undefined): boolean {
-  return role === "owner" || role === "admin"
-}
-
-export function canAssignRole(actor: TeamRole, target: TeamRole): boolean {
-  if (actor === "owner") return target !== "owner"
-  if (actor === "admin") return target === "developer" || target === "viewer"
-  return false
-}
-
-export function rankRole(role: TeamRole): number {
-  return RANK[role]
-}
 
 /**
  * The user's personal (first-owned) team, created on demand.

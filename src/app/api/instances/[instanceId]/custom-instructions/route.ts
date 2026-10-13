@@ -9,9 +9,10 @@ import { logAuditEvent } from "@/lib/audit"
 import { selectSkills } from "@/configs/skill-map"
 import { generateSoul } from "@/lib/soul"
 import type { AgentConfig } from "@/lib/agent-config"
+import { readJsonBody } from "@/lib/request-body"
+import { customInstructionsSchema } from "@/lib/validations"
 
 /** Cap to keep the persona prompt sane and the DB row small. */
-const MAX_CUSTOM_INSTRUCTIONS = 4000
 
 export async function PATCH(
   req: NextRequest,
@@ -23,18 +24,9 @@ export async function PATCH(
   }
 
   const { instanceId } = await params
-  const body = await req.json()
-  const raw = (body as { customInstructions?: unknown }).customInstructions
-  if (typeof raw !== "string") {
-    return NextResponse.json({ error: "customInstructions must be a string" }, { status: 400 })
-  }
-  const customInstructions = raw.trim()
-  if (customInstructions.length > MAX_CUSTOM_INSTRUCTIONS) {
-    return NextResponse.json(
-      { error: `customInstructions must be ${MAX_CUSTOM_INSTRUCTIONS} characters or fewer` },
-      { status: 400 },
-    )
-  }
+  const parsed = await readJsonBody(req, customInstructionsSchema)
+  if (!parsed.ok) return parsed.res
+  const { customInstructions } = parsed.data
 
   const isAdmin = (session.user as { role?: string }).role === "admin"
   const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id

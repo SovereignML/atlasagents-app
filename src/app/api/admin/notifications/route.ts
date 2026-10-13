@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAdmin } from "@/lib/admin-guard"
 import { db, adminNotifications, eq, desc } from "@/db"
-
-function isAdmin(session: { user?: { role?: string } } | null): boolean {
-  return (session?.user as { role?: string } | undefined)?.role === "admin"
-}
+import { readJsonBody } from "@/lib/request-body"
+import { adminNotificationResolveSchema } from "@/lib/validations"
 
 /**
  * GET /api/admin/notifications
@@ -14,10 +12,8 @@ function isAdmin(session: { user?: { role?: string } } | null): boolean {
  *   ?limit=50
  */
 export async function GET(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user?.id || !isAdmin(session)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
+  const guard = await requireAdmin()
+  if (!guard.ok) return guard.res
 
   const url = new URL(req.url)
   const showResolved = url.searchParams.get("resolved") === "true"
@@ -42,21 +38,12 @@ export async function GET(req: NextRequest) {
  * Body: { id: string }
  */
 export async function PATCH(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user?.id || !isAdmin(session)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
+  const guard = await requireAdmin()
+  if (!guard.ok) return guard.res
 
-  let body: { id?: string }
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
-  }
-
-  if (!body.id) {
-    return NextResponse.json({ error: "id is required" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, adminNotificationResolveSchema)
+  if (!parsed.ok) return parsed.res
+  const body = parsed.data
 
   const existing = await db.query.adminNotifications.findFirst({
     where: eq(adminNotifications.id, body.id),
@@ -70,7 +57,7 @@ export async function PATCH(req: NextRequest) {
     .set({
       resolved: true,
       resolvedAt: new Date(),
-      resolvedBy: session.user.id,
+      resolvedBy: guard.userId,
     })
     .where(eq(adminNotifications.id, body.id))
 

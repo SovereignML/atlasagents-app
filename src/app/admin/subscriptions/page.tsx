@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { Search } from "lucide-react"
+import { toast } from "sonner"
 
 import {
   AlertDialog,
@@ -58,6 +59,9 @@ const tabs = [
 interface Sub {
   id: string
   status: string
+  stripeSubscriptionId: string | null
+  connectAccountId: string | null
+  cancelAtPeriodEnd: boolean
   interval: string
   currentPeriodEnd: string | null
   createdAt: string
@@ -69,6 +73,8 @@ interface Sub {
     region: { name: string }
   } | null
 }
+
+const TERMINAL_STATUSES = new Set(["canceled", "incomplete_expired"])
 
 export default function AdminSubscriptionsPage() {
   const [subs, setSubs] = useState<Sub[]>([])
@@ -96,15 +102,23 @@ export default function AdminSubscriptionsPage() {
     fetchSubs()
   }, [fetchSubs])
 
-  async function handleAction(id: string, action: "cancel" | "activate" | "delete") {
-    if (action === "delete") {
-      await fetch(`/api/admin/subscriptions/${id}`, { method: "DELETE" })
-    } else {
-      await fetch(`/api/admin/subscriptions/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: action === "cancel" ? "canceled" : "active" }),
-      })
+  // Stripe-billed subscriptions are changed in Stripe (the route refuses to
+  // edit only our row); local-only rows take a direct status.
+  type Change =
+    | { action: "cancel" | "cancel_at_period_end" | "resume" }
+    | { action: "set_status"; status: "active" | "canceled" }
+  async function handleAction(id: string, change: Change | "delete") {
+    const res =
+      change === "delete"
+        ? await fetch(`/api/admin/subscriptions/${id}`, { method: "DELETE" })
+        : await fetch(`/api/admin/subscriptions/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(change),
+          })
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string }
+      toast.error(body.error ?? "The change failed.")
     }
     fetchSubs()
   }
@@ -172,18 +186,40 @@ export default function AdminSubscriptionsPage() {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  {sub.status !== "active" && (
-                    <Button size="sm" onClick={() => handleAction(sub.id, "activate")}>
-                      Activate
-                    </Button>
-                  )}
-                  {sub.status === "active" && (
+                  {sub.connectAccountId ? (
+                    <span className="text-xs text-muted-foreground">Managed by the reseller</span>
+                  ) : sub.stripeSubscriptionId ? (
+                    !TERMINAL_STATUSES.has(sub.status) && (
+                      <>
+                        {sub.cancelAtPeriodEnd ? (
+                          <Button size="sm" variant="outline" onClick={() => handleAction(sub.id, { action: "resume" })}>
+                            Resume
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleAction(sub.id, { action: "cancel_at_period_end" })}
+                          >
+                            Cancel at period end
+                          </Button>
+                        )}
+                        <Button size="sm" variant="outline" onClick={() => handleAction(sub.id, { action: "cancel" })}>
+                          Cancel now
+                        </Button>
+                      </>
+                    )
+                  ) : sub.status === "active" ? (
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleAction(sub.id, "cancel")}
+                      onClick={() => handleAction(sub.id, { action: "set_status", status: "canceled" })}
                     >
                       Cancel
+                    </Button>
+                  ) : (
+                    <Button size="sm" onClick={() => handleAction(sub.id, { action: "set_status", status: "active" })}>
+                      Activate
                     </Button>
                   )}
                   <AlertDialog>
@@ -199,7 +235,7 @@ export default function AdminSubscriptionsPage() {
                         <AlertDialogTitle>Delete this subscription?</AlertDialogTitle>
                         <AlertDialogDescription>
                           This permanently removes the subscription record. This action cannot be
-                          undone.
+                          undone. A subscription Stripe still bills must be canceled first.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>

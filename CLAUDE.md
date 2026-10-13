@@ -30,8 +30,9 @@ tests, build, and `npm audit --omit=dev --audit-level=critical`.
 
 - **Never** run `db:generate` / `db:migrate` against a real DB. Schema is
   synced with `drizzle-kit push` (`npm run db:push`); the deploy entrypoint
-  runs `push --force` non-fatally. There is no populated migrations journal,
-  so `migrate` would fail on existing columns.
+  runs `push --force` non-fatally, after `scripts/schema-guard.ts` confirms it
+  would drop no table or column (otherwise it skips the push). There is no
+  populated migrations journal, so `migrate` would fail on existing columns.
   ([`scripts/deploy-entrypoint.sh`](scripts/deploy-entrypoint.sh) L13-17,
   [`docs/TECH-STACK.md`](docs/TECH-STACK.md) §Database)
 - `src/db/schema.ts` is the **only** maintained schema definition. If a

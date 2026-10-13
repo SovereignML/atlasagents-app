@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 
 import { db, warmVms, eq } from "@/db"
 import { requireAdmin } from "@/lib/admin-guard"
@@ -38,11 +39,7 @@ export async function DELETE(
       await destroyWarmVm(row)
     }
   } catch (err) {
-    console.error(`[warm-pool] destroy failed for ${warmVmId}:`, err)
-    return NextResponse.json(
-      { error: "Destroy failed", detail: (err as Error).message },
-      { status: 500 },
-    )
+    return apiError(`warm-pool destroy ${warmVmId}`, err, "Destroy failed.")
   }
 
   await logAuditEvent({

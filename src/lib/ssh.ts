@@ -1,8 +1,10 @@
 import { NodeSSH } from "node-ssh"
+import { isIP } from "node:net"
 import { db, instances, eq } from "@/db"
 import { BOOTSTRAP_LOG, BOOTSTRAP_STATUS } from "./runtimes/bootstrap"
 import { buildPipedBashCommand, decideElevation } from "./ssh-elevate"
 import { normalizePem, isValidPem } from "./pem"
+import { resolvePublicHost } from "./net-guard"
 
 export type SshTarget = {
   host: string
@@ -50,6 +52,17 @@ function loadPrivateKey(): string {
 // here because existing callers import them from ssh.
 export { normalizePem, isValidPem }
 
+/**
+ * The address to dial for `host`. Literal IPs (every managed VM and shared
+ * host) pass through. A hostname, which only a customer's BYOS server can be,
+ * is resolved once through the SSRF guard and the vetted IP is dialled, so a
+ * DNS answer that changes between the check and the connect (rebinding) can't
+ * point the fleet key at an internal address.
+ */
+export async function sshDialHost(host: string): Promise<string> {
+  return isIP(host) ? host : resolvePublicHost(host)
+}
+
 async function connect(target: SshTarget): Promise<NodeSSH> {
   if (target.instanceId) {
     return connectAndPin(target, target.instanceId)
@@ -61,7 +74,7 @@ async function connect(target: SshTarget): Promise<NodeSSH> {
   const ssh = new NodeSSH()
   let observed: string | null = null
   await ssh.connect({
-    host: target.host,
+    host: await sshDialHost(target.host),
     port: target.port ?? 22,
     username: target.username ?? "root",
     privateKey: loadPrivateKey(),
@@ -105,7 +118,7 @@ async function connectAndPin(target: SshTarget, instanceId: string): Promise<Nod
   const ssh = new NodeSSH()
   let observed: string | null = null
   await ssh.connect({
-    host: target.host,
+    host: await sshDialHost(target.host),
     port: target.port ?? 22,
     username: target.username ?? "root",
     privateKey: loadPrivateKey(),
@@ -165,7 +178,7 @@ export async function sshObserveHostFingerprint(target: SshTarget): Promise<stri
   const ssh = new NodeSSH()
   let observed: string | null = null
   await ssh.connect({
-    host: target.host,
+    host: await sshDialHost(target.host),
     port: target.port ?? 22,
     username: target.username ?? "root",
     privateKey: loadPrivateKey(),

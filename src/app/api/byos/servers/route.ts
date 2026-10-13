@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextRequest, NextResponse, after } from "next/server"
 import { auth } from "@/auth"
 import { getEffectiveTeam } from "@/lib/effective-user"
 import { isTeamSuspended } from "@/lib/tenant"
@@ -10,6 +10,9 @@ import {
   MAX_IDLE_SERVERS_PER_TEAM,
 } from "@/lib/byos-server"
 import { apiError } from "@/lib/api-error"
+import { readJsonBody } from "@/lib/request-body"
+import { byosServerConnectSchema } from "@/lib/validations"
+import { byosPrebakeEnabled, runPrebake } from "@/lib/byos-prebake-job"
 
 /**
  * Connect a server the customer already owns.
@@ -39,22 +42,23 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  let body: { host?: string; port?: number; sshUser?: string; label?: string }
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: "Invalid request body" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, byosServerConnectSchema)
+  if (!parsed.ok) return parsed.res
+  const body = parsed.data
 
   try {
     const { server, verdict } = await connectServer({
       teamId: ctx.teamId,
       userId: ctx.effectiveUserId,
-      host: String(body.host ?? ""),
+      host: body.host,
       port: body.port,
       sshUser: body.sshUser,
       label: body.label,
+      prebakeConsent: byosPrebakeEnabled() && body.prebakeConsent === true,
     })
+    // Prebake after the response: it takes minutes and must never hold up the
+    // connect. runPrebake re-checks the flag, consent and conflicts itself.
+    if (byosPrebakeEnabled()) after(() => runPrebake(server.id, verdict.facts))
     // Conflicts are returned alongside a successful connect: they describe what
     // installing an agent would disturb, which the user decides about at
     // install time, not now.

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAdmin } from "@/lib/admin-guard"
 import { providerBillingSchema } from "@/lib/validations"
 import { logAuditEvent } from "@/lib/audit"
 import { db, providers, providerBilling, eq } from "@/db"
@@ -11,13 +11,8 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ providerId: string }> },
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-  if ((session.user as { role?: string }).role !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
+  const guard = await requireAdmin()
+  if (!guard.ok) return guard.res
 
   const { providerId } = await params
   const body = await request.json().catch(() => null)
@@ -59,7 +54,7 @@ export async function PATCH(
   }
 
   await logAuditEvent({
-    userId: session.user.id as string,
+    userId: guard.userId,
     action: "admin.provider.billing_update",
     targetType: "provider",
     targetId: providerId,

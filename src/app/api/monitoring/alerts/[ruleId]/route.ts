@@ -3,6 +3,8 @@ import { auth } from "@/auth"
 import { db, alertRules, and, eq } from "@/db"
 import { requireTeamManage } from "@/lib/team"
 import { apiError } from "@/lib/api-error"
+import { readJsonBody } from "@/lib/request-body"
+import { alertRuleUpdateSchema } from "@/lib/validations"
 
 // PATCH — toggle enabled (or update threshold/window/cooldown). Owner/admin.
 export async function PATCH(
@@ -18,23 +20,9 @@ export async function PATCH(
     if (!team) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
     const { ruleId } = await params
-    const body = (await req.json().catch(() => ({}))) as {
-      enabled?: boolean
-      threshold?: number
-      windowMinutes?: number
-      cooldownMinutes?: number
-    }
-
-    const set: Record<string, unknown> = {}
-    if (typeof body.enabled === "boolean") set.enabled = body.enabled
-    if (typeof body.threshold === "number" && Number.isFinite(body.threshold)) {
-      set.threshold = body.threshold
-    }
-    if (Number.isInteger(body.windowMinutes)) set.windowMinutes = body.windowMinutes
-    if (Number.isInteger(body.cooldownMinutes)) set.cooldownMinutes = body.cooldownMinutes
-    if (Object.keys(set).length === 0) {
-      return NextResponse.json({ error: "Nothing to update" }, { status: 400 })
-    }
+    const parsed = await readJsonBody(req, alertRuleUpdateSchema)
+    if (!parsed.ok) return parsed.res
+    const set = parsed.data
 
     const [updated] = await db
       .update(alertRules)

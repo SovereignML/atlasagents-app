@@ -1,7 +1,8 @@
 // Central notification dispatcher. Business code calls `notify(...)`; this
 // resolves the user's per-category × channel matrix and fans out to every
 // enabled + configured channel. It NEVER throws — a notification failure must
-// not break the business path that emitted it.
+// not break the business path that emitted it. It returns what was delivered,
+// for callers that need to retry a notification that went nowhere.
 
 import { db, users, notificationPreferences, eq } from "@/db"
 import { BRANDING } from "@/configs/branding"
@@ -23,7 +24,19 @@ export type NotifyParams = {
   meta?: Record<string, unknown>
 }
 
-export async function notify(params: NotifyParams): Promise<void> {
+/**
+ * What happened to one notify() call. `attempted` counts the channels the
+ * user's preferences enabled; a caller that must not lose the notification
+ * (claim-with-release) releases its claim when `attempted > 0` and nothing
+ * was delivered.
+ */
+export type NotifyResult = { attempted: number; delivered: number; failed: number }
+
+export function nothingDelivered(r: NotifyResult): boolean {
+  return r.attempted > 0 && r.delivered === 0
+}
+
+export async function notify(params: NotifyParams): Promise<NotifyResult> {
   try {
     const [user, prefs] = await Promise.all([
       db.query.users.findFirst({
@@ -97,12 +110,16 @@ export async function notify(params: NotifyParams): Promise<void> {
     }
 
     const results = await Promise.allSettled(tasks)
+    let failed = 0
     for (const r of results) {
       if (r.status === "rejected") {
+        failed++
         console.warn(`[notify] channel error (${params.type}):`, r.reason)
       }
     }
+    return { attempted: tasks.length, delivered: tasks.length - failed, failed }
   } catch (err) {
     console.warn(`[notify] dispatch failed for user ${params.userId} (${params.type}):`, err)
+    return { attempted: 1, delivered: 0, failed: 1 }
   }
 }

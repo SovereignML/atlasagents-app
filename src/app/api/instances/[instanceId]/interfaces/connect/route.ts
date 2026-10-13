@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server"
-import crypto from "node:crypto"
 import { auth } from "@/auth"
 import { getEffectiveUserId } from "@/lib/effective-user"
 import { db, instances, instanceLogs, eq } from "@/db"
@@ -7,30 +6,11 @@ import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { canOperateInstance } from "@/lib/instance-access"
 import { encryptSecret } from "@/lib/crypto-secret"
 import { reprovisionBotEnv } from "@/lib/provisioner"
+import { registerTelegramWebhook, telegramApi } from "@/lib/telegram-webhook"
+import { readJsonBody } from "@/lib/request-body"
+import { telegramConnectSchema } from "@/lib/validations"
 
-type ConnectBody = {
-  kind: "telegram"
-  token: string
-}
-
-type TelegramGetMe = {
-  ok: boolean
-  result?: { id: number; username?: string; first_name?: string }
-  description?: string
-}
-
-const GATEWAY_BASE = () =>
-  process.env.NEXT_PUBLIC_GATEWAY_BASE_URL || "http://localhost:3000"
-
-async function telegramApi<T>(token: string, method: string, body?: object): Promise<T> {
-  const url = `https://api.telegram.org/bot${token}/${method}`
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  })
-  return (await res.json()) as T
-}
+type TelegramUser = { id: number; username?: string; first_name?: string }
 
 export async function POST(
   req: NextRequest,
@@ -62,13 +42,12 @@ export async function POST(
     )
   }
 
-  const body = (await req.json()) as ConnectBody
-  if (body.kind !== "telegram" || !body.token || typeof body.token !== "string") {
-    return NextResponse.json({ error: "Invalid body" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, telegramConnectSchema)
+  if (!parsed.ok) return parsed.res
+  const body = parsed.data
 
   // Validate token via getMe.
-  const me = await telegramApi<TelegramGetMe>(body.token, "getMe")
+  const me = await telegramApi<TelegramUser>(body.token, "getMe")
   if (!me.ok || !me.result) {
     return NextResponse.json(
       { error: `Telegram rejected the token: ${me.description ?? "getMe failed"}` },
@@ -76,24 +55,15 @@ export async function POST(
     )
   }
 
-  // Set webhook to our centralized router. The URL carries a non-secret random
-  // id (never the bot token — that leaks into proxy/CDN logs), and Telegram
-  // echoes our secret_token back in the X-Telegram-Bot-Api-Secret-Token header
-  // so the receiver can reject spoofed updates.
-  const webhookId = crypto.randomBytes(16).toString("hex")
-  const webhookSecret = crypto.randomBytes(24).toString("hex")
-  const webhookUrl = `${GATEWAY_BASE()}/tg/${webhookId}`
-  const setHook = await telegramApi<{ ok: boolean; description?: string }>(
-    body.token,
-    "setWebhook",
-    { url: webhookUrl, allowed_updates: ["message"], secret_token: webhookSecret }
-  )
-  if (!setHook.ok) {
+  // Point the bot at our router on the secure, token-free path.
+  const hook = await registerTelegramWebhook(body.token)
+  if (!hook.ok) {
     return NextResponse.json(
-      { error: `Telegram setWebhook failed: ${setHook.description ?? "unknown"}` },
+      { error: `Telegram setWebhook failed: ${hook.error}` },
       { status: 502 }
     )
   }
+  const { webhookId, webhookSecret } = hook
 
   // Persist (encrypted) and push fresh env to the container.
   const [updated] = await db

@@ -158,7 +158,13 @@ warm pool pays it at bake time, not while a customer waits
   restart is needed. With `ENABLE_PERSISTENT_CONFIG=false` those API writes only touch the live
   process, and the env file carries the same values into later restarts.
 - **Fallbacks**: no marker (a box baked before this change), an unhealthy sidecar, or a failed
-  hand-off all take the old path: restart the sidecar, then seed through signup.
+  hand-off all take the old path: restart the sidecar, then seed through signup. That seed
+  runs before commit on every deploy, warm pool included.
+- **Fail closed**: if the admin account still can't be created, the seed script stops and
+  disables the sidecar and the deploy fails. Open WebUI makes the first account to sign up its
+  admin, so a running sidecar without one would hand the chat (on Hermes, a shell on the box
+  and the customer's credits) to whoever opened the URL first. A reprovision re-enables the
+  unit and retries the seed.
 
 The sidecar unit `Wants=` the gateway instead of `Requires=` it. Under `Requires=`, every
 gateway restart (including the one at claim) restarted Open WebUI too, and a gateway that

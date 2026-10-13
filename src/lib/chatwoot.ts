@@ -13,7 +13,7 @@
 import { createHmac } from "node:crypto"
 import { decryptSecret } from "./crypto-secret"
 import { getTenantForTeam, getTenantConfig } from "./tenant"
-import { assertPublicHost } from "@/lib/net-guard"
+import { publicFetch } from "@/lib/public-fetch"
 
 /** Everything needed to talk to one Chatwoot account/inbox via the API. */
 export type ChatwootConfig = {
@@ -160,12 +160,24 @@ type ContactInbox = { source_id: string; inbox?: { id: number } }
 type SearchContact = { id: number; email?: string | null; contact_inboxes?: ContactInbox[] }
 
 async function cwFetch(cfg: ChatwootConfig, path: string, init: RequestInit): Promise<unknown> {
+  // A tenant's own Chatwoot is a URL they control: go through publicFetch,
+  // which refuses private addresses at connect time (no DNS-rebinding gap).
   if (cfg.tenantSourced) {
-    const url = new URL(cfg.baseUrl)
-    if (url.protocol !== "https:" && url.protocol !== "http:") {
-      throw new Error(`Chatwoot base URL has unsupported protocol: ${url.protocol}`)
+    const res = await publicFetch(`${cfg.baseUrl}/api/v1/accounts/${cfg.accountId}${path}`, {
+      method: init.method,
+      body: typeof init.body === "string" ? init.body : undefined,
+      timeoutMs: 10_000,
+      maxRedirects: 0,
+      headers: {
+        "Content-Type": "application/json",
+        "api-access-token": cfg.apiToken,
+        ...((init.headers as Record<string, string> | undefined) ?? {}),
+      },
+    })
+    if (!res.ok) {
+      throw new Error(`Chatwoot ${init.method ?? "GET"} ${path} → ${res.status}: ${res.text.slice(0, 300)}`)
     }
-    await assertPublicHost(url.hostname)
+    return res.json()
   }
   const res = await fetch(`${cfg.baseUrl}/api/v1/accounts/${cfg.accountId}${path}`, {
     ...init,

@@ -13,6 +13,9 @@ import {
   MIN_TOPUP_CREDITS,
   creditsToUsd,
 } from "@/lib/credit-pricing"
+import { readJsonBody } from "@/lib/request-body"
+import { walletTopupSchema } from "@/lib/validations"
+import { stripeIdempotencyKey, windowKey } from "@/lib/stripe-idempotency"
 
 /**
  * GET /api/billing/wallet
@@ -63,14 +66,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  let body: { credits?: number }
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
-  }
+  const body = await readJsonBody(req, walletTopupSchema)
+  if (!body.ok) return body.res
 
-  const credits = Math.round(body.credits ?? 0)
+  const credits = body.data.credits
   if (!credits || credits < MIN_TOPUP_CREDITS) {
     return NextResponse.json(
       { error: `Minimum top-up is ${MIN_TOPUP_CREDITS} credits` },
@@ -107,7 +106,12 @@ export async function POST(req: NextRequest) {
 
   let customerId = user.stripeCustomerId
   if (!customerId) {
-    const customer = await stripe.customers.create({ email: user.email })
+    // Same params and key as every other customer create, so concurrent
+    // first purchases can't make two customers for one user.
+    const customer = await stripe.customers.create(
+      { email: user.email, metadata: { userId } },
+      { idempotencyKey: stripeIdempotencyKey("customer", userId, user.email) },
+    )
     customerId = customer.id
     await db.update(users).set({ stripeCustomerId: customerId }).where(eq(users.id, userId))
   }
@@ -135,6 +139,9 @@ export async function POST(req: NextRequest) {
     },
     success_url: `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/dashboard/billing?topup=success`,
     cancel_url: `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/dashboard/billing`,
+  }, {
+    // A double click or retry within the minute reuses the same session.
+    idempotencyKey: stripeIdempotencyKey("wallet-topup", userId, customerId, credits, windowKey()),
   })
 
   return NextResponse.json({ checkoutUrl: session.url })

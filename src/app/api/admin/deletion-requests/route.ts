@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAdmin } from "@/lib/admin-guard"
 import { db, deletionRequests, adminNotifications, eq, and, desc, sql } from "@/db"
 import { deletionDecisionSchema } from "@/lib/validations"
 import { logAuditEvent } from "@/lib/audit"
@@ -8,19 +8,13 @@ import { BRANDING } from "@/configs/branding"
 
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
 
-function isAdmin(session: { user?: { role?: string } } | null): boolean {
-  return (session?.user as { role?: string } | undefined)?.role === "admin"
-}
-
 /**
  * GET /api/admin/deletion-requests?status=pending|approved|denied
  * Lists account deletion requests for admin review.
  */
 export async function GET(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user?.id || !isAdmin(session)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
+  const guard = await requireAdmin()
+  if (!guard.ok) return guard.res
 
   const status = new URL(req.url).searchParams.get("status") ?? "pending"
 
@@ -43,10 +37,8 @@ export async function GET(req: NextRequest) {
  * admin then deletes the account from the Users page.
  */
 export async function PATCH(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user?.id || !isAdmin(session)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
+  const guard = await requireAdmin()
+  if (!guard.ok) return guard.res
 
   let body: unknown
   try {
@@ -78,7 +70,7 @@ export async function PATCH(req: NextRequest) {
     .update(deletionRequests)
     .set({
       status,
-      decidedBy: session.user.id,
+      decidedBy: guard.userId,
       decidedAt: new Date(),
       decisionNote: note?.trim() || null,
     })
@@ -87,7 +79,7 @@ export async function PATCH(req: NextRequest) {
   // Resolve the paired admin notification, if any.
   await db
     .update(adminNotifications)
-    .set({ resolved: true, resolvedAt: new Date(), resolvedBy: session.user.id })
+    .set({ resolved: true, resolvedAt: new Date(), resolvedBy: guard.userId })
     .where(
       and(
         eq(adminNotifications.type, "account_deletion_request"),
@@ -97,7 +89,7 @@ export async function PATCH(req: NextRequest) {
     )
 
   await logAuditEvent({
-    userId: session.user.id,
+    userId: guard.userId,
     action: action === "approve" ? "admin.deletion_request.approve" : "admin.deletion_request.deny",
     targetType: "user",
     targetId: existing.userId,

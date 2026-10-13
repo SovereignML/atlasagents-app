@@ -377,3 +377,27 @@ export function prebakeUsability(opts: {
 
   return { fastPath: misses.length === 0, misses }
 }
+
+/* --- Shared install lock --------------------------------------------------- */
+
+/** Lock file shared by the prebake and the BYOS deploy bootstrap on the box. */
+const INSTALL_LOCK = "/var/lock/atlas-install.lock"
+
+/**
+ * Wrap an install script in an flock, so a prebake and a deploy never run apt
+ * at the same time on one box. `waitSeconds` 0 gives up at once (the prebake:
+ * if anything else is installing, it isn't needed); a deploy waits for a
+ * running prebake to finish. Exit 75 (EX_TEMPFAIL) means the lock was busy.
+ */
+export function withInstallLock(script: string, waitSeconds: number): string {
+  const lock = [
+    `exec 9>${INSTALL_LOCK}`,
+    waitSeconds > 0
+      ? `flock -w ${waitSeconds} 9 || { echo "another install still holds ${INSTALL_LOCK}" >&2; exit 75; }`
+      : `flock -n 9 || { echo "another install holds ${INSTALL_LOCK}" >&2; exit 75; }`,
+  ].join("\n")
+  const lines = script.split("\n")
+  // Keep a shebang first.
+  if (lines[0]?.startsWith("#!")) return [lines[0], lock, ...lines.slice(1)].join("\n")
+  return `${lock}\n${script}`
+}

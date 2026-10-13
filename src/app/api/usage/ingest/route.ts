@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db, eq, instances, usageEvents } from "@/db"
 import { rateLimit } from "@/lib/rate-limit"
+import { readJsonBody } from "@/lib/request-body"
+import { usageIngestSchema } from "@/lib/validations"
 
 /**
  * Bot runtimes POST usage events here. This endpoint is ANALYTICS-ONLY: it
@@ -54,22 +56,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "rate limit exceeded" }, { status: 429 })
   }
 
-  let body: IngestBody
-  try {
-    body = (await req.json()) as IngestBody
-  } catch {
-    return NextResponse.json({ error: "invalid JSON body" }, { status: 400 })
-  }
-  if (!body.kind || typeof body.amount !== "number") {
-    return NextResponse.json({ error: "kind and amount are required" }, { status: 400 })
-  }
-  if (!Number.isFinite(body.amount) || body.amount < 0) {
-    return NextResponse.json({ error: "amount must be a non-negative finite number" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, usageIngestSchema)
+  if (!parsed.ok) return parsed.res
+  const body: IngestBody = parsed.data
   const maxForKind = MAX_AMOUNTS[body.kind]
-  if (maxForKind === undefined) {
-    return NextResponse.json({ error: `unknown kind: ${body.kind}` }, { status: 400 })
-  }
   if (body.amount > maxForKind) {
     return NextResponse.json(
       { error: `amount ${body.amount} exceeds max ${maxForKind} for kind ${body.kind}` },

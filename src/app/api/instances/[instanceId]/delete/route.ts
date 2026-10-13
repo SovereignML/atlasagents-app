@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 import { auth } from "@/auth"
 import { getEffectiveUserId } from "@/lib/effective-user"
 import { db, instances, subscriptions, eq } from "@/db"
@@ -7,6 +8,7 @@ import { getInstanceAccessLevel } from "@/lib/instance-access"
 import { IllegalTransitionError } from "@/lib/instance-state"
 import { stripe, isStripeConfigured } from "@/lib/stripe"
 import { logAuditEvent } from "@/lib/audit"
+import { stripeIdempotencyKey } from "@/lib/stripe-idempotency"
 
 // POST /api/instances/:instanceId/delete
 //
@@ -47,11 +49,7 @@ export async function POST(
       // Row is already deleting/deleted — this is a double-click, treat as OK.
       return NextResponse.json({ status: "already_deleting" }, { status: 200 })
     }
-    console.error(`[delete] deleteBot failed for ${instanceId}:`, err)
-    return NextResponse.json(
-      { error: "Delete failed", detail: (err as Error).message },
-      { status: 500 },
-    )
+    return apiError(`delete ${instanceId}`, err, "Delete failed.")
   }
 
   // Cancel linked subscription regardless — the row is at least in `deleting`.
@@ -61,7 +59,9 @@ export async function POST(
   if (sub) {
     if (isStripeConfigured() && sub.stripeSubscriptionId) {
       try {
-        await stripe.subscriptions.cancel(sub.stripeSubscriptionId)
+        await stripe.subscriptions.cancel(sub.stripeSubscriptionId, undefined, {
+          idempotencyKey: stripeIdempotencyKey("cancel-subscription", sub.stripeSubscriptionId),
+        })
       } catch (err) {
         console.warn(`[delete] stripe cancel failed:`, err)
       }

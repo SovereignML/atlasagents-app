@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { verifyDomain } from "@/lib/domain-verify"
+import { readJsonBody } from "@/lib/request-body"
+import { domainVerifySchema } from "@/lib/validations"
 
 // POST /api/domain-verification/verify { domain }
 //
@@ -12,11 +14,9 @@ export async function POST(req: NextRequest) {
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
-  const body = (await req.json().catch(() => ({}))) as { domain?: string }
-  const domain = body.domain?.trim()
-  if (!domain) {
-    return NextResponse.json({ error: "domain required" }, { status: 400 })
-  }
+  const parsed = await readJsonBody(req, domainVerifySchema)
+  if (!parsed.ok) return parsed.res
+  const domain = parsed.data.domain
 
   const result = await verifyDomain(session.user.id, domain)
   if (result.verified) {

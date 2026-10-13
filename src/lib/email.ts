@@ -2,6 +2,18 @@ import { Resend } from "resend"
 import { BRANDING } from "@/configs/branding"
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
+
+/**
+ * Send through Resend and throw on failure. The SDK returns API failures as
+ * `{ error }` rather than throwing, so a bare `await resend.emails.send()`
+ * reported success for mail Resend had rejected (bad sender, rate limit,
+ * suppressed address), and callers that retry on failure never did.
+ */
+async function sendOrThrow(payload: Parameters<Resend["emails"]["send"]>[0]): Promise<void> {
+  if (!resend) throw new Error("Email not configured")
+  const { error } = await resend.emails.send(payload)
+  if (error) throw new Error(`Resend rejected the email: ${error.name}: ${error.message}`)
+}
 const fromEmail = process.env.RESEND_FROM_EMAIL || BRANDING.noreplyEmail
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
 
@@ -87,7 +99,7 @@ export async function sendTeamInviteEmail(args: {
   }
 
   try {
-    await resend.emails.send({
+    await sendOrThrow({
       from: fromEmail,
       to: args.email,
       subject: `${args.inviterName} invited you to ${args.teamName} on ${BRANDING.name}`,
@@ -114,7 +126,7 @@ export async function sendPasswordResetEmail(email: string, token: string) {
   }
 
   try {
-    await resend.emails.send({
+    await sendOrThrow({
       from: fromEmail,
       to: email,
       subject: `Reset your ${BRANDING.name} password`,
@@ -141,7 +153,7 @@ export async function sendVerificationEmail(email: string, token: string) {
   }
 
   try {
-    await resend.emails.send({
+    await sendOrThrow({
       from: fromEmail,
       to: email,
       subject: `Verify your ${BRANDING.name} email`,
@@ -176,7 +188,7 @@ export async function sendNotificationEmail(args: {
   }
 
   try {
-    await resend.emails.send({
+    await sendOrThrow({
       from: fromEmail,
       to: args.to,
       subject: args.title,
@@ -214,7 +226,7 @@ export async function sendSupportTicketEmail(args: {
   }
 
   try {
-    await resend.emails.send({
+    await sendOrThrow({
       from: fromEmail,
       to: BRANDING.supportEmail,
       replyTo: args.fromEmail,

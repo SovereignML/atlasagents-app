@@ -12,6 +12,8 @@ import {
   MAX_TEXT_BYTES,
 } from "@/lib/instance-files"
 import { fileErrorResponse, loadFilesContext } from "@/lib/instance-files-route"
+import { readJsonBody } from "@/lib/request-body"
+import { fileSaveSchema, fileOpSchema } from "@/lib/validations"
 
 /** GET ?path= — list the immediate children of a directory (defaults to root). */
 export async function GET(
@@ -42,11 +44,10 @@ export async function PUT(
   if ("error" in ctx) return ctx.error
 
   try {
-    const body = (await req.json()) as { path?: unknown; content?: unknown }
-    if (typeof body.path !== "string" || !body.path.trim()) {
-      return NextResponse.json({ error: "A file path is required." }, { status: 400 })
-    }
-    const content = typeof body.content === "string" ? body.content : ""
+    const parsed = await readJsonBody(req, fileSaveSchema)
+    if (!parsed.ok) return parsed.res
+    const body = parsed.data
+    const content = body.content ?? ""
     if (Buffer.byteLength(content, "utf8") > MAX_TEXT_BYTES) {
       return NextResponse.json(
         { error: `File is too large to save (max ${Math.floor(MAX_TEXT_BYTES / 1_000_000)} MB).` },
@@ -122,14 +123,9 @@ export async function PATCH(
   if ("error" in ctx) return ctx.error
 
   try {
-    const body = (await req.json()) as {
-      op?: unknown
-      path?: unknown
-      newPath?: unknown
-    }
-    if (typeof body.path !== "string" || !body.path.trim()) {
-      return NextResponse.json({ error: "A path is required." }, { status: 400 })
-    }
+    const parsed = await readJsonBody(req, fileOpSchema)
+    if (!parsed.ok) return parsed.res
+    const body = parsed.data
     const abs = resolveScopedPath(ctx.root, body.path)
 
     if (body.op === "mkdir") {
@@ -146,9 +142,6 @@ export async function PATCH(
     }
 
     if (body.op === "rename") {
-      if (typeof body.newPath !== "string" || !body.newPath.trim()) {
-        return NextResponse.json({ error: "A destination path is required." }, { status: 400 })
-      }
       const absTo = resolveScopedPath(ctx.root, body.newPath)
       await renamePath(ctx.target, ctx.root, abs, absTo)
       await logAuditEvent({

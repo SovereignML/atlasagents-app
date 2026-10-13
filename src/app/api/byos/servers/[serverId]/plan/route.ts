@@ -10,6 +10,9 @@ import { apiError } from "@/lib/api-error"
 import { planUnitAmountCents } from "@/lib/pricing"
 import { findPlanBySlug } from "@/configs/plans"
 import { BRANDING } from "@/configs/branding"
+import { readJsonBody } from "@/lib/request-body"
+import { byosPlanCheckoutSchema } from "@/lib/validations"
+import { stripeIdempotencyKey, windowKey } from "@/lib/stripe-idempotency"
 
 /**
  * Buy a BYOS plan for one connected server.
@@ -45,8 +48,9 @@ export async function POST(
     })
     if (!server) return NextResponse.json({ error: "Server not found" }, { status: 404 })
 
-    const body = (await req.json().catch(() => ({}))) as { interval?: string }
-    const interval: "month" | "year" = body.interval === "year" ? "year" : "month"
+    const body = await readJsonBody(req, byosPlanCheckoutSchema, { allowEmpty: true })
+    if (!body.ok) return body.res
+    const interval: "month" | "year" = body.data.interval ?? "month"
 
     if (await isTeamSuspended(teamId)) {
       return NextResponse.json(
@@ -90,12 +94,15 @@ export async function POST(
       })
       let stripeCustomerId = userRow?.stripeCustomerId
       if (!stripeCustomerId) {
-        const customer = await stripe.customers.create({
-          // The OWNER's email — under impersonation session.user.email is the
-          // admin's, and would stamp staff details onto the customer's record.
-          email: userRow?.email ?? undefined,
-          metadata: { userId: effectiveUserId },
-        })
+        const customer = await stripe.customers.create(
+          {
+            // The OWNER's email — under impersonation session.user.email is the
+            // admin's, and would stamp staff details onto the customer's record.
+            email: userRow?.email ?? undefined,
+            metadata: { userId: effectiveUserId },
+          },
+          { idempotencyKey: stripeIdempotencyKey("customer", effectiveUserId, userRow?.email) },
+        )
         stripeCustomerId = customer.id
         await db.update(users).set({ stripeCustomerId }).where(eq(users.id, effectiveUserId))
       }
@@ -132,6 +139,8 @@ export async function POST(
         // Straight on to installing — the reason they bought it.
         success_url: `${BRANDING.appUrl}/dashboard/byos/deploy?serverId=${server.id}`,
         cancel_url: `${BRANDING.appUrl}/dashboard/byos`,
+      }, {
+        idempotencyKey: stripeIdempotencyKey("byos-plan", server.id, stripeCustomerId, interval, windowKey()),
       })
       return NextResponse.json({ checkoutUrl: checkout.url })
     }

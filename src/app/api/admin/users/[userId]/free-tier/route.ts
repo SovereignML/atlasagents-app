@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAdmin } from "@/lib/admin-guard"
 import { db, eq, users } from "@/db"
 import { logAuditEvent } from "@/lib/audit"
 import { getFreeTierUsage } from "@/lib/free-tier"
@@ -16,13 +16,8 @@ export async function PATCH(
   { params }: { params: Promise<{ userId: string }> },
 ) {
   try {
-    const session = await auth()
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-    if ((session.user as { role: string }).role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
+    const guard = await requireAdmin()
+    if (!guard.ok) return guard.res
 
     const { userId } = await params
 
@@ -48,7 +43,7 @@ export async function PATCH(
       .where(eq(users.id, userId))
 
     await logAuditEvent({
-      userId: session.user.id as string,
+      userId: guard.userId,
       action: "admin.set_free_limit",
       targetType: "user",
       targetId: userId,

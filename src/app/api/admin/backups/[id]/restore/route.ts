@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 
 import { db, databaseBackups, eq } from "@/db"
 import { requireAdmin } from "@/lib/admin-guard"
 import { restoreDatabaseFromBackup } from "@/lib/db-backup"
 import { r2ErrorResponse } from "@/lib/r2-errors"
+import { readJsonBody } from "@/lib/request-body"
+import { backupRestoreSchema } from "@/lib/validations"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 300
@@ -20,13 +23,8 @@ export async function POST(
   const guard = await requireAdmin()
   if (!guard.ok) return guard.res
 
-  const body = await req.json().catch(() => ({}))
-  if (body?.confirm !== "RESTORE") {
-    return NextResponse.json(
-      { error: 'Type "RESTORE" to confirm this destructive action.' },
-      { status: 400 },
-    )
-  }
+  const body = await readJsonBody(req, backupRestoreSchema, { allowEmpty: true })
+  if (!body.ok) return body.res
 
   const { id } = await params
   const row = await db.query.databaseBackups.findFirst({
@@ -43,13 +41,6 @@ export async function POST(
   } catch (err) {
     const mapped = r2ErrorResponse(err)
     if (mapped) return mapped
-    console.error(
-      `[admin/backups] restore failed for ${row.objectKey}:`,
-      err instanceof Error ? err.message : err,
-    )
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Restore failed." },
-      { status: 500 },
-    )
+    return apiError(`admin/backups restore ${row.objectKey}`, err, "Restore failed.")
   }
 }

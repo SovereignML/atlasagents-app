@@ -5,6 +5,8 @@ import { getUserTeam, requireTeamManage } from "@/lib/team"
 import { computeSshFingerprint, isValidPublicKey } from "@/lib/instance"
 import { logAuditEvent } from "@/lib/audit"
 import { syncTeamSshKeys } from "@/lib/provisioner"
+import { readJsonBody } from "@/lib/request-body"
+import { sshKeyAddSchema } from "@/lib/validations"
 
 /**
  * GET /api/team/ssh-keys
@@ -53,9 +55,11 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const body = (await req.json().catch(() => ({}))) as { name?: string; publicKey?: string }
-  const publicKey = body.publicKey?.trim()
-  if (!publicKey || !isValidPublicKey(publicKey)) {
+  const parsed = await readJsonBody(req, sshKeyAddSchema)
+  if (!parsed.ok) return parsed.res
+  const body = parsed.data
+  const publicKey = body.publicKey
+  if (!isValidPublicKey(publicKey)) {
     return NextResponse.json({ error: "Invalid SSH public key" }, { status: 400 })
   }
   const fingerprint = computeSshFingerprint(publicKey)
