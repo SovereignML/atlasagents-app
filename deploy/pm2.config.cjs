@@ -35,6 +35,15 @@ if (!fs.existsSync(envPath)) {
   process.exit(1)
 }
 
+// The bind address comes from HOSTNAME in .env, defaulting to loopback. pm2's
+// env block wins over `node --env-file`, so without this a .env HOSTNAME was
+// silently ignored. A proxy on another machine (Nginx Proxy Manager) needs
+// HOSTNAME=0.0.0.0 plus a cloud firewall rule letting only that machine reach
+// port 3000.
+const envHost = fs
+  .readFileSync(envPath, "utf8")
+  .match(/^\s*HOSTNAME\s*=\s*["']?([^"'\s#]+)/m)?.[1]
+
 module.exports = {
   apps: [
     {
@@ -49,11 +58,12 @@ module.exports = {
       instances: 1,
       env: {
         NODE_ENV: "production",
-        // Loopback only: Caddy (deploy/Caddyfile) is the public listener and
-        // proxies to 127.0.0.1:3000, and cron-tick.sh calls 127.0.0.1 too.
-        // 0.0.0.0 served the app over plain HTTP on the box's public IP,
-        // bypassing TLS and Caddy's /api/internal/* block.
-        HOSTNAME: "127.0.0.1",
+        // Loopback by default: Caddy (deploy/Caddyfile) is the public listener
+        // and proxies to 127.0.0.1:3000, and cron-tick.sh calls 127.0.0.1 too.
+        // 0.0.0.0 serves the app over plain HTTP on the box's public IP,
+        // bypassing TLS and Caddy's /api/internal/* block, so only set it when
+        // the proxy is on another host and the firewall limits port 3000.
+        HOSTNAME: envHost || "127.0.0.1",
         PORT: "3000",
         NEXT_TELEMETRY_DISABLED: "1",
       },
