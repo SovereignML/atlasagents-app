@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 
 import { db, databaseBackups, eq } from "@/db"
 import { requireAdmin } from "@/lib/admin-guard"
@@ -43,13 +44,6 @@ export async function POST(
   } catch (err) {
     const mapped = r2ErrorResponse(err)
     if (mapped) return mapped
-    console.error(
-      `[admin/backups] restore failed for ${row.objectKey}:`,
-      err instanceof Error ? err.message : err,
-    )
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Restore failed." },
-      { status: 500 },
-    )
+    return apiError(`admin/backups restore ${row.objectKey}`, err, "Restore failed.")
   }
 }

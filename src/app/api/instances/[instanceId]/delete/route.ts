@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 import { auth } from "@/auth"
 import { getEffectiveUserId } from "@/lib/effective-user"
 import { db, instances, subscriptions, eq } from "@/db"
@@ -47,11 +48,7 @@ export async function POST(
       // Row is already deleting/deleted — this is a double-click, treat as OK.
       return NextResponse.json({ status: "already_deleting" }, { status: 200 })
     }
-    console.error(`[delete] deleteBot failed for ${instanceId}:`, err)
-    return NextResponse.json(
-      { error: "Delete failed", detail: (err as Error).message },
-      { status: 500 },
-    )
+    return apiError(`delete ${instanceId}`, err, "Delete failed.")
   }
 
   // Cancel linked subscription regardless — the row is at least in `deleting`.

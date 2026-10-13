@@ -33,6 +33,7 @@ For the rest of the env reference, see [.env.example](../.env.example). For depl
 ### How an error reaches Sentry
 
 - **Server route / RSC / server action throws** → `onRequestError` in `src/instrumentation.ts`
+- **Server code catches the error and logs it with `console.error`** (`apiError`, cron and job catch blocks — most server errors) → `captureConsoleIntegration` in `sentry.server.config.ts`. An `Error` argument becomes the exception; the other arguments are attached, scrubbed, as `extra.arguments`. `apiError` logs a short `ref` that is also in the 500 body the client sees, so a user's report can be matched to the event
 - **Client component throws below the root layout** → Next's route error boundary; Sentry's client SDK captures the unhandled error automatically
 - **Root layout itself crashes** → `src/app/global-error.tsx` (explicit `captureException`)
 - **Unhandled promise rejection (browser)** → client SDK global handlers
@@ -47,6 +48,7 @@ All documented in `.env.example` under *"Sentry error monitoring"*.
 | `NEXT_PUBLIC_SENTRY_DSN` | to enable browser + edge | **Inlined at build time** — must be present when `next build` runs, not just at boot. The edge runtime also uses this one (only `NEXT_PUBLIC_*` vars are inlined into the edge bundle) |
 | `SENTRY_TRACES_SAMPLE_RATE` | no (default `0.1`) | `0` disables performance traces entirely; errors are still captured |
 | `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` | no (default `0.1`) | Browser-side sampling |
+| `SENTRY_RELEASE` | no | Release name for events and source maps. Defaults to the 12-character commit SHA of the build (`git rev-parse` in `next.config.ts`), inlined as `NEXT_PUBLIC_SENTRY_RELEASE` so all three runtimes report the same release |
 | `SENTRY_ORG` / `SENTRY_PROJECT` / `SENTRY_AUTH_TOKEN` | no | Build-time only, for source-map upload. Omit in dev/CI — the build wrapper no-ops without them |
 
 DSNs are **not secrets** in the traditional sense (they can only ingest events, not read data), but keep `SENTRY_AUTH_TOKEN` out of runtime env — it's a write-capable API token and is only needed by the build.
@@ -94,6 +96,8 @@ In dev (`npm run dev` with no DSN) you should see **no** Sentry network activity
 | Default | Where | Why / when to change |
 |---|---|---|
 | `dataCollection: SENTRY_DATA_COLLECTION` | all three init files | Privacy-by-default. v11 removed `sendDefaultPii`, and an unset `dataCollection` collects everything; the shared constant is Sentry's documented equivalent of v10's `sendDefaultPii: false`, plus no local variables in stack frames. If you later want user context on errors, prefer explicit `Sentry.setUser({ id })` (no email) at session start rather than loosening this |
+| `beforeSend: scrubSentryEvent` | all three init files | Redacts bearer values, provider keys (Stripe, OpenRouter, GitHub, Resend, Slack), Telegram bot tokens, JWTs, secret-looking query parameters, emails and long hex tokens from messages, exception values, console arguments, breadcrumbs and URLs (`src/lib/sentry-scrub.ts`). Add a pattern there when a new credential shape appears |
+| `captureConsoleIntegration({ levels: ["error"] })` | `sentry.server.config.ts` | Turns every server `console.error` into an event. Use `console.warn` for expected failures that shouldn't page anyone |
 | `tracesSampleRate: 0.1` | all three init files | Raise for more performance visibility, at quota cost. Errors are always captured regardless |
 | `widenClientFileUpload: false` | `next.config.ts` | Keeps upload scope lean; widen if client traces come through unsymbolicated |
 | `webpack.treeshake.removeDebugLogging: true` | `next.config.ts` | Strips Sentry's debug logger from webpack production bundles (v10's `disableLogger`); Turbopack builds ignore it |

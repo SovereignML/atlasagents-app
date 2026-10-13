@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 import { auth } from "@/auth"
 import { db, eq, and, instances, instanceLogs, sshKeys, users, subscriptions } from "@/db"
 import {
@@ -26,11 +27,7 @@ export async function POST(req: NextRequest) {
   try {
     return await handleDeploy(req)
   } catch (err) {
-    console.error("[deploy] unhandled error:", err)
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Deployment failed" },
-      { status: 500 },
-    )
+    return apiError("deploy", err, "Deployment failed.")
   }
 }
 

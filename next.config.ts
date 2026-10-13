@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process"
 import type { NextConfig } from "next"
 import { withSentryConfig } from "@sentry/nextjs/config"
 
@@ -196,8 +197,27 @@ const securityHeaders = [
   },
 ]
 
+/**
+ * The Sentry release: SENTRY_RELEASE when the deploy sets it, else the commit
+ * being built. Inlined as NEXT_PUBLIC_SENTRY_RELEASE so the server, edge and
+ * browser inits all tag events with the same build.
+ */
+function sentryRelease(): string | undefined {
+  const explicit = process.env.SENTRY_RELEASE?.trim()
+  if (explicit) return explicit
+  try {
+    return execSync("git rev-parse --short=12 HEAD", { stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim() || undefined
+  } catch {
+    return undefined
+  }
+}
+const SENTRY_RELEASE = sentryRelease()
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  env: SENTRY_RELEASE ? { NEXT_PUBLIC_SENTRY_RELEASE: SENTRY_RELEASE } : {},
   output: "standalone",
   // PostHog proxy paths (/ingest/...) must not be trailing-slash redirected.
   skipTrailingSlashRedirect: true,
@@ -252,6 +272,7 @@ export default withSentryConfig(nextConfig, {
   org: process.env.SENTRY_ORG,
   project: process.env.SENTRY_PROJECT,
   authToken: process.env.SENTRY_AUTH_TOKEN,
+  ...(SENTRY_RELEASE ? { release: { name: SENTRY_RELEASE } } : {}),
   silent: !process.env.CI,
   // Keep client bundles lean; we don't proxy events through the app.
   widenClientFileUpload: false,

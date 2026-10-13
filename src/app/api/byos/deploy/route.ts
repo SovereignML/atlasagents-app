@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 import { auth } from "@/auth"
 import { db, eq, and, asc, byosServers, instances, instanceLogs, regions, serverConfigs } from "@/db"
 import { logAuditEvent } from "@/lib/audit"
@@ -73,11 +74,7 @@ export async function POST(req: NextRequest) {
   try {
     return await handleByosDeploy(req)
   } catch (err) {
-    console.error("[byos/deploy] unhandled error:", err)
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Deployment failed" },
-      { status: 500 },
-    )
+    return apiError("byos/deploy", err, "Deployment failed.")
   }
 }
 

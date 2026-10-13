@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 
 import { auth } from "@/auth"
 import { isValidCronBearer } from "@/lib/cron-auth"
@@ -37,10 +38,6 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const mapped = r2ErrorResponse(err)
     if (mapped) return mapped
-    console.error("[admin/backups/cron] backup failed:", err instanceof Error ? err.message : err)
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Backup failed." },
-      { status: 500 },
-    )
+    return apiError("admin/backups/cron", err, "Backup failed.")
   }
 }
