@@ -185,7 +185,65 @@ function wwwToApexRedirect():
   }
 }
 
+/**
+ * Sentry's CSP report endpoint, derived from the public DSN
+ * (https://<key>@<host>/<project> → https://<host>/api/<project>/security/?sentry_key=<key>).
+ */
+function cspReportUri(): string | null {
+  const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN?.trim()
+  if (!dsn) return null
+  try {
+    const u = new URL(dsn)
+    const project = u.pathname.replace(/^\//, "")
+    if (!u.username || !project) return null
+    return `${u.protocol}//${u.host}/api/${project}/security/?sentry_key=${u.username}`
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Content-Security-Policy. Ships in report-only mode: violations are reported
+ * (to Sentry when NEXT_PUBLIC_SENTRY_DSN is set) without blocking anything.
+ * Once the reports are clean, set CSP_ENFORCE=true at build to enforce it.
+ *
+ * Deliberately broad where the app needs it: Next.js App Router emits inline
+ * scripts, so script-src keeps 'unsafe-inline' until a nonce-based policy
+ * replaces it; a tenant's Chatwoot widget loads its script, iframe and
+ * websocket from the tenant's own domain, hence https:/wss: in those lists.
+ * The parts that matter today are object-src, base-uri, frame-ancestors and
+ * form-action.
+ */
+function contentSecurityPolicy(): { key: string; value: string } {
+  const directives = [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https:",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https:",
+    "font-src 'self' data:",
+    "connect-src 'self' https: wss:",
+    "frame-src 'self' https://challenges.cloudflare.com https:",
+    "worker-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+    // OAuth sign-in posts to /api/auth and is redirected to the provider;
+    // browsers apply form-action to that redirect.
+    "form-action 'self' https://accounts.google.com https://appleid.apple.com https://twitter.com https://x.com https://api.twitter.com https://checkout.stripe.com",
+  ]
+  const reportUri = cspReportUri()
+  if (reportUri) directives.push(`report-uri ${reportUri}`)
+  return {
+    key:
+      process.env.CSP_ENFORCE === "true"
+        ? "Content-Security-Policy"
+        : "Content-Security-Policy-Report-Only",
+    value: directives.join("; "),
+  }
+}
+
 const securityHeaders = [
+  contentSecurityPolicy(),
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
