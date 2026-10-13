@@ -1,13 +1,16 @@
 /**
  * Cloudflare Turnstile bot-protection helpers.
  *
- * Env-driven and gracefully degrading, mirroring src/lib/oauth.ts and the
- * `if (!resend)` pattern in src/lib/email.ts: when the keys are unset (dev /
- * local), the widget renders nothing and `verifyTurnstileToken` returns true,
- * so the auth forms keep working without Turnstile configured.
- *
  *   NEXT_PUBLIC_TURNSTILE_SITE_KEY — public site key (also read client-side)
  *   TURNSTILE_SECRET_KEY           — server-only secret for siteverify
+ *   TURNSTILE_DISABLED             — "true" to run production without it, on purpose
+ *
+ * Fails closed in production. Missing keys used to make verification return
+ * true, so a deploy that lost them quietly dropped the bot check from the
+ * login, register and forgot-password forms. Now production needs either both
+ * keys or an explicit TURNSTILE_DISABLED=true: assertEnv() refuses to boot
+ * otherwise, and verifyTurnstileToken() rejects every token. Outside
+ * production, unset keys still skip the check so local forms work.
  */
 
 const SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
@@ -19,16 +22,31 @@ export function isTurnstileConfigured(): boolean {
   )
 }
 
+/** True when Turnstile may be skipped because it isn't configured: dev, or an explicit opt-out. */
+export function mayRunWithoutTurnstile(): boolean {
+  return (
+    process.env.NODE_ENV !== "production" ||
+    process.env.TURNSTILE_DISABLED?.trim().toLowerCase() === "true"
+  )
+}
+
 /**
- * Verify a Turnstile token against Cloudflare. Returns true (skip) when
- * Turnstile isn't configured, false when configured but the token is missing
- * or rejected. `ip` is the client IP (optional — siteverify works without it).
+ * Verify a Turnstile token against Cloudflare. False when the token is missing
+ * or rejected. When Turnstile isn't configured: true (skip) in dev or with
+ * TURNSTILE_DISABLED=true, false otherwise. `ip` is the client IP (optional —
+ * siteverify works without it).
  */
 export async function verifyTurnstileToken(
   token: string | undefined | null,
   ip?: string,
 ): Promise<boolean> {
-  if (!isTurnstileConfigured()) return true
+  if (!isTurnstileConfigured()) {
+    if (mayRunWithoutTurnstile()) return true
+    console.error(
+      "[turnstile] keys are not set in production and TURNSTILE_DISABLED is not true — rejecting.",
+    )
+    return false
+  }
   if (!token) return false
 
   try {

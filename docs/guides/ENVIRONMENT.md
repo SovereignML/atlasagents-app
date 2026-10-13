@@ -218,12 +218,13 @@ Check the whole block with `node --env-file=.env --import tsx scripts/check-agen
 
 ## 20. Cloudflare Turnstile (bot protection)
 
-Anti-bot challenge on register / login / forgot-password. **Both must be set to enable**; leave both unset to disable.
+Anti-bot challenge on register / login / forgot-password. **Both keys must be set to enable it.** It fails closed in production: without both keys, the app refuses to boot and the server rejects every token, unless `TURNSTILE_DISABLED=true` says to run without it on purpose. In dev, unset keys skip the check.
 
 | Variable | Required? | What it does | How to obtain / generate |
 |----------|-----------|--------------|--------------------------|
-| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | Feature | Public site key rendered in the widget. | [Cloudflare Turnstile](https://dash.cloudflare.com/?to=/:account/turnstile). |
-| `TURNSTILE_SECRET_KEY` | Feature | Server-side verification secret. | Same. |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | Prod (or opt out) | Public site key rendered in the widget. Inlined at build time, so rebuild after setting it. | [Cloudflare Turnstile](https://dash.cloudflare.com/?to=/:account/turnstile). |
+| `TURNSTILE_SECRET_KEY` | Prod (or opt out) | Server-side verification secret. | Same. |
+| `TURNSTILE_DISABLED` | Optional | `true` runs production without Turnstile, deliberately. | Set by hand. |
 
 ## 21. Sentry error monitoring
 
