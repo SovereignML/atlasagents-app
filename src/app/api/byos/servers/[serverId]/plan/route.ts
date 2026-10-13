@@ -12,6 +12,7 @@ import { findPlanBySlug } from "@/configs/plans"
 import { BRANDING } from "@/configs/branding"
 import { readJsonBody } from "@/lib/request-body"
 import { byosPlanCheckoutSchema } from "@/lib/validations"
+import { stripeIdempotencyKey, windowKey } from "@/lib/stripe-idempotency"
 
 /**
  * Buy a BYOS plan for one connected server.
@@ -93,12 +94,15 @@ export async function POST(
       })
       let stripeCustomerId = userRow?.stripeCustomerId
       if (!stripeCustomerId) {
-        const customer = await stripe.customers.create({
-          // The OWNER's email — under impersonation session.user.email is the
-          // admin's, and would stamp staff details onto the customer's record.
-          email: userRow?.email ?? undefined,
-          metadata: { userId: effectiveUserId },
-        })
+        const customer = await stripe.customers.create(
+          {
+            // The OWNER's email — under impersonation session.user.email is the
+            // admin's, and would stamp staff details onto the customer's record.
+            email: userRow?.email ?? undefined,
+            metadata: { userId: effectiveUserId },
+          },
+          { idempotencyKey: stripeIdempotencyKey("customer", effectiveUserId, userRow?.email) },
+        )
         stripeCustomerId = customer.id
         await db.update(users).set({ stripeCustomerId }).where(eq(users.id, effectiveUserId))
       }
@@ -135,6 +139,8 @@ export async function POST(
         // Straight on to installing — the reason they bought it.
         success_url: `${BRANDING.appUrl}/dashboard/byos/deploy?serverId=${server.id}`,
         cancel_url: `${BRANDING.appUrl}/dashboard/byos`,
+      }, {
+        idempotencyKey: stripeIdempotencyKey("byos-plan", server.id, stripeCustomerId, interval, windowKey()),
       })
       return NextResponse.json({ checkoutUrl: checkout.url })
     }

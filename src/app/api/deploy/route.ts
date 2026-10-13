@@ -22,6 +22,7 @@ import { getEffectiveTeam } from "@/lib/effective-user"
 import { createInstanceFromAgentFields } from "@/lib/agent-create"
 import { runtimeDeployDenial } from "@/lib/runtime-access"
 import { deploySchema } from "@/lib/validations"
+import { stripeIdempotencyKey } from "@/lib/stripe-idempotency"
 
 export async function POST(req: NextRequest) {
   try {
@@ -218,10 +219,10 @@ async function handleDeploy(req: NextRequest) {
     let stripeCustomerId = userRow?.stripeCustomerId
 
     if (!stripeCustomerId) {
-      const customer = await stripe.customers.create({
-        email: userRow?.email ?? undefined,
-        metadata: { userId: effectiveUserId },
-      })
+      const customer = await stripe.customers.create(
+        { email: userRow?.email ?? undefined, metadata: { userId: effectiveUserId } },
+        { idempotencyKey: stripeIdempotencyKey("customer", effectiveUserId, userRow?.email) },
+      )
       stripeCustomerId = customer.id
       await db
         .update(users)
@@ -259,6 +260,9 @@ async function handleDeploy(req: NextRequest) {
       },
       success_url: `${BRANDING.appUrl}/dashboard/instances/${instance.id}`,
       cancel_url: `${BRANDING.appUrl}/dashboard/deploy`,
+    }, {
+      // One checkout per instance row, however often it is retried.
+      idempotencyKey: stripeIdempotencyKey("deploy-checkout", instance.id),
     })
 
     return NextResponse.json({

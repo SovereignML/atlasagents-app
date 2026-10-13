@@ -15,6 +15,7 @@ import {
 } from "@/lib/credit-pricing"
 import { readJsonBody } from "@/lib/request-body"
 import { walletTopupSchema } from "@/lib/validations"
+import { stripeIdempotencyKey, windowKey } from "@/lib/stripe-idempotency"
 
 /**
  * GET /api/billing/wallet
@@ -105,7 +106,12 @@ export async function POST(req: NextRequest) {
 
   let customerId = user.stripeCustomerId
   if (!customerId) {
-    const customer = await stripe.customers.create({ email: user.email })
+    // Same params and key as every other customer create, so concurrent
+    // first purchases can't make two customers for one user.
+    const customer = await stripe.customers.create(
+      { email: user.email, metadata: { userId } },
+      { idempotencyKey: stripeIdempotencyKey("customer", userId, user.email) },
+    )
     customerId = customer.id
     await db.update(users).set({ stripeCustomerId: customerId }).where(eq(users.id, userId))
   }
@@ -133,6 +139,9 @@ export async function POST(req: NextRequest) {
     },
     success_url: `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/dashboard/billing?topup=success`,
     cancel_url: `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/dashboard/billing`,
+  }, {
+    // A double click or retry within the minute reuses the same session.
+    idempotencyKey: stripeIdempotencyKey("wallet-topup", userId, customerId, credits, windowKey()),
   })
 
   return NextResponse.json({ checkoutUrl: session.url })

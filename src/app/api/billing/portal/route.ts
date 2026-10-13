@@ -3,6 +3,7 @@ import { auth } from "@/auth"
 import { db, eq, users } from "@/db"
 import { stripe, isStripeConfigured } from "@/lib/stripe"
 import { BRANDING } from "@/configs/branding"
+import { stripeIdempotencyKey } from "@/lib/stripe-idempotency"
 
 export async function POST() {
   const session = await auth()
@@ -23,10 +24,11 @@ export async function POST() {
 
   let customerId = user?.stripeCustomerId
   if (!customerId) {
-    const customer = await stripe.customers.create({
-      email: user?.email ?? session.user.email ?? undefined,
-      metadata: { userId: session.user.id },
-    })
+    const email = user?.email ?? session.user.email ?? undefined
+    const customer = await stripe.customers.create(
+      { email, metadata: { userId: session.user.id } },
+      { idempotencyKey: stripeIdempotencyKey("customer", session.user.id, email) },
+    )
     customerId = customer.id
     await db
       .update(users)
