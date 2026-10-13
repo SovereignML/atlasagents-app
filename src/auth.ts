@@ -18,6 +18,7 @@ import { verifyTurnstileToken } from "@/lib/turnstile"
 import { rateLimit } from "@/lib/rate-limit"
 import { clientIp } from "@/lib/client-ip"
 import { getOrCreatePersonalTeam } from "@/lib/team"
+import { getAccountStatus } from "@/lib/account-status"
 
 /**
  * `code` is overridden so the client can distinguish the 2FA challenge step
@@ -218,9 +219,29 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         })
         token.role = dbUser?.role || "user"
       }
+      // Every later read of the session re-checks the account (cached for a
+      // few seconds), so a ban or a role change applies to sessions that are
+      // already open, not just at the next sign-in. A deleted account's
+      // session is dropped outright; a banned one is kept, marked, so the
+      // proxy can send it to /banned (see auth.config.ts).
+      if (!user && token.id) {
+        const status = await getAccountStatus(token.id as string)
+        if (status.kind === "missing") return null
+        if (status.kind === "banned") {
+          token.banned = true
+        } else {
+          delete token.banned
+          token.role = status.role
+        }
+      }
       return token
     },
     async session({ session, token }) {
+      // A banned account's session carries no user, so every route that
+      // checks `session?.user?.id` treats it as signed out.
+      if (token.banned) {
+        return { expires: session.expires, banned: true } as unknown as typeof session
+      }
       if (session.user) {
         session.user.id = token.id as string
         ;(session.user as { role: string }).role = token.role as string

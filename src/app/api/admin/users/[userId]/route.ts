@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { userUpdateSchema } from "@/lib/validations";
 import { db, users, eq } from "@/db";
+import { forgetAccountStatus } from "@/lib/account-status";
 
 export async function PATCH(
   request: Request,
@@ -57,6 +58,7 @@ export async function PATCH(
           role: users.role,
         });
 
+      forgetAccountStatus(userId);
       return NextResponse.json(updatedUser);
     }
 
@@ -86,6 +88,7 @@ export async function PATCH(
           bannedReason: users.bannedReason,
         });
 
+      forgetAccountStatus(userId);
       return NextResponse.json(updatedUser);
     }
 
@@ -108,6 +111,7 @@ export async function PATCH(
           bannedReason: users.bannedReason,
         });
 
+      forgetAccountStatus(userId);
       return NextResponse.json(updatedUser);
     }
 
