@@ -1193,7 +1193,7 @@ const PROVISION_STEPS = [
   { match: "Selecting shared host", label: "Selecting host" },
   { match: "Starting bot container", label: "Starting container" },
   { match: "Starting provisioning", label: "Initializing" },
-  { match: "Mock-provisioned", label: "Provisioned" },
+  { match: "Mock-provisioned", label: "Simulated (dev mode, no server)" },
 ] as const
 
 const PROVISION_STAGE_HINTS: Record<string, string> = {

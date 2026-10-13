@@ -1222,6 +1222,16 @@ async function provisionBotLocked(
   try {
     let result: ProvisionResult
     if (!isLiveMode()) {
+      // The mock exists for local development only. In production a missing
+      // provider token or fleet key must fail the deploy, not hand the user
+      // an agent that shows as running with no server behind it. (assertEnv()
+      // also refuses to boot production without them.)
+      if (process.env.NODE_ENV === "production") {
+        throw new Error(
+          "Provisioning is not configured: set a VPS provider token (DIGITALOCEAN_API_TOKEN or " +
+            "LINODE_API_TOKEN) and SSH_FLEET_PRIVATE_KEY.",
+        )
+      }
       await logInstanceEvent({
         instanceId: instance.id,
         stage: "provision",
@@ -1237,7 +1247,7 @@ async function provisionBotLocked(
         stage: "provision",
         action: "mock_complete",
         result: "ok",
-        message: `Mock-provisioned (${target}). Set LINODE_API_TOKEN + SSH_FLEET_PRIVATE_KEY for real infra.`,
+        message: `Mock-provisioned (${target}, dev only): no server was created. Set DIGITALOCEAN_API_TOKEN (or LINODE_API_TOKEN) + SSH_FLEET_PRIVATE_KEY for real infra.`,
       })
       result = { ipAddress, mocked: true }
     } else if (target === "vps") {
