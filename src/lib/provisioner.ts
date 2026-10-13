@@ -48,6 +48,7 @@ import {
   buildRestoreBakeSecret,
   buildReusePrewarmedSidecar,
 } from "@/lib/runtimes/open-webui-claim"
+import { buildSeedSidecarAdminScript } from "@/lib/runtimes/open-webui-seed"
 import { getRuntime, type RuntimeEngine, type RuntimeId } from "@/lib/runtimes"
 import { runtimeAcceptsModel } from "@/lib/runtimes/labels"
 import { selectableModelsForRuntime } from "@/lib/allowed-models"
@@ -791,67 +792,6 @@ echo "=== provision: done ==="
 `
 }
 
-/**
- * Seed the sidecar's first (admin) account, then lock signup. Open WebUI has no
- * auto-admin env: the first account created via the signup endpoint becomes
- * admin. We retry while the container's HTTP server warms up; a 400/403 means
- * the account already exists (idempotent on reprovision). On success we flip
- * ENABLE_SIGNUP=false in the env file and restart so the public URL isn't an
- * open registration page.
- */
-function buildSeedSidecarAdminScript(opts: {
-  port: number
-  signupPath: string
-  envPath: string
-  serviceName: string
-  adminEmail: string
-  adminPassword: string
-}): string {
-  const payload = JSON.stringify({
-    name: "Admin",
-    email: opts.adminEmail,
-    password: opts.adminPassword,
-  })
-  return `#!/bin/bash
-set -uo pipefail
-SIGNUP_URL="http://127.0.0.1:${opts.port}${opts.signupPath}"
-ENV_PATH=${bashSingleQuoteForScript(opts.envPath)}
-SERVICE=${bashSingleQuoteForScript(opts.serviceName)}
-PAYLOAD=${bashSingleQuoteForScript(payload)}
-
-echo "=== seed: open-webui admin ==="
-OK=0
-CODE=""
-for _ in \$(seq 1 30); do
-  CODE=\$(curl -s -o /tmp/owui_signup.out -w '%{http_code}' -m 8 -X POST "\${SIGNUP_URL}" -H 'Content-Type: application/json' -d "\${PAYLOAD}" || echo "000")
-  if [ "\${CODE}" = "200" ] || [ "\${CODE}" = "201" ]; then
-    OK=1
-    break
-  fi
-  if [ "\${CODE}" = "400" ] || [ "\${CODE}" = "403" ]; then
-    echo "admin signup returned \${CODE} — treating as already-seeded"
-    OK=1
-    break
-  fi
-  sleep 2
-done
-
-if [ "\${OK}" != "1" ]; then
-  echo "open-webui admin signup failed (last code \${CODE})" >&2
-  cat /tmp/owui_signup.out 2>/dev/null || true
-  exit 1
-fi
-
-echo "=== seed: lock signup ==="
-if grep -q '^ENABLE_SIGNUP=' "\${ENV_PATH}"; then
-  sed -i 's/^ENABLE_SIGNUP=.*/ENABLE_SIGNUP=false/' "\${ENV_PATH}"
-else
-  echo 'ENABLE_SIGNUP=false' >> "\${ENV_PATH}"
-fi
-systemctl restart "\${SERVICE}"
-echo "=== seed: done ==="
-`
-}
 
 
 
@@ -2187,9 +2127,9 @@ async function configureRuntimeOverSsh(
     /**
      * True when the VM came from the warm pool (already bootstrapped +
      * bake-finalized). Enables the fast claim path: skip the runtime's
-     * setup/doctor (done at bake) and move the Open WebUI admin seed + the
-     * `/v1/models` verification OFF the critical path (run async after commit),
-     * so delivery lands under 25s.
+     * setup/doctor (done at bake) and move companion-service setup OFF the
+     * critical path (run async after commit), so delivery lands under 25s.
+     * The `/v1/models` check and the Open WebUI admin seed still gate it.
      */
     fromWarmPool?: boolean
   },
@@ -2514,7 +2454,6 @@ async function configureRuntimeOverSsh(
   // placeholder config): the customer's account and the real gateway wiring
   // must be applied below, before the deploy is committed.
   const sidecarPrewarmed = !installFailed && installStep.stdout.includes(SIDECAR_PREWARMED)
-  let webuiAdminSeeded = false
   if (installFailed) {
     const stdout = installStep.stdout
     let failedPhase = "B+C+D"
@@ -2584,9 +2523,10 @@ async function configureRuntimeOverSsh(
 
     // Hermes: assert the OpenAI-compatible API is actually serving models (provider wired,
     // model accepted) before we point Open WebUI at it. Hard gate — a failure here means the
-    // gateway is up but the agent can't talk to a model, so fail the deploy.
-    // Warm-pool deploys move this OFF the critical path (run async after commit).
-    if (runtime.caps.exposesOpenAiApi && !fromWarmPool) {
+    // gateway is up but the agent can't talk to a model, so fail the deploy. Warm-pool deploys
+    // run it too: the VM is already warm, so it answers in seconds, and running it after
+    // commit let a broken agent show as running.
+    if (runtime.caps.exposesOpenAiApi) {
       const modelsStep = await sshRunScriptLogged(
         target,
         buildApiModelsCheckScript({ envPath: runtime.paths.envPath, port: runtime.gatewayPort }),
@@ -2610,53 +2550,39 @@ async function configureRuntimeOverSsh(
       })
     }
 
-    // Seed the Open WebUI admin and lock signup. Best-effort: a failure here
-    // leaves signup open (the first visitor self-registers as admin) but does
-    // not fail the deploy. Warm-pool deploys move this OFF the critical path.
-    if (webuiEnabled && runtime.sidecar && !fromWarmPool) {
-      const seedStep = await sshRunScriptLogged(
-        target,
-        buildSeedSidecarAdminScript({
-          port: runtime.sidecar.port,
-          signupPath: runtime.sidecar.seedAdmin.signupPath,
-          envPath: runtime.sidecar.envPath,
-          serviceName: runtime.sidecar.serviceName,
-          adminEmail,
-          adminPassword,
-        }),
-        currentStage,
-        "provision:seed (open-webui admin)",
-        { timeoutMs: 120_000 },
-      )
-      await logSshStep(instance.id, seedStep)
-      const seedOk = seedStep.exitCode === 0 || seedStep.exitCode === null
-      await logInstanceEvent({
-        instanceId: instance.id,
-        level: seedOk ? "info" : "warn",
-        stage: currentStage,
-        action: "webui_admin_seeded",
-        result: seedOk ? "ok" : "error",
-        message: seedOk
-          ? "Open WebUI admin account created and public signup disabled."
-          : "Could not seed the Open WebUI admin; signup is left open so the first visitor becomes admin.",
-      })
-    }
-
-    // Warm-pool claim with a prewarmed Open WebUI: create the customer's admin
-    // account on the running sidecar and point it at the real gateway, model
-    // and URL over its API — no restart. On the critical path because until it
-    // runs the chat UI holds the bake placeholder token and open signup. If the
-    // live hand-off fails, fall back to the restart-based seed: the env file
-    // already holds the real values, so a restart picks them up.
-    if (webuiEnabled && runtime.sidecar && sidecarPrewarmed) {
-      webuiAdminSeeded = await claimPrewarmedSidecar({
-        instanceId: instance.id,
-        target,
-        runtime,
-        stage: currentStage,
-        adminEmail,
-        adminPassword,
-      })
+    // Create the customer's Open WebUI admin and lock signup. Hard gate, like
+    // /v1/models: Open WebUI makes the first account to sign up its admin, so
+    // an unseeded sidecar would hand the agent's chat (and, on Hermes, a shell
+    // on the box and the customer's credits) to whoever opens the URL first.
+    // The seed script stops the sidecar when it fails, and the deploy fails
+    // here so the agent never shows as running with an unclaimed chat UI.
+    //
+    // A warm-pool VM with a prewarmed sidecar is handed over live (no restart),
+    // falling back to the restart-based seed; every other deploy seeds directly.
+    if (webuiEnabled && runtime.sidecar) {
+      const seeded = sidecarPrewarmed
+        ? await claimPrewarmedSidecar({
+            instanceId: instance.id,
+            target,
+            runtime,
+            stage: currentStage,
+            adminEmail,
+            adminPassword,
+          })
+        : await seedSidecarAdmin({
+            instanceId: instance.id,
+            target,
+            runtime,
+            stage: currentStage,
+            adminEmail,
+            adminPassword,
+          })
+      if (!seeded) {
+        throw new Error(
+          "Open WebUI admin account could not be created. The chat UI was stopped so " +
+            "nobody else can claim it; the deploy failed rather than leave signup open.",
+        )
+      }
     }
 
     // Browser terminal (Claude Code / Codex). Best-effort, never fails the deploy.
@@ -2716,20 +2642,11 @@ async function configureRuntimeOverSsh(
     }. Direct access: http://${ipAddress}:${runtime.gatewayPort}`,
   })
 
-  // Warm-pool fast path: the gateway is healthy and committed; run the
-  // non-essential post-checks (Hermes /v1/models verification + Open WebUI
-  // admin seed) asynchronously so they don't count against the <25s delivery
-  // budget. Best-effort — a failure only flips a warning event.
+  // Warm-pool fast path: the gateway is healthy and committed; set up the
+  // companion services asynchronously so they don't count against the <25s
+  // delivery budget. Best-effort — a failure only flips a warning event.
   if (fromWarmPool) {
-    void runWarmPoolPostChecks({
-      instanceId: instance.id,
-      target,
-      runtime,
-      // Already done synchronously above when the sidecar was prewarmed.
-      webuiEnabled: webuiEnabled && !webuiAdminSeeded,
-      adminEmail,
-      adminPassword,
-    }).catch(() => {
+    void runWarmPoolPostChecks({ instanceId: instance.id }).catch(() => {
       /* observability only — deploy already committed */
     })
   }
@@ -2813,6 +2730,29 @@ async function claimPrewarmedSidecar(opts: {
     })
   }
 
+  return seedSidecarAdmin({ ...opts, fallback: true })
+}
+
+/**
+ * Create the Open WebUI admin with the restart-based seed script and log the
+ * outcome. Returns whether the admin exists and signup is locked; on false the
+ * script has already stopped the sidecar (fail closed). Never throws.
+ */
+async function seedSidecarAdmin(opts: {
+  instanceId: string
+  target: SshTarget
+  runtime: RuntimeEngine
+  stage: VpsStage
+  adminEmail: string
+  adminPassword: string
+  /** Label the step as the fallback after a failed prewarmed hand-off. */
+  fallback?: boolean
+}): Promise<boolean> {
+  const { instanceId, target, runtime, stage, adminEmail, adminPassword } = opts
+  const sidecar = runtime.sidecar
+  if (!sidecar) return false
+  const failMessage =
+    "Could not create the Open WebUI admin; the chat UI was stopped so the first visitor can't claim it."
   try {
     const seedStep = await sshRunScriptLogged(
       target,
@@ -2825,99 +2765,41 @@ async function claimPrewarmedSidecar(opts: {
         adminPassword,
       }),
       stage,
-      "provision:seed (open-webui admin) [prewarm fallback]",
+      `provision:seed (open-webui admin)${opts.fallback ? " [prewarm fallback]" : ""}`,
       { timeoutMs: 120_000 },
     )
     await logSshStep(instanceId, seedStep)
     const seedOk = seedStep.exitCode === 0 || seedStep.exitCode === null
     await logInstanceEvent({
       instanceId,
-      level: seedOk ? "info" : "warn",
+      level: seedOk ? "info" : "error",
       stage,
       action: "webui_admin_seeded",
       result: seedOk ? "ok" : "error",
-      message: seedOk
-        ? "Open WebUI admin account created and public signup disabled."
-        : "Could not seed the Open WebUI admin; signup is left open so the first visitor becomes admin.",
+      message: seedOk ? "Open WebUI admin account created and public signup disabled." : failMessage,
     })
     return seedOk
-  } catch {
+  } catch (err) {
+    await logInstanceEvent({
+      instanceId,
+      level: "error",
+      stage,
+      action: "webui_admin_seeded",
+      result: "error",
+      message: `${failMessage} ${err instanceof Error ? err.message : String(err)}`,
+    }).catch(() => {})
     return false
   }
 }
 
 /**
- * Off-critical-path post-checks for a warm-pool deploy: verify Hermes'
- * `/v1/models` and seed the Open WebUI admin. Runs AFTER the instance is
- * committed `running`, so it never counts against delivery time. Each step logs
- * its own outcome and is fully best-effort.
+ * Off-critical-path work for a warm-pool deploy. Runs AFTER the instance is
+ * committed `running`, so it never counts against delivery time, and is fully
+ * best-effort. The `/v1/models` check and the Open WebUI admin seed used to run
+ * here too; both now gate the deploy (see configureRuntimeOverSsh).
  */
-async function runWarmPoolPostChecks(opts: {
-  instanceId: string
-  target: SshTarget
-  runtime: RuntimeEngine
-  webuiEnabled: boolean
-  adminEmail: string
-  adminPassword: string
-}): Promise<void> {
-  const { instanceId, target, runtime, webuiEnabled, adminEmail, adminPassword } = opts
-
-  if (runtime.caps.exposesOpenAiApi) {
-    try {
-      const modelsStep = await sshRunScriptLogged(
-        target,
-        buildApiModelsCheckScript({ envPath: runtime.paths.envPath, port: runtime.gatewayPort }),
-        "health_check",
-        "provision:health (GET /v1/models) [async]",
-        { timeoutMs: 60_000 },
-      )
-      const ok = modelsStep.exitCode === 0 || modelsStep.exitCode === null
-      await logInstanceEvent({
-        instanceId,
-        level: ok ? "info" : "warn",
-        stage: "health_check",
-        action: "api_models_ok",
-        result: ok ? "ok" : "error",
-        message: ok
-          ? `${runtime.displayName} OpenAI-compatible API verified (/v1/models).`
-          : `${runtime.displayName} /v1/models post-check failed — the agent may not answer until the model wires up.`,
-      })
-    } catch {
-      /* best-effort */
-    }
-  }
-
-  if (webuiEnabled && runtime.sidecar) {
-    try {
-      const seedStep = await sshRunScriptLogged(
-        target,
-        buildSeedSidecarAdminScript({
-          port: runtime.sidecar.port,
-          signupPath: runtime.sidecar.seedAdmin.signupPath,
-          envPath: runtime.sidecar.envPath,
-          serviceName: runtime.sidecar.serviceName,
-          adminEmail,
-          adminPassword,
-        }),
-        "health_check",
-        "provision:seed (open-webui admin) [async]",
-        { timeoutMs: 120_000 },
-      )
-      const seedOk = seedStep.exitCode === 0 || seedStep.exitCode === null
-      await logInstanceEvent({
-        instanceId,
-        level: seedOk ? "info" : "warn",
-        stage: "health_check",
-        action: "webui_admin_seeded",
-        result: seedOk ? "ok" : "error",
-        message: seedOk
-          ? "Open WebUI admin account created and public signup disabled."
-          : "Could not seed the Open WebUI admin; signup is left open so the first visitor becomes admin.",
-      })
-    } catch {
-      /* best-effort */
-    }
-  }
+async function runWarmPoolPostChecks(opts: { instanceId: string }): Promise<void> {
+  const { instanceId } = opts
 
   // Companion services (n8n): install + start + seed off the warm-pool critical
   // path. Loads the freshly-committed row so enabledTools + persisted secrets are
