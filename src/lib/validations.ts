@@ -334,6 +334,18 @@ export const usageIngestSchema = z.object({
   instanceId: z.string().max(128).optional(),
 })
 
+/**
+ * Admin subscription change. Stripe-backed rows take cancel,
+ * cancel_at_period_end or resume, made in Stripe; a row with no Stripe
+ * subscription (dev, manual) takes set_status.
+ */
+export const adminSubscriptionChangeSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("cancel") }),
+  z.object({ action: z.literal("cancel_at_period_end") }),
+  z.object({ action: z.literal("resume") }),
+  z.object({ action: z.literal("set_status"), status: z.enum(["active", "canceled"]) }),
+], { message: "action must be cancel, cancel_at_period_end, resume or set_status" })
+
 export type DeployInput = z.infer<typeof deploySchema>
 export type SupportTicketInput = z.infer<typeof supportTicketSchema>
 export type SupportReplyInput = z.infer<typeof supportReplySchema>
