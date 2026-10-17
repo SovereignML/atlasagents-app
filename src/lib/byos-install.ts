@@ -83,12 +83,17 @@ export function platformOwnsHostVm(deploymentTarget: string | null | undefined):
 
 // ── BYOS plan entitlement ────────────────────────────────────────────────
 //
-// Connecting a server is free; installing an agent on it needs a BYOS plan for
-// THAT server. One plan covers any number of agents on its server. These are
-// the pure rules — the lookups live in byos-plan.ts.
+// A BYOS plan entitles ONE agent. Plans are bought on their own (no server
+// needed) and sit unassigned until an install takes one; connecting a server
+// is free and needs no plan. Installing uses an available plan, or opens Checkout for
+// a new one and installs once it is paid. These are the pure rules — the
+// lookups live in byos-plan.ts.
+//
+// Legacy: plans used to be bought per server (Subscription.byosServerId) and
+// covered every agent on it. Those rows are grandfathered until they end.
 
 /**
- * Subscription statuses under which a plan still covers its server. `past_due`
+ * Subscription statuses under which a plan still covers its agent. `past_due`
  * is included on purpose: Stripe is retrying the card, and agents keep running
  * through dunning. Coverage only ends when Stripe ends the subscription
  * (customer.subscription.deleted), which for a cancel happens at period end.
@@ -109,18 +114,27 @@ export function planAllowsInstall(status: string | null | undefined): boolean {
 /** The statuses `planIsLive` accepts, for building a DB filter. */
 export const LIVE_PLAN_STATUS_LIST = [...LIVE_PLAN_STATUSES]
 
+/** The statuses `planAllowsInstall` accepts, for building a DB filter. */
+export const INSTALLABLE_PLAN_STATUS_LIST = [...INSTALLABLE_PLAN_STATUSES]
+
+export type ByosInstallPath = "legacy_server_plan" | "use_available_plan" | "checkout"
+
 /**
- * Why an agent can't be installed on a server with this plan (or none), or
- * null if it can. Shown verbatim to the customer.
+ * How a new agent gets its plan.
+ *
+ * A grandfathered per-server plan comes first: it already covers every agent
+ * on its server, so spending one of the customer's available per-agent plans there
+ * would waste it. Then an available plan. Otherwise the install goes through Checkout
+ * for a new plan, and the agent is installed once that is paid.
  */
-export function planBlockedReason(plan: { status: string } | null): string | null {
-  if (!plan) {
-    return "This server needs a BYOS plan before you can install an agent on it."
+export function byosInstallPath(input: {
+  legacyServerPlan: { status: string } | null
+  hasAvailablePlan: boolean
+}): ByosInstallPath {
+  if (input.legacyServerPlan && planAllowsInstall(input.legacyServerPlan.status)) {
+    return "legacy_server_plan"
   }
-  if (!planAllowsInstall(plan.status)) {
-    return "This server's BYOS plan has an unpaid invoice. Update your payment method in Billing, then try again."
-  }
-  return null
+  return input.hasAvailablePlan ? "use_available_plan" : "checkout"
 }
 
 /**

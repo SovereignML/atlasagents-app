@@ -1,7 +1,19 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
 import { auth } from "@/auth"
-import { db, eq, and, asc, byosServers, instances, instanceLogs, regions, serverConfigs } from "@/db"
+import {
+  db,
+  eq,
+  and,
+  asc,
+  byosServers,
+  instances,
+  instanceLogs,
+  plans,
+  regions,
+  serverConfigs,
+  subscriptions,
+} from "@/db"
 import { logAuditEvent } from "@/lib/audit"
 import { createSlug } from "@/lib/instance"
 import { encryptSecret } from "@/lib/crypto-secret"
@@ -13,9 +25,12 @@ import { provisionBot } from "@/lib/provisioner"
 import { describeVmError } from "@/lib/vm-provider"
 import { assertPublicHost, BlockedHostError } from "@/lib/net-guard"
 import { getEffectiveTeam } from "@/lib/effective-user"
-import { byosConnectionFields, installBlockedReason, planBlockedReason } from "@/lib/byos-install"
-import { findByosPlan } from "@/lib/byos-plan"
-import { recoverByosPlanCheckout } from "@/lib/checkout-recovery"
+import { byosConnectionFields, byosInstallPath, installBlockedReason } from "@/lib/byos-install"
+import { claimAvailableByosPlan, discardUnpaidByosInstall, findLegacyServerPlan } from "@/lib/byos-plan"
+import { createByosPlanCheckout } from "@/lib/byos-checkout"
+import { recoverByosPlanCheckouts } from "@/lib/checkout-recovery"
+import { isStripeConfigured, isDevBypassAllowed } from "@/lib/stripe"
+import { BRANDING } from "@/configs/branding"
 import { claimEvent, releaseEvent } from "@/lib/idempotency"
 import { isTeamSuspended } from "@/lib/tenant"
 import { canDeploy, DEPLOY_ROLE_DENIED } from "@/lib/team"
@@ -65,12 +80,15 @@ async function validateCustomBaseUrl(raw: string | undefined): Promise<string | 
  * had no link back to the server — leaving `agentCount`, the idle-server cap
  * and the disconnect guard all reading zero.
  *
- * No VM is created, and no checkout is opened. Paying for BYOS is a separate
- * step: a BYOS plan is bought per server (POST /api/byos/servers/[id]/plan),
- * and this route only checks that the server has one — one plan covers every
- * agent on its server. LLM usage is either metered against the credit wallet
- * ("managed_credits") or paid via the customer's own key ("own_key", stored
- * encrypted).
+ * No VM is created. Every BYOS agent needs a BYOS plan — one plan, one agent —
+ * and plans are independent of servers. This route takes the customer's oldest
+ * available plan; with none available, it leaves the agent `pending`, opens Checkout for
+ * a new plan and returns `{ instanceId, checkoutUrl }`. The webhook (or
+ * checkout-recovery) then records the plan against this agent and installs it
+ * — so nothing is installed, and no dashboard exists, until a plan is paid
+ * for. Grandfathered per-server plans still cover their server. LLM usage is
+ * either metered against the credit wallet ("managed_credits") or paid via the
+ * customer's own key ("own_key", stored encrypted).
  */
 export async function POST(req: NextRequest) {
   try {
@@ -124,6 +142,7 @@ async function handleByosDeploy(req: NextRequest) {
     fallbackApiKey,
     fallbackBaseUrl,
     agentConfig: agentConfigInput,
+    interval = "month",
   } = parsedBody.data
 
   // ── Validate ──────────────────────────────────────────────────────
@@ -201,24 +220,6 @@ async function handleByosDeploy(req: NextRequest) {
     return NextResponse.json(
       { error: "BYOS provisioning is not configured on this server" },
       { status: 503 },
-    )
-  }
-
-  // ── Plan gate — BEFORE any DB write ───────────────────────────────
-  // Installing is free; the server must already have a BYOS plan. If it
-  // doesn't, ask Stripe once — the customer may have just paid and the webhook
-  // hasn't landed (checkout-recovery.ts). Refusing before the INSERT matters:
-  // countTeamAgents() counts every non-deleted row against the agent cap, so a
-  // stranded row per attempt would turn this message into "Agent limit reached".
-  let plan = await findByosPlan(byosServer.id)
-  if (!plan && (await recoverByosPlanCheckout(byosServer.id, effectiveUserId))) {
-    plan = await findByosPlan(byosServer.id)
-  }
-  const planBlocked = planBlockedReason(plan)
-  if (planBlocked || !plan) {
-    return NextResponse.json(
-      { error: planBlocked, code: "byos_plan_required" },
-      { status: 402 },
     )
   }
 
@@ -352,8 +353,9 @@ async function handleByosDeploy(req: NextRequest) {
       regionId: region.id,
       serverConfigId: serverConfig.id,
       storageGb: serverConfig.storageGb,
-      // Informational: the agent itself isn't billed, its server's plan is.
-      billingInterval: plan.interval,
+      // Informational: the agent's plan is what is billed. Corrected below
+      // once we know which plan covers it.
+      billingInterval: interval,
       status: "pending",
       // Shared agent columns (runtime, webuiEnabled, soul, skills, botToken, …)
       // derived identically to the managed path; deploymentTarget is forced to
@@ -387,35 +389,112 @@ async function handleByosDeploy(req: NextRequest) {
     })
     .returning()
 
-  await logAuditEvent({
-    // The REAL actor, with the customer recorded as onBehalfOf — same contract
-    // as createInstanceFromAgentFields. Undefined for a normal self-serve
-    // install, where actor and owner are the same person.
-    userId: actorUserId,
-    onBehalfOfUserId: actorUserId !== effectiveUserId ? effectiveUserId : undefined,
-    teamId,
-    action: "instance.deploy",
-    targetType: "instance",
-    targetId: instance.id,
-    targetLabel: instance.name,
-    meta: {
-      plan: "byos",
-      byosServerId: byosServer.id,
-      byosHost: byosServer.host,
-      llmMode,
-      byosPlanSubscriptionId: plan.subscriptionId,
-      ...(llmMode === "own_key"
-        ? { ownProvider: ownProviderId, hasFallback: hasFallbackInput }
-        : {}),
-    },
-  })
+  // ── Which plan covers this agent ──────────────────────────────────
+  // A grandfathered per-server plan, else the oldest available plan (claimed
+  // atomically against this row), else Checkout for a new one. If none is
+  // available, ask Stripe once: the customer may have just bought one and the
+  // webhook hasn't landed (checkout-recovery.ts).
+  const legacyServerPlan = await findLegacyServerPlan(byosServer.id)
+  let claimed: { subscriptionId: string; interval: string } | null = null
+  if (byosInstallPath({ legacyServerPlan, hasAvailablePlan: true }) === "use_available_plan") {
+    claimed = await claimAvailableByosPlan(effectiveUserId, instance.id)
+    if (!claimed && (await recoverByosPlanCheckouts(effectiveUserId))) {
+      claimed = await claimAvailableByosPlan(effectiveUserId, instance.id)
+    }
+  }
+  const path = byosInstallPath({ legacyServerPlan, hasAvailablePlan: !!claimed })
 
+  const auditInstall = (planSubscriptionId: string | null) =>
+    logAuditEvent({
+      // The REAL actor, with the customer recorded as onBehalfOf — same contract
+      // as createInstanceFromAgentFields. Undefined for a normal self-serve
+      // install, where actor and owner are the same person.
+      userId: actorUserId,
+      onBehalfOfUserId: actorUserId !== effectiveUserId ? effectiveUserId : undefined,
+      teamId,
+      action: "instance.deploy",
+      targetType: "instance",
+      targetId: instance.id,
+      targetLabel: instance.name,
+      meta: {
+        plan: "byos",
+        byosServerId: byosServer.id,
+        byosHost: byosServer.host,
+        llmMode,
+        byosPlanPath: path,
+        byosPlanSubscriptionId: planSubscriptionId,
+        ...(llmMode === "own_key"
+          ? { ownProvider: ownProviderId, hasFallback: hasFallbackInput }
+          : {}),
+      },
+    })
+  const llmLabel = `LLM mode: ${llmMode}${llmMode === "own_key" ? ` (provider: ${ownProviderId})` : ""}`
+
+  // ── No available plan: pay first, install after ───────────────────
+  if (path === "checkout") {
+    if (isStripeConfigured()) {
+      let checkoutUrl: string | null
+      try {
+        checkoutUrl = await createByosPlanCheckout({
+          userId: effectiveUserId,
+          interval,
+          instance: { id: instance.id, name: instance.name },
+          // The agent page shows the install progressing, and asks Stripe
+          // itself if the webhook is late (recoverPaidCheckout).
+          successUrl: `${BRANDING.appUrl}/dashboard/instances/${instance.id}`,
+          // Back to the form, which removes this unpaid agent.
+          cancelUrl: `${BRANDING.appUrl}/dashboard/byos/deploy?serverId=${byosServer.id}&abandoned=${instance.id}`,
+        })
+      } catch (err) {
+        // No checkout, no agent: don't strand a row that counts against the cap.
+        await discardUnpaidByosInstall(instance.id, teamId)
+        throw err
+      }
+      await auditInstall(null)
+      await db.insert(instanceLogs).values({
+        instanceId: instance.id,
+        level: "info",
+        message: `BYOS agent created on ${byosServer.label} (${byosServer.host}). ${llmLabel}. Waiting for payment of its BYOS plan — it installs once that is paid.`,
+      })
+      return NextResponse.json({ instanceId: instance.id, checkoutUrl })
+    }
+
+    // Never grant a plan for free outside development.
+    if (!isDevBypassAllowed()) {
+      await discardUnpaidByosInstall(instance.id, teamId)
+      return NextResponse.json(
+        { error: "Payments are temporarily unavailable. You have not been charged." },
+        { status: 503 },
+      )
+    }
+    // ── Dev mode: no Stripe, record the agent's plan directly ─────────
+    const dbPlan = await db.query.plans.findFirst({ where: eq(plans.tier, "byos") })
+    if (!dbPlan) {
+      await discardUnpaidByosInstall(instance.id, teamId)
+      return NextResponse.json({ error: "BYOS plan is not configured" }, { status: 500 })
+    }
+    const [devPlan] = await db
+      .insert(subscriptions)
+      .values({ userId: effectiveUserId, planId: dbPlan.id, instanceId: instance.id, interval, status: "active" })
+      .returning({ id: subscriptions.id })
+    claimed = { subscriptionId: devPlan.id, interval }
+  }
+
+  // ── Covered: record which plan, then install ──────────────────────
+  const coveringPlan = claimed ?? legacyServerPlan!
+  if (coveringPlan.interval !== interval) {
+    await db
+      .update(instances)
+      .set({ billingInterval: coveringPlan.interval })
+      .where(eq(instances.id, instance.id))
+  }
+  await auditInstall(coveringPlan.subscriptionId)
   await db.insert(instanceLogs).values({
     instanceId: instance.id,
     level: "info",
-    message: `BYOS instance created on ${byosServer.label} (${byosServer.host}). LLM mode: ${llmMode}${
-      llmMode === "own_key" ? ` (provider: ${ownProviderId})` : ""
-    }. Covered by the server's BYOS plan — installing now.`,
+    message: `BYOS instance created on ${byosServer.label} (${byosServer.host}). ${llmLabel}. ${
+      claimed ? "Covered by one of your BYOS plans" : "Covered by the server's BYOS plan"
+    } — installing now.`,
   })
 
   // ── Provision (background — it takes minutes) ─────────────────────
@@ -431,13 +510,13 @@ async function handleByosDeploy(req: NextRequest) {
 
   // ── One-time starter credits, once per plan ───────────────────────
   // Managed-AI agents draw on the wallet, so the first one installed under a
-  // plan seeds it with BYOS_SIGNUP_CREDITS. Keyed on the plan, not the agent,
-  // so installing more agents doesn't mint more credits. Legacy per-agent plans
-  // already received theirs on their first invoice. Best-effort: a failed grant
-  // must not fail an install that is already under way, so it is released for
-  // the next install to retry.
-  if (llmMode === "managed_credits" && !plan.legacy) {
-    const grantKey = plan.subscriptionId
+  // plan seeds it with BYOS_SIGNUP_CREDITS. Keyed on the plan (the same claim
+  // the invoice path uses for a plan bought at install), so reusing a plan for
+  // a later agent doesn't mint more credits. Best-effort: a failed grant must
+  // not fail an install that is already under way, so it is released for the
+  // next install to retry.
+  if (llmMode === "managed_credits") {
+    const grantKey = coveringPlan.subscriptionId
     if (await claimEvent("byos_signup_grant", grantKey)) {
       try {
         await fundWallet(

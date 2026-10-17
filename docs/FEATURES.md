@@ -114,7 +114,7 @@ A 5-step guided deployment wizard (`project → interface → plan → advanced 
 - Status badges: active, past_due, canceled, incomplete
 
 ### Bring Your Own Server (`/dashboard/byos`)
-- Connect a server you already own; Atlas Agents runs the agent on it for a flat fee. See [BYOS](BYOS.md).
+- Connect servers you already own (free); Atlas Agents runs agents on them for a flat fee per agent — one BYOS plan per agent, bought ahead or at install. See [BYOS](BYOS.md).
 
 ### Per-agent tools (instance detail page)
 - **Backups** — snapshot/restore agent settings to your own Google Drive.
@@ -203,7 +203,7 @@ Seven plans, defined in [`src/configs/plans.ts`](../src/configs/plans.ts). AI us
 | Operator | `operator` | $69 | $690 | $99 | 2,000 | 3 | Growing operations |
 | Scale | `scale` | $179 | $1,790 | $249 | 5,000 | 10 | Agencies and teams |
 | Enterprise | `enterprise` | From $499 | custom | From $999 | custom | scalable | High-scale orgs (contact sales) |
-| Bring Your Own Server | `byos` | $2.50 | $30 | $2.50 | 100 (one-time, managed mode) | — | Manage your own server ([BYOS](BYOS.md)) |
+| Bring Your Own Server | `byos` | $2.50 | $30 | $2.50 | 100 (one-time per plan, managed mode) | — | One agent on your own server ([BYOS](BYOS.md)) |
 
 Billing is monthly or yearly (yearly ≈ 2 months free, ~17% off).
 
@@ -302,7 +302,9 @@ These power the subsystems documented in their own pages.
 
 | Method | Endpoint | Description | Doc |
 |--------|----------|-------------|-----|
-| `POST` | `/api/byos/deploy` | Deploy onto a customer-owned server | [BYOS](BYOS.md) |
+| `POST` | `/api/byos/deploy` | Install an agent onto a connected server (uses an available BYOS plan, or returns a Checkout URL for one) | [BYOS](BYOS.md) |
+| `POST` | `/api/byos/plans` | Buy a BYOS plan (one agent) — no server needed | [BYOS](BYOS.md) |
+| `PATCH` | `/api/byos/plans/[subscriptionId]` | Cancel a BYOS plan at period end, or undo that | [BYOS](BYOS.md) |
 | `POST` | `/api/billing/usage-sync` | Poll OpenRouter spend, charge wallet, enforce caps | [Billing](BILLING.md) |
 | `GET/POST` | `/api/integrations/drive/*` | Connect / disconnect Google Drive | [Integrations](INTEGRATIONS.md) |
 | `POST/GET` | `/api/integrations/cloudflare/*` | Connect / list zones / disconnect Cloudflare | [Integrations](INTEGRATIONS.md) |

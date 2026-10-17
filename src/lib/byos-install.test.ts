@@ -4,8 +4,8 @@ import {
   byosConnectionFields,
   installBlockedReason,
   pickBestPlan,
+  byosInstallPath,
   planAllowsInstall,
-  planBlockedReason,
   planIsLive,
   platformOwnsHostVm,
 } from "./byos-install"
@@ -124,10 +124,32 @@ describe("BYOS plan entitlement", () => {
     expect(planAllowsInstall("canceled")).toBe(false)
   })
 
-  it("explains each refusal, and has none for a paid-up plan", () => {
-    expect(planBlockedReason(null)).toMatch(/needs a BYOS plan/)
-    expect(planBlockedReason({ status: "past_due" })).toMatch(/unpaid invoice/)
-    expect(planBlockedReason({ status: "active" })).toBeNull()
+  describe("byosInstallPath", () => {
+    it("uses an available per-agent plan when there is one", () => {
+      expect(byosInstallPath({ legacyServerPlan: null, hasAvailablePlan: true })).toBe("use_available_plan")
+    })
+
+    it("sends the install through Checkout when no plan is available", () => {
+      // Never a dead end: no plan means "pay, then we install", not a 402.
+      expect(byosInstallPath({ legacyServerPlan: null, hasAvailablePlan: false })).toBe("checkout")
+    })
+
+    it("prefers a grandfathered per-server plan over spending an available one", () => {
+      // The per-server plan already covers every agent on its server; using a
+      // available per-agent plan there would charge the customer twice.
+      expect(
+        byosInstallPath({ legacyServerPlan: { status: "active" }, hasAvailablePlan: true }),
+      ).toBe("legacy_server_plan")
+    })
+
+    it("does not install under an unpaid per-server plan", () => {
+      expect(
+        byosInstallPath({ legacyServerPlan: { status: "past_due" }, hasAvailablePlan: false }),
+      ).toBe("checkout")
+      expect(
+        byosInstallPath({ legacyServerPlan: { status: "past_due" }, hasAvailablePlan: true }),
+      ).toBe("use_available_plan")
+    })
   })
 
   describe("pickBestPlan", () => {
