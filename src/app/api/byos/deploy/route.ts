@@ -26,7 +26,7 @@ import { describeVmError } from "@/lib/vm-provider"
 import { assertPublicHost, BlockedHostError } from "@/lib/net-guard"
 import { getEffectiveTeam } from "@/lib/effective-user"
 import { byosConnectionFields, byosInstallPath, installBlockedReason } from "@/lib/byos-install"
-import { claimFreeByosPlan, discardUnpaidByosInstall, findLegacyServerPlan } from "@/lib/byos-plan"
+import { claimAvailableByosPlan, discardUnpaidByosInstall, findLegacyServerPlan } from "@/lib/byos-plan"
 import { createByosPlanCheckout } from "@/lib/byos-checkout"
 import { recoverByosPlanCheckouts } from "@/lib/checkout-recovery"
 import { isStripeConfigured, isDevBypassAllowed } from "@/lib/stripe"
@@ -82,7 +82,7 @@ async function validateCustomBaseUrl(raw: string | undefined): Promise<string | 
  *
  * No VM is created. Every BYOS agent needs a BYOS plan — one plan, one agent —
  * and plans are independent of servers. This route takes the customer's oldest
- * free plan; with none free, it leaves the agent `pending`, opens Checkout for
+ * available plan; with none available, it leaves the agent `pending`, opens Checkout for
  * a new plan and returns `{ instanceId, checkoutUrl }`. The webhook (or
  * checkout-recovery) then records the plan against this agent and installs it
  * — so nothing is installed, and no dashboard exists, until a plan is paid
@@ -390,19 +390,19 @@ async function handleByosDeploy(req: NextRequest) {
     .returning()
 
   // ── Which plan covers this agent ──────────────────────────────────
-  // A grandfathered per-server plan, else the oldest free plan (claimed
+  // A grandfathered per-server plan, else the oldest available plan (claimed
   // atomically against this row), else Checkout for a new one. If none is
-  // free, ask Stripe once: the customer may have just bought one and the
+  // available, ask Stripe once: the customer may have just bought one and the
   // webhook hasn't landed (checkout-recovery.ts).
   const legacyServerPlan = await findLegacyServerPlan(byosServer.id)
   let claimed: { subscriptionId: string; interval: string } | null = null
-  if (byosInstallPath({ legacyServerPlan, hasFreePlan: true }) === "use_free_plan") {
-    claimed = await claimFreeByosPlan(effectiveUserId, instance.id)
+  if (byosInstallPath({ legacyServerPlan, hasAvailablePlan: true }) === "use_available_plan") {
+    claimed = await claimAvailableByosPlan(effectiveUserId, instance.id)
     if (!claimed && (await recoverByosPlanCheckouts(effectiveUserId))) {
-      claimed = await claimFreeByosPlan(effectiveUserId, instance.id)
+      claimed = await claimAvailableByosPlan(effectiveUserId, instance.id)
     }
   }
-  const path = byosInstallPath({ legacyServerPlan, hasFreePlan: !!claimed })
+  const path = byosInstallPath({ legacyServerPlan, hasAvailablePlan: !!claimed })
 
   const auditInstall = (planSubscriptionId: string | null) =>
     logAuditEvent({
@@ -430,7 +430,7 @@ async function handleByosDeploy(req: NextRequest) {
     })
   const llmLabel = `LLM mode: ${llmMode}${llmMode === "own_key" ? ` (provider: ${ownProviderId})` : ""}`
 
-  // ── No free plan: pay first, install after ────────────────────────
+  // ── No available plan: pay first, install after ───────────────────
   if (path === "checkout") {
     if (isStripeConfigured()) {
       let checkoutUrl: string | null

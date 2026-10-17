@@ -125,30 +125,30 @@ describe("BYOS plan entitlement", () => {
   })
 
   describe("byosInstallPath", () => {
-    it("uses a free per-agent plan when there is one", () => {
-      expect(byosInstallPath({ legacyServerPlan: null, hasFreePlan: true })).toBe("use_free_plan")
+    it("uses an available per-agent plan when there is one", () => {
+      expect(byosInstallPath({ legacyServerPlan: null, hasAvailablePlan: true })).toBe("use_available_plan")
     })
 
-    it("sends the install through Checkout when no plan is free", () => {
+    it("sends the install through Checkout when no plan is available", () => {
       // Never a dead end: no plan means "pay, then we install", not a 402.
-      expect(byosInstallPath({ legacyServerPlan: null, hasFreePlan: false })).toBe("checkout")
+      expect(byosInstallPath({ legacyServerPlan: null, hasAvailablePlan: false })).toBe("checkout")
     })
 
-    it("prefers a grandfathered per-server plan over spending a free one", () => {
+    it("prefers a grandfathered per-server plan over spending an available one", () => {
       // The per-server plan already covers every agent on its server; using a
-      // free per-agent plan there would charge the customer twice.
+      // available per-agent plan there would charge the customer twice.
       expect(
-        byosInstallPath({ legacyServerPlan: { status: "active" }, hasFreePlan: true }),
+        byosInstallPath({ legacyServerPlan: { status: "active" }, hasAvailablePlan: true }),
       ).toBe("legacy_server_plan")
     })
 
     it("does not install under an unpaid per-server plan", () => {
       expect(
-        byosInstallPath({ legacyServerPlan: { status: "past_due" }, hasFreePlan: false }),
+        byosInstallPath({ legacyServerPlan: { status: "past_due" }, hasAvailablePlan: false }),
       ).toBe("checkout")
       expect(
-        byosInstallPath({ legacyServerPlan: { status: "past_due" }, hasFreePlan: true }),
-      ).toBe("use_free_plan")
+        byosInstallPath({ legacyServerPlan: { status: "past_due" }, hasAvailablePlan: true }),
+      ).toBe("use_available_plan")
     })
   })
 

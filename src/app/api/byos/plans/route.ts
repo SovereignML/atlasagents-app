@@ -15,8 +15,8 @@ import { createByosPlanCheckout } from "@/lib/byos-checkout"
  * Buy one BYOS plan — the right to run one agent on a server you own.
  *
  * No server is involved: plans and servers are independent. A plan bought here
- * is free until an install takes it (POST /api/byos/deploy), and a customer can
- * hold as many as they like. Installing with no free plan buys one through its
+ * is available until an install takes it (POST /api/byos/deploy), and a customer can
+ * hold as many as they like. Installing with no available plan buys one through its
  * own Checkout instead, so buying ahead is optional.
  *
  * The Checkout Session carries `metadata.type = "byos_plan"`;
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── Dev mode: no Stripe, record a free plan directly ────────────
+    // ── Dev mode: no Stripe, record an available plan directly ──────
     await db.insert(subscriptions).values({
       userId: effectiveUserId,
       planId: dbPlan.id,

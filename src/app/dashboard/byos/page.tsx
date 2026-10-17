@@ -17,7 +17,7 @@ import { listServersForTeam, MAX_IDLE_SERVERS_PER_TEAM } from "@/lib/byos-server
 import { db, instances, inArray } from "@/db"
 import {
   findLegacyServerPlans,
-  isFreePlan,
+  isAvailablePlan,
   listByosPlans,
   serverLabels,
 } from "@/lib/byos-plan"
@@ -63,8 +63,8 @@ export default async function ByosPage({
     await recoverByosPlanCheckouts(ctx.effectiveUserId)
   }
   const plans = ctx ? await listByosPlans(ctx.effectiveUserId) : []
-  const freeCount = plans.filter(isFreePlan).length
-  const inUseCount = plans.length - freeCount
+  const availableCount = plans.filter(isAvailablePlan).length
+  const inUseCount = plans.length - availableCount
   const agentIds = plans.flatMap((p) => (p.instanceId ? [p.instanceId] : []))
   const agents = agentIds.length
     ? await db
@@ -172,7 +172,7 @@ export default async function ByosPage({
                 <p className="text-sm text-muted-foreground">
                   {plans.length === 0
                     ? "No plans yet. Buy one now, or install an agent and pay for its plan then."
-                    : `${plans.length} ${plans.length === 1 ? "plan" : "plans"} · ${inUseCount} in use · ${freeCount} free`}
+                    : `${plans.length} ${plans.length === 1 ? "plan" : "plans"} · ${inUseCount} in use · ${availableCount} available`}
                 </p>
               </div>
               <BuyPlanButton

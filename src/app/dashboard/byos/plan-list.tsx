@@ -16,7 +16,7 @@ export type PlanRowData = {
   cancelAtPeriodEnd: boolean
   /** Paid up — false while Stripe is retrying a failed payment. */
   allowsInstall: boolean
-  /** The agent this plan covers, or null while it is free. */
+  /** The agent this plan covers, or null while it is available. */
   agent: { id: string; name: string } | null
   /** Set on a grandfathered per-server plan, which covers a whole server. */
   serverLabel: string | null
@@ -32,7 +32,7 @@ function statusLine(plan: PlanRowData): string {
 
 /**
  * The customer's BYOS plans, one row per plan. Each plan covers one agent, or
- * is free for the next install. Cancelling takes effect at the end of the paid
+ * is available for the next install. Cancelling takes effect at the end of the paid
  * period, and can be undone until then.
  */
 export function PlanList({ plans }: { plans: PlanRowData[] }) {
@@ -82,7 +82,7 @@ export function PlanList({ plans }: { plans: PlanRowData[] }) {
                     {plan.agent.name}
                   </Link>
                 ) : (
-                  <span className="text-muted-foreground">Free — ready for your next agent</span>
+                  <span className="text-muted-foreground">Available — ready for your next agent</span>
                 )}
               </p>
               <p

@@ -123,7 +123,7 @@ async function handlePaidSubscriptionCheckout(
   }
 
   // A BYOS plan bought at install, for an agent deleted before the payment
-  // landed: the customer has paid for a plan, so record it — as a FREE plan
+  // landed: the customer has paid for a plan, so record it — as an AVAILABLE plan
   // their next install takes, not one tied to an agent that no longer exists.
   if (plan.tier === "byos" && instance.status === "deleted") {
     await handleByosPlanCheckout(session, {
@@ -276,7 +276,7 @@ async function trackPurchaseConversion(
 }
 
 // ---------- checkout.session.completed: BYOS plan ----------
-// A BYOS plan bought ahead of an install. Recorded as a FREE plan (no
+// A BYOS plan bought ahead of an install. Recorded as an AVAILABLE plan (no
 // instanceId, no server) — /api/byos/deploy assigns it to the next agent.
 // Nothing is provisioned here. A plan bought AT install carries an instanceId
 // instead and goes through handlePaidSubscriptionCheckout.
@@ -413,7 +413,7 @@ export async function handleSubscriptionDeleted(
   // BYOS: an agent runs for as long as it has a plan — its own, or its
   // server's grandfathered per-server plan. A per-agent plan ending stops its
   // agent; a per-server plan ending stops the agents on that server that have
-  // no plan of their own; a free plan ending stops nothing. No wallet fallback:
+  // no plan of their own; an available plan ending stops nothing. No wallet fallback:
   // BYOS has no compute to bill the wallet for, so a wallet balance is not a
   // plan.
   if (local.byosServerId || local.instance?.deploymentTarget === "byos") {
@@ -585,7 +585,7 @@ export async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> 
   ) {
     // Same propagate-and-retry contract as the plan grant above. Claimed per
     // PLAN, with the same key /api/byos/deploy uses when an install takes a
-    // free plan, so a plan grants its starter credits once however its first
+    // available plan, so a plan grants its starter credits once however its first
     // managed agent arrived — and never again when the plan is reused.
     const byosGrantKey = local.id
     if (await claimEvent("byos_signup_grant", byosGrantKey)) {

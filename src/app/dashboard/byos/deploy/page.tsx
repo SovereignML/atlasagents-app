@@ -6,7 +6,7 @@ import { PageContainer, PageHeader } from "@/components/layout/page-container"
 import { getEffectiveTeam } from "@/lib/effective-user"
 import { BYOS_PLAN, formatUsd } from "@/configs/plans"
 import {
-  countFreeByosPlans,
+  countAvailableByosPlans,
   discardUnpaidByosInstall,
   findLegacyServerPlan,
 } from "@/lib/byos-plan"
@@ -55,8 +55,8 @@ export default async function ByosDeployPage({
 
   // Which plan this install would use — shown on the form, decided again (and
   // atomically) by /api/byos/deploy.
-  const [freePlans, legacyServerPlan] = await Promise.all([
-    countFreeByosPlans(ctx.effectiveUserId),
+  const [availablePlans, legacyServerPlan] = await Promise.all([
+    countAvailableByosPlans(ctx.effectiveUserId),
     findLegacyServerPlan(server.id),
   ])
 
@@ -86,7 +86,7 @@ export default async function ByosDeployPage({
       <ByosInstallForm
         server={installServer}
         planContext={{
-          freePlans,
+          availablePlans,
           coveredByServerPlan: planAllowsInstall(legacyServerPlan?.status),
           priceMonthly: BYOS_PLAN.displayPriceMonthly,
           priceYearly: BYOS_PLAN.displayPriceYearly,

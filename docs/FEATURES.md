@@ -302,7 +302,7 @@ These power the subsystems documented in their own pages.
 
 | Method | Endpoint | Description | Doc |
 |--------|----------|-------------|-----|
-| `POST` | `/api/byos/deploy` | Install an agent onto a connected server (uses a free BYOS plan, or returns a Checkout URL for one) | [BYOS](BYOS.md) |
+| `POST` | `/api/byos/deploy` | Install an agent onto a connected server (uses an available BYOS plan, or returns a Checkout URL for one) | [BYOS](BYOS.md) |
 | `POST` | `/api/byos/plans` | Buy a BYOS plan (one agent) — no server needed | [BYOS](BYOS.md) |
 | `PATCH` | `/api/byos/plans/[subscriptionId]` | Cancel a BYOS plan at period end, or undo that | [BYOS](BYOS.md) |
 | `POST` | `/api/billing/usage-sync` | Poll OpenRouter spend, charge wallet, enforce caps | [Billing](BILLING.md) |

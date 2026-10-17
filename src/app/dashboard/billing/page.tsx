@@ -295,7 +295,7 @@ export default async function BillingPage() {
             ) : sub.plan?.slug === "byos" && sub.status !== "canceled" ? (
               <p className="text-sm text-muted-foreground">
                 <Link href="/dashboard/byos" className="hover:text-foreground">
-                  Free — ready for your next agent
+                  Available — ready for your next agent
                 </Link>
               </p>
             ) : null}

@@ -1,17 +1,17 @@
 // BYOS plans: one plan per agent, bought independently of servers.
 //
 // A BYOS plan is a recurring subscription (plan tier "byos") that entitles ONE
-// agent. It is either free (instanceId NULL — bought ahead, waiting for an
+// agent. It is either available (instanceId NULL — bought ahead, waiting for an
 // install) or assigned (instanceId set — covering that agent). Plans are bought
 // with no server involved, and connecting a server needs no plan. Installing an
-// agent takes a free plan, or opens Checkout for a new one and installs once it
+// agent takes an available plan, or opens Checkout for a new one and installs once it
 // is paid (src/app/api/byos/deploy/route.ts). Deleting the agent frees its plan
 // for the next one; cancelling the plan stops its agent when the paid period
 // ends.
 //
 // Legacy: before this, plans were bought per server (Subscription.byosServerId)
 // and covered every agent on it. Those rows are grandfathered until they end —
-// they keep covering their server and are never handed out as free plans.
+// they keep covering their server and are never handed out as available plans.
 //
 // Pure rules (which statuses count, which path an install takes) are in
 // byos-install.ts.
@@ -47,7 +47,7 @@ export type ByosPlan = {
   currentPeriodEnd: Date | null
   cancelAtPeriodEnd: boolean
   createdAt: Date
-  /** The agent this plan covers, or null while the plan is free. */
+  /** The agent this plan covers, or null while the plan is available. */
   instanceId: string | null
   /** Set only on a grandfathered per-server plan. */
   byosServerId: string | null
@@ -87,7 +87,7 @@ export async function listByosPlans(userId: string): Promise<ByosPlan[]> {
 }
 
 /** A plan that can take a new agent: paid up, unassigned, not a per-server plan. */
-export function isFreePlan(plan: ByosPlan): boolean {
+export function isAvailablePlan(plan: ByosPlan): boolean {
   return (
     plan.instanceId === null &&
     plan.byosServerId === null &&
@@ -96,14 +96,14 @@ export function isFreePlan(plan: ByosPlan): boolean {
 }
 
 /**
- * Assign one of the user's free plans to `instanceId`, atomically. Returns the
- * plan, or null if none is free. Used for a new install, and to bring back an
+ * Assign one of the user's available plans to `instanceId`, atomically. Returns
+ * the plan, or null if none is available. Used for a new install, and to bring back an
  * agent that was stopped when its plan ended.
  *
  * Single statement with FOR UPDATE SKIP LOCKED (the warm pool's claim pattern),
  * so two installs at once can never take the same plan.
  */
-export async function claimFreeByosPlan(
+export async function claimAvailableByosPlan(
   userId: string,
   instanceId: string,
 ): Promise<{ subscriptionId: string; interval: string } | null> {
@@ -275,9 +275,9 @@ export async function byosAgentIdsOnServer(serverId: string): Promise<string[]> 
   return rows.map((r) => r.id)
 }
 
-/** The free plans a user can install onto right now. */
-export async function countFreeByosPlans(userId: string): Promise<number> {
-  return (await listByosPlans(userId)).filter(isFreePlan).length
+/** The available plans a user can install onto right now. */
+export async function countAvailableByosPlans(userId: string): Promise<number> {
+  return (await listByosPlans(userId)).filter(isAvailablePlan).length
 }
 
 /** Servers' labels for plan rows, used by the plan list. */
@@ -292,7 +292,7 @@ export async function serverLabels(serverIds: string[]): Promise<Map<string, str
 
 // ── Installs that were never paid for ──────────────────────────────────
 //
-// An install with no free plan leaves its agent `pending` while the customer is
+// An install with no available plan leaves its agent `pending` while the customer is
 // at Checkout. If they back out, nothing was installed and nothing should stay:
 // the row counts against the team's agent cap (countTeamAgents) and holds its
 // slug. Checkout Sessions expire after 24h, so an older one can't be paid.
@@ -308,7 +308,7 @@ const isUnpaidByosInstall = and(
 
 /**
  * Soft-delete one unpaid BYOS install, scoped to its team. Returns whether it
- * did. A payment that lands afterwards is still recorded — as a free plan
+ * did. A payment that lands afterwards is still recorded — as an available plan
  * (handlePaidSubscriptionCheckout).
  */
 export async function discardUnpaidByosInstall(instanceId: string, teamId: string): Promise<boolean> {

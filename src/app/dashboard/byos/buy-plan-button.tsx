@@ -13,7 +13,7 @@ type Interval = "month" | "year"
 
 /**
  * Buy one BYOS plan — the right to run one agent on a server you own. No
- * server needed: the plan stays free until an install takes it.
+ * server needed: the plan stays available until an install takes it.
  */
 export function BuyPlanButton({
   priceMonthly,

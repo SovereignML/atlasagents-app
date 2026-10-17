@@ -53,7 +53,7 @@ type Runtime = RuntimeId
 // there is no "Server" step: the flow is about the agent, not the machine.
 // Model access is its own step rather than a tail on the server form — it is a
 // billing decision, and burying it under an SSH form hid it. There is no
-// billing step: the agent's BYOS plan is a free plan the customer already has,
+// billing step: the agent's BYOS plan is an available plan the customer already has,
 // or is bought at Checkout from the review step's button (see planContext).
 type Step = "agent" | "model" | "project" | "review"
 
@@ -96,12 +96,12 @@ function gb(mb: number | null): string {
 }
 
 /**
- * How this install gets its BYOS plan. With a free plan (or a grandfathered
+ * How this install gets its BYOS plan. With an available plan (or a grandfathered
  * per-server plan) it installs straight away; otherwise the button goes to
  * Checkout for a new plan and the agent installs once that is paid.
  */
 export type InstallPlanContext = {
-  freePlans: number
+  availablePlans: number
   coveredByServerPlan: boolean
   priceMonthly: number
   priceYearly: number
@@ -118,7 +118,7 @@ export function ByosInstallForm({
 
   const [step, setStep] = useState<Step>("agent")
   const [submitting, setSubmitting] = useState(false)
-  const needsPayment = !planContext.coveredByServerPlan && planContext.freePlans === 0
+  const needsPayment = !planContext.coveredByServerPlan && planContext.availablePlans === 0
   const [interval, setInterval] = useState<"month" | "year">("month")
 
   // Agent step
@@ -242,7 +242,7 @@ export function ByosInstallForm({
           // The server, not a host: the API reads the connection off the
           // connected row so the agent is linked to the machine it lands on.
           byosServerId: server.id,
-          // Only used when no plan is free and this install buys one.
+          // Only used when no plan is available and this install buys one.
           interval,
           llmMode,
           ownApiKey: llmMode === "own_key" ? ownApiKey.trim() : undefined,
@@ -826,9 +826,9 @@ export function ByosInstallForm({
               <p className="text-xs text-muted-foreground">
                 {planContext.coveredByServerPlan
                   ? `Covered by ${server.label}'s server plan.`
-                  : planContext.freePlans > 0
-                    ? `Uses 1 of your ${planContext.freePlans} free BYOS ${
-                        planContext.freePlans === 1 ? "plan" : "plans"
+                  : planContext.availablePlans > 0
+                    ? `Uses 1 of your ${planContext.availablePlans} available BYOS ${
+                        planContext.availablePlans === 1 ? "plan" : "plans"
                       }.`
                     : `Needs a BYOS plan: ${formatUsd(planContext.priceMonthly)}/mo or ${formatUsd(
                         planContext.priceYearly,

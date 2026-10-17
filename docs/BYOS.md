@@ -13,12 +13,12 @@ Related: [BILLING.md](BILLING.md) (the credit-metered LLM mode), [RUNTIMES.md](R
 From **Dashboard → Bring Your Own Server** (`/dashboard/byos`) there are two independent things, and neither needs the other:
 
 - **Servers.** Connect as many as you like, for free (`/dashboard/byos/connect`). The page shows the platform's **fleet public key** (`SSH_FLEET_PUBLIC_KEY`); paste that one line into the `authorized_keys` of the SSH user on your server, then enter host/IP, SSH port (default `22`) and SSH user (default `root`). No agent or daemon to install yourself, and no plan needed.
-- **BYOS plans.** One plan runs **one agent**, on any of your servers. Buy as many as you like, whenever you like, with zero servers connected; a plan nobody is using yet is **free** and waits for your next install. Cancel any one of them at any time.
+- **BYOS plans.** One plan runs **one agent**, on any of your servers. Buy as many as you like, whenever you like, with zero servers connected; a plan nobody is using yet is **available** and waits for your next install. Cancel any one of them at any time.
 
 To **install an agent**, pick a connected server and fill in the wizard (runtime, and how its LLM calls are paid for — see [LLM modes](#llm-modes)). The install button then:
 
-- **uses one of your free plans** and installs straight away, or
-- if none is free, says **Continue to payment**: you pay for a new plan at Stripe, and the agent installs as soon as that's done. Back out of Checkout and nothing is installed — the waiting agent is removed.
+- **uses one of your available plans** and installs straight away, or
+- if none is available, says **Continue to payment**: you pay for a new plan at Stripe, and the agent installs as soon as that's done. Back out of Checkout and nothing is installed — the waiting agent is removed.
 
 **No plan, no agent:** nothing is installed, and there is no agent dashboard, until the agent's plan is paid for. Deleting an agent frees its plan for the next one (it keeps billing until you cancel it).
 
@@ -161,20 +161,20 @@ admin cannot complete a paid BYOS install without the customer's payment method.
 
 ### Billing path ([`src/lib/byos-plan.ts`](../src/lib/byos-plan.ts))
 
-A plan belongs to **one agent**, never to a server. A plan is a `Subscription` on the `byos` plan that is either **free** (`instanceId` NULL) or **assigned** (`instanceId` set).
+A plan belongs to **one agent**, never to a server. A plan is a `Subscription` on the `byos` plan that is either **available** (`instanceId` NULL) or **assigned** (`instanceId` set).
 
-- **Buying ahead.** `POST /api/byos/plans` opens a recurring Stripe Checkout (`mode: "subscription"`, `metadata.type = "byos_plan"`, no server). `handleByosPlanCheckout` records a free plan. In dev mode without Stripe it writes an active free plan directly.
+- **Buying ahead.** `POST /api/byos/plans` opens a recurring Stripe Checkout (`mode: "subscription"`, `metadata.type = "byos_plan"`, no server). `handleByosPlanCheckout` records an available plan. In dev mode without Stripe it writes an active available plan directly.
 - **Installing.** `POST /api/byos/deploy` inserts the agent `pending`, then `byosInstallPath()` ([`byos-install.ts`](../src/lib/byos-install.ts)) picks how it is covered:
   - a grandfathered per-server plan on that server (below) — install now;
-  - else `claimFreeByosPlan()` — one atomic `UPDATE … FOR UPDATE SKIP LOCKED`, so two installs can't take the same plan — install now;
+  - else `claimAvailableByosPlan()` — one atomic `UPDATE … FOR UPDATE SKIP LOCKED`, so two installs can't take the same plan — install now;
   - else **Checkout**: a session carrying the agent's `instanceId` (no `type`). `handlePaidSubscriptionCheckout` — the managed pay-then-provision path — records the plan against that agent and provisions it. `recoverPaidCheckout` covers a late webhook from the agent page (the session's `success_url`).
   - A plan in `past_due` is never handed to a new install.
-- **Unpaid installs.** Backing out of Checkout returns to the install page with `?abandoned=<id>`, which soft-deletes that agent (`discardUnpaidByosInstall`). The 60s background sweep removes any left `pending` with no plan after 25h (`reapUnpaidByosInstalls`), since a Checkout Session can't be paid after 24h. A payment that lands for an agent already removed is recorded as a free plan.
+- **Unpaid installs.** Backing out of Checkout returns to the install page with `?abandoned=<id>`, which soft-deletes that agent (`discardUnpaidByosInstall`). The 60s background sweep removes any left `pending` with no plan after 25h (`reapUnpaidByosInstalls`), since a Checkout Session can't be paid after 24h. A payment that lands for an agent already removed is recorded as an available plan.
 - **Webhook recovery.** Plans bought ahead are recovered by `recoverByosPlanCheckouts(userId)` (called from `/dashboard/byos?plan=bought`, the success URL, and from the install route) and by the 60s sweep. All paths share the `stripe_checkout:<session id>` claim.
 - **Deleting an agent frees its plan** (`releaseByosPlan`) instead of cancelling it in Stripe. The next install takes it.
-- **Ending a plan.** Cancel from `/dashboard/byos` (`PATCH /api/byos/plans/[subscriptionId]`, `{ "cancelAtPeriodEnd": true }`, reversible until the period ends) or from the Stripe billing portal. A cancel takes effect at period end, so the agent runs through every month that was paid for. On `customer.subscription.deleted` the plan's agent is **stopped** (`pauseBot` — systemd stop, nothing deleted) by `stopUncoveredByosAgents`. There is no wallet fallback for BYOS. Restarting a stopped agent takes a free plan if the owner has one, and is otherwise refused (`402`).
+- **Ending a plan.** Cancel from `/dashboard/byos` (`PATCH /api/byos/plans/[subscriptionId]`, `{ "cancelAtPeriodEnd": true }`, reversible until the period ends) or from the Stripe billing portal. A cancel takes effect at period end, so the agent runs through every month that was paid for. On `customer.subscription.deleted` the plan's agent is **stopped** (`pauseBot` — systemd stop, nothing deleted) by `stopUncoveredByosAgents`. There is no wallet fallback for BYOS. Restarting a stopped agent takes an available plan if the owner has one, and is otherwise refused (`402`).
 - **Disconnecting a server** is never blocked by per-agent plans — only by agents still on it (and by a grandfathered per-server plan that will renew).
-- **Legacy per-server plans.** Between PR #19 and per-agent plans, a plan was bought per server (`Subscription.byosServerId`) and covered every agent on it. Those rows are grandfathered: they keep covering their server until they end, are never handed out as free plans, and their end stops only the server's agents that have no plan of their own. Older per-agent rows (from before #19) are simply assigned plans.
+- **Legacy per-server plans.** Between PR #19 and per-agent plans, a plan was bought per server (`Subscription.byosServerId`) and covered every agent on it. Those rows are grandfathered: they keep covering their server until they end, are never handed out as available plans, and their end stops only the server's agents that have no plan of their own. Older per-agent rows (from before #19) are simply assigned plans.
 
 ### Instance columns (on the `instances` table)
 
@@ -204,7 +204,7 @@ Auth: user session, resolved through `getEffectiveTeam()` (see
   "byosServerId": "clx...",   // a connected server
   "llmMode": "managed_credits", // or "own_key"
   "ownApiKey": "sk-...",      // required iff llmMode === "own_key"
-  "interval": "month",        // only used when no plan is free and this install buys one
+  "interval": "month",        // only used when no plan is available and this install buys one
   "agentConfig": { /* optional; deployment_target is forced to "byos" */ }
 }
 ```

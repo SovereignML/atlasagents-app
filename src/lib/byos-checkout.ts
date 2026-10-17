@@ -2,8 +2,8 @@
 //
 // Two callers, one session shape:
 // - Buying a plan ahead of time (POST /api/byos/plans). `metadata.type =
-//   "byos_plan"`; handleByosPlanCheckout records it as a FREE plan.
-// - Installing with no free plan (POST /api/byos/deploy). Carries the pending
+//   "byos_plan"`; handleByosPlanCheckout records it as an AVAILABLE plan.
+// - Installing with no available plan (POST /api/byos/deploy). Carries the pending
 //   agent's `instanceId` and no `type`, so handlePaidSubscriptionCheckout
 //   records the plan ASSIGNED to that agent and provisions it — the same
 //   pay-then-provision path managed deploys use, including checkout-recovery.
@@ -19,7 +19,7 @@ export type ByosCheckoutInput = {
   /** The plan's owner — the customer, also under impersonation. */
   userId: string
   interval: "month" | "year"
-  /** The pending agent this plan is bought for, or absent for a free plan. */
+  /** The pending agent this plan is bought for, or absent for an available plan. */
   instance?: { id: string; name: string }
   successUrl: string
   cancelUrl: string

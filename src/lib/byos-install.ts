@@ -85,7 +85,7 @@ export function platformOwnsHostVm(deploymentTarget: string | null | undefined):
 //
 // A BYOS plan entitles ONE agent. Plans are bought on their own (no server
 // needed) and sit unassigned until an install takes one; connecting a server
-// is free and needs no plan. Installing uses a free plan, or opens Checkout for
+// is free and needs no plan. Installing uses an available plan, or opens Checkout for
 // a new one and installs once it is paid. These are the pure rules — the
 // lookups live in byos-plan.ts.
 //
@@ -117,24 +117,24 @@ export const LIVE_PLAN_STATUS_LIST = [...LIVE_PLAN_STATUSES]
 /** The statuses `planAllowsInstall` accepts, for building a DB filter. */
 export const INSTALLABLE_PLAN_STATUS_LIST = [...INSTALLABLE_PLAN_STATUSES]
 
-export type ByosInstallPath = "legacy_server_plan" | "use_free_plan" | "checkout"
+export type ByosInstallPath = "legacy_server_plan" | "use_available_plan" | "checkout"
 
 /**
  * How a new agent gets its plan.
  *
  * A grandfathered per-server plan comes first: it already covers every agent
- * on its server, so spending one of the customer's free per-agent plans there
- * would waste it. Then a free plan. Otherwise the install goes through Checkout
+ * on its server, so spending one of the customer's available per-agent plans there
+ * would waste it. Then an available plan. Otherwise the install goes through Checkout
  * for a new plan, and the agent is installed once that is paid.
  */
 export function byosInstallPath(input: {
   legacyServerPlan: { status: string } | null
-  hasFreePlan: boolean
+  hasAvailablePlan: boolean
 }): ByosInstallPath {
   if (input.legacyServerPlan && planAllowsInstall(input.legacyServerPlan.status)) {
     return "legacy_server_plan"
   }
-  return input.hasFreePlan ? "use_free_plan" : "checkout"
+  return input.hasAvailablePlan ? "use_available_plan" : "checkout"
 }
 
 /**
