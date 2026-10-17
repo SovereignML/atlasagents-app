@@ -3,6 +3,7 @@ import { auth } from "@/auth"
 import { getEffectiveUserId } from "@/lib/effective-user"
 import { db, instances, subscriptions, eq } from "@/db"
 import { deleteBot } from "@/lib/provisioner"
+import { releaseByosPlan } from "@/lib/byos-plan"
 import { getInstanceAccessLevel } from "@/lib/instance-access"
 import { IllegalTransitionError } from "@/lib/instance-state"
 import { stripe, isStripeConfigured } from "@/lib/stripe"
@@ -51,9 +52,16 @@ export async function DELETE(
     )
   }
 
-  const sub = await db.query.subscriptions.findFirst({
-    where: eq(subscriptions.instanceId, instanceId),
-  })
+  // A BYOS agent's plan is not the agent's to cancel: plans are bought on
+  // their own, and deleting the agent frees its plan for the next install. The
+  // customer cancels plans from /dashboard/byos.
+  const freedByosPlan =
+    instance.deploymentTarget === "byos" && (await releaseByosPlan(instanceId))
+  const sub = freedByosPlan
+    ? null
+    : await db.query.subscriptions.findFirst({
+        where: eq(subscriptions.instanceId, instanceId),
+      })
   if (sub) {
     if (isStripeConfigured() && sub.stripeSubscriptionId) {
       try {

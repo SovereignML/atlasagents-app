@@ -292,6 +292,12 @@ export default async function BillingPage() {
                   Server: {sub.byosServer.label}
                 </Link>
               </p>
+            ) : sub.plan?.slug === "byos" && sub.status !== "canceled" ? (
+              <p className="text-sm text-muted-foreground">
+                <Link href="/dashboard/byos" className="hover:text-foreground">
+                  Free — ready for your next agent
+                </Link>
+              </p>
             ) : null}
             {sub.currentPeriodEnd && (
               <p className="font-mono text-[11px] text-muted-foreground">

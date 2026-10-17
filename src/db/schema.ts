@@ -210,13 +210,12 @@ export const subscriptions = pgTable(
     // src/lib/stripe-connect-events.ts.
     connectAccountId: text(),
     teamId: text().references(() => teams.id),
-    // BYOS plan (per server). Set on a subscription bought for a connected
-    // server — that row has NO instanceId: the plan is what lets the team
-    // install agents onto that server, however many. NULL for every other
-    // subscription, including legacy BYOS rows that were bought per agent
-    // (those carry instanceId and still entitle their agent's server; see
-    // src/lib/byos-plan.ts). SET NULL so a hard-deleted server can't take the
-    // billing record with it — disconnect is refused while a plan is live.
+    // LEGACY per-server BYOS plan. BYOS plans are now one per agent (instanceId
+    // set, or NULL while the plan is free — see src/lib/byos-plan.ts) and never
+    // set this. A row that does was bought for a connected server before that
+    // change and is grandfathered: it covers every agent on the server until it
+    // ends. SET NULL so a hard-deleted server can't take the billing record
+    // with it — disconnect is refused while such a plan will renew.
     byosServerId: text().references(() => byosServers.id, { onDelete: "set null" }),
     createdAt: now(),
     updatedAt: timestamp({ mode: "date", withTimezone: false })

@@ -14,21 +14,36 @@ import {
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
 import { getEffectiveTeam } from "@/lib/effective-user"
 import { listServersForTeam, MAX_IDLE_SERVERS_PER_TEAM } from "@/lib/byos-server"
-import { findByosPlans } from "@/lib/byos-plan"
+import { db, instances, inArray } from "@/db"
+import {
+  findLegacyServerPlans,
+  isFreePlan,
+  listByosPlans,
+  serverLabels,
+} from "@/lib/byos-plan"
 import { planAllowsInstall } from "@/lib/byos-install"
+import { recoverByosPlanCheckouts } from "@/lib/checkout-recovery"
 import { BYOS_PLAN, formatUsd } from "@/configs/plans"
+import { BuyPlanButton } from "./buy-plan-button"
+import { PlanList, type PlanRowData } from "./plan-list"
 import { ServerCard, type ServerCardData } from "./server-card"
 
 const PLAN_FEATURES = [
-  "Connecting a server is free",
-  "One plan covers every agent on its server",
+  "Connecting servers is free — no plan needed",
+  "One plan runs one agent, on any of your servers",
+  "Buy plans ahead, or at install",
+  "Cancel any time; it runs to the end of the period",
   "Live specs and health monitoring",
   "Managed updates & backups",
   "Bring your own LLM key, or use credits",
   "No vendor lock-in",
 ]
 
-export default async function ByosPage() {
+export default async function ByosPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ plan?: string }>
+}) {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
   // Resolve through impersonation so an admin viewing-as a user sees their
@@ -40,7 +55,36 @@ export default async function ByosPage() {
 
   const servers = ctx ? await listServersForTeam(ctx.teamId) : []
   const idleUsed = servers.filter((s) => s.agentCount === 0).length
-  const plans = await findByosPlans(servers.map((s) => s.id))
+  const legacyPlans = await findLegacyServerPlans(servers.map((s) => s.id))
+
+  // Back from buying a plan: if the webhook hasn't recorded it yet, ask Stripe
+  // so the new plan shows up now.
+  if (ctx && (await searchParams).plan === "bought") {
+    await recoverByosPlanCheckouts(ctx.effectiveUserId)
+  }
+  const plans = ctx ? await listByosPlans(ctx.effectiveUserId) : []
+  const freeCount = plans.filter(isFreePlan).length
+  const inUseCount = plans.length - freeCount
+  const agentIds = plans.flatMap((p) => (p.instanceId ? [p.instanceId] : []))
+  const agents = agentIds.length
+    ? await db
+        .select({ id: instances.id, name: instances.name })
+        .from(instances)
+        .where(inArray(instances.id, agentIds))
+    : []
+  const agentById = new Map(agents.map((a) => [a.id, a]))
+  const labels = await serverLabels(
+    plans.flatMap((p) => (p.byosServerId ? [p.byosServerId] : [])),
+  )
+  const planRows: PlanRowData[] = plans.map((p) => ({
+    subscriptionId: p.subscriptionId,
+    interval: p.interval,
+    currentPeriodEnd: p.currentPeriodEnd?.toISOString() ?? null,
+    cancelAtPeriodEnd: p.cancelAtPeriodEnd,
+    allowsInstall: planAllowsInstall(p.status),
+    agent: p.instanceId ? (agentById.get(p.instanceId) ?? null) : null,
+    serverLabel: p.byosServerId ? (labels.get(p.byosServerId) ?? "a disconnected server") : null,
+  }))
 
   const cards: ServerCardData[] = servers.map((s) => ({
     id: s.id,
@@ -60,13 +104,11 @@ export default async function ByosPage() {
     hwKernel: s.hwKernel,
     capacityAgents: s.capacityAgents,
     agentCount: s.agentCount,
-    plan: (() => {
-      const p = plans.get(s.id)
+    legacyPlan: (() => {
+      const p = legacyPlans.get(s.id)
       return p
         ? {
-            status: p.status,
             allowsInstall: planAllowsInstall(p.status),
-            interval: p.interval,
             currentPeriodEnd: p.currentPeriodEnd?.toISOString() ?? null,
             cancelAtPeriodEnd: p.cancelAtPeriodEnd,
           }
@@ -78,7 +120,7 @@ export default async function ByosPage() {
     <PageContainer>
       <PageHeader
         title="Your servers"
-        description="Run managed agents on hardware you own. Connecting a server is free — buy a BYOS plan for a server to install agents on it."
+        description="Run managed agents on hardware you own. Connecting a server is free; each agent you install needs a BYOS plan."
       />
 
       <div className="grid grid-cols-1 items-start gap-[18px] lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -118,15 +160,28 @@ export default async function ByosPage() {
           ) : (
             <div className="space-y-[18px]">
               {cards.map((s) => (
-                <ServerCard
-                  key={s.id}
-                  server={s}
-                  priceMonthly={BYOS_PLAN.displayPriceMonthly}
-                  priceYearly={BYOS_PLAN.displayPriceYearly}
-                />
+                <ServerCard key={s.id} server={s} />
               ))}
             </div>
           )}
+
+          <section className="space-y-[18px] pt-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">BYOS plans</h2>
+                <p className="text-sm text-muted-foreground">
+                  {plans.length === 0
+                    ? "No plans yet. Buy one now, or install an agent and pay for its plan then."
+                    : `${plans.length} ${plans.length === 1 ? "plan" : "plans"} · ${inUseCount} in use · ${freeCount} free`}
+                </p>
+              </div>
+              <BuyPlanButton
+                priceMonthly={BYOS_PLAN.displayPriceMonthly}
+                priceYearly={BYOS_PLAN.displayPriceYearly}
+              />
+            </div>
+            {planRows.length > 0 && <PlanList plans={planRows} />}
+          </section>
         </div>
 
         <aside className="rounded-2xl border border-border bg-card p-6">
@@ -135,11 +190,11 @@ export default async function ByosPage() {
           </p>
           <p className="mt-2 text-3xl font-semibold text-foreground">
             {formatUsd(BYOS_PLAN.displayPriceMonthly)}
-            <span className="ml-1 text-sm font-normal text-muted-foreground">/mo per server</span>
+            <span className="ml-1 text-sm font-normal text-muted-foreground">/mo per agent</span>
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Or {formatUsd(BYOS_PLAN.displayPriceYearly)}/yr. Buy it for the servers you want to
-            run agents on; connected servers without a plan cost nothing.
+            Or {formatUsd(BYOS_PLAN.displayPriceYearly)}/yr. One plan per agent, on whichever of
+            your servers you like. Connected servers cost nothing.
           </p>
           <ul className="mt-5 space-y-2 border-t border-border pt-5 text-sm text-muted-foreground">
             {PLAN_FEATURES.map((f) => (

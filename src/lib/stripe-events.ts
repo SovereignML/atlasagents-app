@@ -122,6 +122,17 @@ async function handlePaidSubscriptionCheckout(
     return
   }
 
+  // A BYOS plan bought at install, for an agent deleted before the payment
+  // landed: the customer has paid for a plan, so record it — as a FREE plan
+  // their next install takes, not one tied to an agent that no longer exists.
+  if (plan.tier === "byos" && instance.status === "deleted") {
+    await handleByosPlanCheckout(session, {
+      userId: instance.userId,
+      interval: metadata.interval,
+    })
+    return
+  }
+
   const stripeSubscriptionId =
     typeof session.subscription === "string"
       ? session.subscription
@@ -265,18 +276,22 @@ async function trackPurchaseConversion(
 }
 
 // ---------- checkout.session.completed: BYOS plan ----------
-// A plan bought for one connected server. Records the Subscription against the
-// server (byosServerId, no instanceId) — that row is what /api/byos/deploy
-// checks before installing. Nothing is provisioned here: buying a plan and
-// installing an agent are separate steps.
+// A BYOS plan bought ahead of an install. Recorded as a FREE plan (no
+// instanceId, no server) — /api/byos/deploy assigns it to the next agent.
+// Nothing is provisioned here. A plan bought AT install carries an instanceId
+// instead and goes through handlePaidSubscriptionCheckout.
+//
+// Sessions opened before per-agent plans carry `byosServerId`; one paid after
+// the switch is still recorded against its server, as the grandfathered
+// per-server plan the customer was shown.
 
 async function handleByosPlanCheckout(
   session: Stripe.Checkout.Session,
   metadata: { userId?: string; byosServerId?: string; interval?: "month" | "year" },
 ): Promise<void> {
   const { byosServerId, userId } = metadata
-  if (!byosServerId || !userId) {
-    console.warn(`[stripe] byos_plan checkout ${session.id} missing byosServerId/userId`)
+  if (!userId) {
+    console.warn(`[stripe] byos_plan checkout ${session.id} missing userId`)
     return
   }
   const plan = await db.query.plans.findFirst({ where: eq(plans.slug, "byos") })
@@ -285,16 +300,12 @@ async function handleByosPlanCheckout(
     // plan row exists — the customer has paid.
     throw new Error(`[stripe] byos plan row missing for checkout ${session.id}`)
   }
-  const server = await db.query.byosServers.findFirst({
-    where: eq(byosServers.id, byosServerId),
-    columns: { id: true, label: true },
-  })
-  // The server can be disconnected between checkout and payment. Still record
-  // the subscription (they paid, and Billing must show it so it can be
-  // canceled), just unlinked.
-  if (!server) {
-    console.warn(`[stripe] byos_plan checkout ${session.id}: server ${byosServerId} is gone`)
-  }
+  const server = byosServerId
+    ? await db.query.byosServers.findFirst({
+        where: eq(byosServers.id, byosServerId),
+        columns: { id: true },
+      })
+    : null
 
   const stripeSubscriptionId =
     typeof session.subscription === "string"
@@ -320,24 +331,20 @@ async function handleByosPlanCheckout(
     .values({ userId, planId: plan.id, stripeSubscriptionId, ...values })
     .onConflictDoUpdate({ target: subscriptions.stripeSubscriptionId, set: values })
 
-  console.log(
-    `[stripe] BYOS plan ${stripeSubscriptionId} active for server ${byosServerId} (user ${userId})`,
-  )
-  if (server) {
-    await notify({
-      userId,
-      category: "billing",
-      type: "byos_plan_active",
-      title: `BYOS plan active for ${server.label}`,
-      message: `You can now install agents on ${server.label}.`,
-      url: `/dashboard/byos/deploy?serverId=${server.id}`,
-    })
-  }
+  console.log(`[stripe] BYOS plan ${stripeSubscriptionId} active (user ${userId})`)
+  await notify({
+    userId,
+    category: "billing",
+    type: "byos_plan_active",
+    title: "BYOS plan active",
+    message: "You can install one more agent on a server you own.",
+    url: "/dashboard/byos",
+  })
 
   posthogServer.capture({
     distinctId: userId,
     event: "subscription_changed",
-    properties: { action: "created", plan: "byos", interval, byosServerId },
+    properties: { action: "created", plan: "byos", interval },
   })
   await trackPurchaseConversion(userId, session)
 }
@@ -403,17 +410,18 @@ export async function handleSubscriptionDeleted(
     },
   })
 
-  // BYOS: an agent runs for as long as its SERVER has a plan. That covers both
-  // a per-server plan ending and a legacy per-agent subscription ending — in
-  // either case the server's agents stop only if nothing else still covers the
-  // server. No wallet fallback: BYOS has no compute to bill the wallet for, so
-  // a wallet balance is not a plan.
-  const byosServerId =
-    local.byosServerId ??
-    (local.instance?.deploymentTarget === "byos" ? local.instance.byosServerId : null)
-  if (byosServerId) {
-    const { stopAgentsOnUncoveredServer } = await import("@/lib/byos-plan")
-    await stopAgentsOnUncoveredServer(byosServerId)
+  // BYOS: an agent runs for as long as it has a plan — its own, or its
+  // server's grandfathered per-server plan. A per-agent plan ending stops its
+  // agent; a per-server plan ending stops the agents on that server that have
+  // no plan of their own; a free plan ending stops nothing. No wallet fallback:
+  // BYOS has no compute to bill the wallet for, so a wallet balance is not a
+  // plan.
+  if (local.byosServerId || local.instance?.deploymentTarget === "byos") {
+    const { byosAgentIdsOnServer, stopUncoveredByosAgents } = await import("@/lib/byos-plan")
+    const agentIds = local.byosServerId
+      ? await byosAgentIdsOnServer(local.byosServerId)
+      : [local.instance!.id]
+    await stopUncoveredByosAgents(agentIds)
     return
   }
 
@@ -575,10 +583,12 @@ export async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> 
     byosInstance?.byosLlmMode === "managed_credits" &&
     invoice.billing_reason === "subscription_create"
   ) {
-    // Same propagate-and-retry contract as the plan grant above, with its own
-    // per-invoice sub-claim so the retry deposits at most once.
-    const byosGrantKey = `byos_signup_grant:${invoice.id}`
-    if (await claimEvent("stripe", byosGrantKey)) {
+    // Same propagate-and-retry contract as the plan grant above. Claimed per
+    // PLAN, with the same key /api/byos/deploy uses when an install takes a
+    // free plan, so a plan grants its starter credits once however its first
+    // managed agent arrived — and never again when the plan is reused.
+    const byosGrantKey = local.id
+    if (await claimEvent("byos_signup_grant", byosGrantKey)) {
       try {
         await fundWallet(
           local.userId,
@@ -592,7 +602,7 @@ export async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> 
           `[stripe] Granted ${BYOS_SIGNUP_CREDITS} BYOS signup credits to user ${local.userId} (invoice ${invoice.id})`,
         )
       } catch (err) {
-        await releaseEvent("stripe", byosGrantKey)
+        await releaseEvent("byos_signup_grant", byosGrantKey)
         throw err
       }
     }

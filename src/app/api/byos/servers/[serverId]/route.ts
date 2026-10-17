@@ -3,7 +3,7 @@ import { auth } from "@/auth"
 import { db, byosServers, instances, and, eq, ne, sql } from "@/db"
 import { getEffectiveTeam } from "@/lib/effective-user"
 import { refreshServer } from "@/lib/byos-server"
-import { findByosPlan } from "@/lib/byos-plan"
+import { findLegacyServerPlan } from "@/lib/byos-plan"
 import { apiError } from "@/lib/api-error"
 
 /**
@@ -48,10 +48,11 @@ export async function POST(
  * nothing on the machine is touched — it is the customer's hardware, and
  * "disconnect" means we stop managing it, not that we go and delete things.
  *
- * Refused while agents are installed (they are running; delete them first),
- * and while the server has a BYOS plan that will renew — disconnecting would
- * leave a subscription billing for a server nobody can see. A plan already set
- * to cancel at period end doesn't block it.
+ * Refused while agents are installed (they are running; delete them first).
+ * BYOS plans belong to agents, not servers, so they never block it — except a
+ * grandfathered per-server plan that will renew, since disconnecting would
+ * leave it billing for a server nobody can see. One already set to cancel at
+ * period end doesn't block it.
  */
 export async function DELETE(
   _req: NextRequest,
@@ -82,7 +83,7 @@ export async function DELETE(
       )
     }
 
-    const plan = await findByosPlan(serverId)
+    const plan = await findLegacyServerPlan(serverId)
     if (plan && !plan.cancelAtPeriodEnd) {
       return NextResponse.json(
         {
