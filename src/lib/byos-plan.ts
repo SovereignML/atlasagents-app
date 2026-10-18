@@ -35,6 +35,7 @@ import {
   INSTALLABLE_PLAN_STATUS_LIST,
   LIVE_PLAN_STATUS_LIST,
   pickBestPlan,
+  planIsLive,
 } from "@/lib/byos-install"
 import { logInstanceEvent } from "@/lib/instance-state"
 import { notify } from "@/lib/notifications/dispatch"
@@ -190,25 +191,46 @@ export async function findLegacyServerPlan(serverId: string): Promise<ByosPlan |
   return (await findLegacyServerPlans([serverId])).get(serverId) ?? null
 }
 
-/** Whether a BYOS agent is allowed to run right now: its own plan, or its server's legacy plan. */
+/**
+ * Whether a BYOS agent is allowed to run right now: its own plan, its server's
+ * legacy plan, or — for an agent that never had a plan of its own — a live plan
+ * on another agent on the same server.
+ *
+ * That last rule grandfathers the per-server era: a plan bought per agent
+ * before it counted as a plan for its whole server, so agents installed then
+ * carry no Subscription row and lean on a sibling's. An agent installed since
+ * always gets its own row, and a row stays pointed at its agent after the plan
+ * ends, so a lapsed agent can't fall back on a sibling's plan.
+ */
 export async function byosAgentIsCovered(instance: {
   id: string
   deploymentTarget: string | null
   byosServerId: string | null
 }): Promise<boolean> {
   if (instance.deploymentTarget !== "byos") return true
-  const own = await db
+  const ownRows = await db
+    .select({ status: subscriptions.status })
+    .from(subscriptions)
+    .where(eq(subscriptions.instanceId, instance.id))
+  if (ownRows.some((r) => planIsLive(r.status))) return true
+  if (!instance.byosServerId) return false
+  if (await findLegacyServerPlan(instance.byosServerId)) return true
+  if (ownRows.length > 0) return false
+  const sibling = await db
     .select({ id: subscriptions.id })
     .from(subscriptions)
+    .innerJoin(instances, eq(subscriptions.instanceId, instances.id))
     .where(
       and(
-        eq(subscriptions.instanceId, instance.id),
+        eq(instances.byosServerId, instance.byosServerId),
+        ne(instances.id, instance.id),
+        ne(instances.status, "deleted"),
+        isByosTier,
         inArray(subscriptions.status, LIVE_PLAN_STATUS_LIST),
       ),
     )
     .limit(1)
-  if (own.length > 0) return true
-  return instance.byosServerId ? !!(await findLegacyServerPlan(instance.byosServerId)) : false
+  return sibling.length > 0
 }
 
 /**
