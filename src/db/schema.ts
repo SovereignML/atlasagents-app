@@ -211,7 +211,7 @@ export const subscriptions = pgTable(
     connectAccountId: text(),
     teamId: text().references(() => teams.id),
     // LEGACY per-server BYOS plan. BYOS plans are now one per agent (instanceId
-    // set, or NULL while the plan is free — see src/lib/byos-plan.ts) and never
+    // set, or NULL while the plan is available — see src/lib/byos-plan.ts) and never
     // set this. A row that does was bought for a connected server before that
     // change and is grandfathered: it covers every agent on the server until it
     // ends. SET NULL so a hard-deleted server can't take the billing record

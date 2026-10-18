@@ -410,17 +410,15 @@ export async function handleSubscriptionDeleted(
     },
   })
 
-  // BYOS: an agent runs for as long as it has a plan — its own, or its
-  // server's grandfathered per-server plan. A per-agent plan ending stops its
-  // agent; a per-server plan ending stops the agents on that server that have
-  // no plan of their own; an available plan ending stops nothing. No wallet fallback:
-  // BYOS has no compute to bill the wallet for, so a wallet balance is not a
-  // plan.
+  // BYOS: an agent runs for as long as it has a plan (byosAgentIsCovered). A
+  // plan ending re-checks every agent on its server, since grandfathered agents
+  // can lean on a server's plan or on a sibling's; an available plan ending
+  // stops nothing. No wallet fallback: BYOS has no compute to bill the wallet
+  // for, so a wallet balance is not a plan.
   if (local.byosServerId || local.instance?.deploymentTarget === "byos") {
     const { byosAgentIdsOnServer, stopUncoveredByosAgents } = await import("@/lib/byos-plan")
-    const agentIds = local.byosServerId
-      ? await byosAgentIdsOnServer(local.byosServerId)
-      : [local.instance!.id]
+    const serverId = local.byosServerId ?? local.instance!.byosServerId
+    const agentIds = serverId ? await byosAgentIdsOnServer(serverId) : [local.instance!.id]
     await stopUncoveredByosAgents(agentIds)
     return
   }
