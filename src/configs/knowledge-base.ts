@@ -120,7 +120,7 @@ export const KB_FAQS: KbFaq[] = [
   {
     question: "How does billing & credits work?",
     answer:
-      "You buy credits that cover real LLM usage at cost plus a small margin. Managed agents are billed daily; BYOS is a flat monthly fee per connected server.",
+      "You buy credits that cover real LLM usage at cost plus a small margin. Managed agents are billed daily; BYOS is a flat monthly fee per agent; connecting a server is free.",
     anchor: "billing",
   },
   {

@@ -13,10 +13,12 @@
 // so the webhook and this path can race freely — whichever claims first
 // processes the payment, the other no-ops.
 //
-// BYOS plans get the same treatment. A plan is bought for a connected server,
-// not an instance, so there is no `pending` row to find: the install page (the
-// plan's success_url) asks about its server, and the sweep scans recent paid
-// `byos_plan` sessions that never produced a Subscription row.
+// BYOS plans bought ahead of an install get the same treatment. Such a plan is
+// not tied to an instance, so there is no `pending` row to find: the BYOS page
+// (the plan's success_url) asks about the customer's sessions, and the sweep
+// scans recent paid `byos_plan` sessions that never produced a Subscription
+// row. A plan bought AT install carries the pending agent's instanceId, so the
+// instance path above covers it.
 
 import type Stripe from "stripe"
 import { db, instances, subscriptions, users, eq, and, gt } from "@/db"
@@ -98,16 +100,28 @@ function isByosPlanSession(s: Stripe.Checkout.Session): boolean {
   return s.metadata?.type === "byos_plan" && isPaid(s)
 }
 
+/** Whether a paid session's subscription already has a local row. */
+async function isRecorded(session: Stripe.Checkout.Session): Promise<boolean> {
+  const subId =
+    typeof session.subscription === "string" ? session.subscription : session.subscription?.id
+  if (!subId) return true // nothing to record against
+  const local = await db.query.subscriptions.findFirst({
+    where: eq(subscriptions.stripeSubscriptionId, subId),
+    columns: { id: true },
+  })
+  return !!local
+}
+
 /**
- * The install page for `serverId` found no plan. If Stripe holds a paid
- * `byos_plan` session for it (the customer just came back from Checkout and
- * the webhook hasn't landed, or never will), record the plan now. Awaited —
- * it is a few DB writes, and the caller re-reads the plan straight after.
- * Never throws; throttled per server.
+ * The customer just came back from buying a BYOS plan (the BYOS page is that
+ * checkout's success_url). If Stripe holds paid `byos_plan` sessions of theirs
+ * that never produced a Subscription row — the webhook hasn't landed, or never
+ * will — record them now. Awaited: it is a few DB writes, and the caller
+ * re-reads the plans straight after. Never throws; throttled per user.
  */
-export async function recoverByosPlanCheckout(serverId: string, userId: string): Promise<boolean> {
+export async function recoverByosPlanCheckouts(userId: string): Promise<boolean> {
   if (!isStripeConfigured()) return false
-  const key = `byos_plan:${serverId}`
+  const key = `byos_plan:${userId}`
   const now = Date.now()
   if (now - (lastLookupAt.get(key) ?? 0) < LOOKUP_MIN_INTERVAL_MS) return false
   lastLookupAt.set(key, now)
@@ -123,18 +137,19 @@ export async function recoverByosPlanCheckout(serverId: string, userId: string):
       created: { gte: Math.floor((now - MAX_PENDING_AGE_MS) / 1000) },
       limit: 100,
     })
-    const session = sessions.data.find(
-      (s) => isByosPlanSession(s) && s.metadata?.byosServerId === serverId,
-    )
-    if (!session) return false
-    console.warn(
-      `[checkout-recovery] BYOS plan session ${session.id} for server ${serverId} is paid but ` +
-        `unrecorded — the webhook never processed it. Recording now.`,
-    )
-    await handleCheckoutSessionCompleted(session)
-    return true
+    let recovered = false
+    for (const session of sessions.data) {
+      if (!isByosPlanSession(session) || (await isRecorded(session))) continue
+      console.warn(
+        `[checkout-recovery] BYOS plan session ${session.id} is paid but unrecorded — ` +
+          `the webhook never processed it. Recording now.`,
+      )
+      await handleCheckoutSessionCompleted(session)
+      recovered = true
+    }
+    return recovered
   } catch (err) {
-    console.error(`[checkout-recovery] BYOS plan lookup failed for server ${serverId}:`, err)
+    console.error(`[checkout-recovery] BYOS plan lookup failed for user ${userId}:`, err)
     return false
   }
 }
@@ -155,14 +170,7 @@ export async function sweepPaidByosPlanCheckouts(): Promise<number> {
   for (const session of sessions.data) {
     if (!isByosPlanSession(session)) continue
     if (now - session.created * 1000 < SWEEP_GRACE_MS) continue
-    const subId =
-      typeof session.subscription === "string" ? session.subscription : session.subscription?.id
-    if (!subId) continue
-    const local = await db.query.subscriptions.findFirst({
-      where: eq(subscriptions.stripeSubscriptionId, subId),
-      columns: { id: true },
-    })
-    if (local) continue
+    if (await isRecorded(session)) continue
     try {
       await handleCheckoutSessionCompleted(session)
       recovered++

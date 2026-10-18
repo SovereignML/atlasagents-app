@@ -12,17 +12,14 @@ import { formatUsd } from "@/configs/plans"
 type Interval = "month" | "year"
 
 /**
- * Buy the BYOS plan for one connected server. The only paid step in BYOS:
- * connecting is free, and once the server has a plan, installing agents on it
- * is too.
+ * Buy one BYOS plan — the right to run one agent on a server you own. No
+ * server needed: the plan stays available until an install takes it.
  */
 export function BuyPlanButton({
-  serverId,
   priceMonthly,
   priceYearly,
   disabled,
 }: {
-  serverId: string
   priceMonthly: number
   priceYearly: number
   disabled?: boolean
@@ -34,7 +31,7 @@ export function BuyPlanButton({
   async function buy() {
     setBusy(true)
     try {
-      const res = await fetch(`/api/byos/servers/${serverId}/plan`, {
+      const res = await fetch("/api/byos/plans", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ interval }),

@@ -10,6 +10,7 @@
 
 import { maybeReapDemoInstances } from "@/lib/demo-reaper"
 import { sweepPaidByosPlanCheckouts, sweepPendingPaidCheckouts } from "@/lib/checkout-recovery"
+import { reapUnpaidByosInstalls } from "@/lib/byos-plan"
 
 const SWEEP_INTERVAL_MS = 60_000
 
@@ -26,6 +27,9 @@ async function runSweeps(): Promise<void> {
     })
     await sweepPaidByosPlanCheckouts().catch((err) => {
       console.error("[background-sweeps] BYOS plan recovery sweep failed:", err)
+    })
+    await reapUnpaidByosInstalls().catch((err) => {
+      console.error("[background-sweeps] unpaid BYOS install sweep failed:", err)
     })
   } finally {
     inFlight = false

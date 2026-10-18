@@ -28,6 +28,7 @@ import { RUNTIME_IDS } from "@/lib/runtimes/ids"
 import { RUNTIME_CAPS } from "@/lib/runtimes/labels"
 import type { RuntimeId } from "@/lib/runtimes/types"
 import { BRANDING } from "@/configs/branding"
+import { formatUsd } from "@/configs/plans"
 
 /** The connected server this agent is being installed onto. */
 export type InstallServer = {
@@ -52,8 +53,8 @@ type Runtime = RuntimeId
 // there is no "Server" step: the flow is about the agent, not the machine.
 // Model access is its own step rather than a tail on the server form — it is a
 // billing decision, and burying it under an SSH form hid it. There is no
-// billing step: the server's BYOS plan already covers the agent (the page
-// won't render this form without one).
+// billing step: the agent's BYOS plan is an available plan the customer already has,
+// or is bought at Checkout from the review step's button (see planContext).
 type Step = "agent" | "model" | "project" | "review"
 
 const STEPS: Step[] = ["agent", "model", "project", "review"]
@@ -94,11 +95,31 @@ function gb(mb: number | null): string {
   return mb == null ? "—" : `${Math.round((mb / 1024) * 10) / 10} GB`
 }
 
-export function ByosInstallForm({ server }: { server: InstallServer }) {
+/**
+ * How this install gets its BYOS plan. With an available plan (or a grandfathered
+ * per-server plan) it installs straight away; otherwise the button goes to
+ * Checkout for a new plan and the agent installs once that is paid.
+ */
+export type InstallPlanContext = {
+  availablePlans: number
+  coveredByServerPlan: boolean
+  priceMonthly: number
+  priceYearly: number
+}
+
+export function ByosInstallForm({
+  server,
+  planContext,
+}: {
+  server: InstallServer
+  planContext: InstallPlanContext
+}) {
   const router = useRouter()
 
   const [step, setStep] = useState<Step>("agent")
   const [submitting, setSubmitting] = useState(false)
+  const needsPayment = !planContext.coveredByServerPlan && planContext.availablePlans === 0
+  const [interval, setInterval] = useState<"month" | "year">("month")
 
   // Agent step
   const [runtime, setRuntime] = useState<Runtime>("openclaw")
@@ -221,6 +242,8 @@ export function ByosInstallForm({ server }: { server: InstallServer }) {
           // The server, not a host: the API reads the connection off the
           // connected row so the agent is linked to the machine it lands on.
           byosServerId: server.id,
+          // Only used when no plan is available and this install buys one.
+          interval,
           llmMode,
           ownApiKey: llmMode === "own_key" ? ownApiKey.trim() : undefined,
           ownProvider: llmMode === "own_key" ? ownProvider : undefined,
@@ -259,7 +282,9 @@ export function ByosInstallForm({ server }: { server: InstallServer }) {
         return
       }
       if (data.checkoutUrl) {
+        // Paying for the agent's plan; it installs once that goes through.
         window.location.href = data.checkoutUrl
+        return
       } else {
         toast.success("Installing your agent...")
         router.push(`/dashboard/instances/${data.instanceId}`)
@@ -798,12 +823,19 @@ export function ByosInstallForm({ server }: { server: InstallServer }) {
                 </Card>
               </div>
 
-              {llmMode === "managed_credits" && (
-                <p className="text-xs text-muted-foreground">
-                  The first {BRANDING.name} Credits agent under this plan adds 100 starter
-                  credits. LLM usage is metered from your credit wallet.
-                </p>
-              )}
+              <p className="text-xs text-muted-foreground">
+                {planContext.coveredByServerPlan
+                  ? `Covered by ${server.label}'s server plan.`
+                  : planContext.availablePlans > 0
+                    ? `Uses 1 of your ${planContext.availablePlans} available BYOS ${
+                        planContext.availablePlans === 1 ? "plan" : "plans"
+                      }.`
+                    : `Needs a BYOS plan: ${formatUsd(planContext.priceMonthly)}/mo or ${formatUsd(
+                        planContext.priceYearly,
+                      )}/yr. You'll pay at Stripe, and the agent installs as soon as that's done.`}
+                {llmMode === "managed_credits" &&
+                  ` The first ${BRANDING.name} Credits agent on a plan adds 100 starter credits; LLM usage is metered from your credit wallet.`}
+              </p>
             </div>
           )}
         </CardContent>
@@ -815,14 +847,38 @@ export function ByosInstallForm({ server }: { server: InstallServer }) {
         </Button>
         <div className="flex items-center gap-3">
           {step === STEPS[STEPS.length - 1] ? (
-            <Button
-              variant="gradient"
-              size="pill"
-              onClick={submit}
-              disabled={submitting || !canNext}
-            >
-              {submitting ? "Installing..." : "Install agent"}
-            </Button>
+            <>
+              {needsPayment && (
+                <ToggleGroup
+                  value={[interval]}
+                  onValueChange={(v) => v[0] && setInterval(v[0] as "month" | "year")}
+                  variant="outline"
+                  size="sm"
+                  aria-label="Billing interval"
+                >
+                  <ToggleGroupItem value="month">
+                    {formatUsd(planContext.priceMonthly)}/mo
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="year">
+                    {formatUsd(planContext.priceYearly)}/yr
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              )}
+              <Button
+                variant="gradient"
+                size="pill"
+                onClick={submit}
+                disabled={submitting || !canNext}
+              >
+                {needsPayment
+                  ? submitting
+                    ? "Opening checkout..."
+                    : "Continue to payment"
+                  : submitting
+                    ? "Installing..."
+                    : "Install agent"}
+              </Button>
+            </>
           ) : (
             <Button variant="gradient" size="pill" onClick={next} disabled={!canNext}>
               Continue

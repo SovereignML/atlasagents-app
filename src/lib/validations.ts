@@ -132,6 +132,11 @@ export const byosPlanCheckoutSchema = z.object({
   interval: z.enum(["month", "year"]).optional(),
 })
 
+/** Cancel a BYOS plan at the end of its paid period, or undo that. */
+export const byosPlanChangeSchema = z.object({
+  cancelAtPeriodEnd: z.boolean(),
+})
+
 export const byosServerConnectSchema = z.object({
   host: z.string().trim().min(1, "A hostname or IP address is required").max(253),
   port: z.number().int().min(1).max(65535).optional(),
@@ -155,6 +160,8 @@ export const byosDeploySchema = z.object({
   fallbackApiKey: secret.optional(),
   fallbackBaseUrl: url.optional(),
   agentConfig: z.unknown().optional(),
+  /** Billing interval for a new plan, used only when no plan is free and the install goes through Checkout. */
+  interval: z.enum(["month", "year"]).optional(),
 })
 
 const password = z.string().max(128, "Password must be 128 characters or fewer")

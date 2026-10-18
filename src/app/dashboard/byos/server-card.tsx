@@ -8,7 +8,6 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { BuyPlanButton } from "./buy-plan-button"
 
 export type ServerCardData = {
   id: string
@@ -28,21 +27,22 @@ export type ServerCardData = {
   hwKernel: string | null
   capacityAgents: number
   agentCount: number
-  /** The live BYOS plan covering this server, or null — installing needs one. */
-  plan: {
-    status: string
+  /**
+   * A grandfathered per-server plan covering every agent here, or null. New
+   * plans are per agent and are not shown on a server.
+   */
+  legacyPlan: {
     allowsInstall: boolean
-    interval: string
     currentPeriodEnd: string | null
     cancelAtPeriodEnd: boolean
   } | null
 }
 
-function planLine(plan: NonNullable<ServerCardData["plan"]>): string {
+function legacyPlanLine(plan: NonNullable<ServerCardData["legacyPlan"]>): string {
   const date = plan.currentPeriodEnd ? plan.currentPeriodEnd.slice(0, 10) : null
-  if (!plan.allowsInstall) return "BYOS plan · payment failed — update your card in Billing"
-  if (plan.cancelAtPeriodEnd) return `BYOS plan · ends ${date ?? "at period end"}`
-  return `BYOS plan · ${plan.interval === "year" ? "yearly" : "monthly"}${date ? `, renews ${date}` : ""}`
+  if (!plan.allowsInstall) return "Server plan · payment failed — update your card in Billing"
+  if (plan.cancelAtPeriodEnd) return `Server plan · covers every agent here until ${date ?? "period end"}`
+  return `Server plan · covers every agent here${date ? `, renews ${date}` : ""}`
 }
 
 function gb(mb: number | null): string {
@@ -62,15 +62,7 @@ function relative(iso: string | null): string {
  * One connected server. Shows the hardware we actually measured over SSH —
  * never a plan's nominal figures, which for BYOS are all zero.
  */
-export function ServerCard({
-  server,
-  priceMonthly,
-  priceYearly,
-}: {
-  server: ServerCardData
-  priceMonthly: number
-  priceYearly: number
-}) {
+export function ServerCard({ server }: { server: ServerCardData }) {
   const router = useRouter()
   const [busy, setBusy] = useState<"refresh" | "disconnect" | null>(null)
 
@@ -196,35 +188,29 @@ export function ServerCard({
             </>
           )}
           <span className="ml-2 text-xs">Checked {relative(server.lastCheckedAt)}.</span>
-          <span
-            className={cn(
-              "mt-1 block text-xs",
-              server.plan?.allowsInstall === false && "text-destructive",
-            )}
-          >
-            {server.plan ? planLine(server.plan) : "No BYOS plan — buy one to install agents here."}
-          </span>
+          {server.legacyPlan && (
+            <span
+              className={cn(
+                "mt-1 block text-xs",
+                !server.legacyPlan.allowsInstall && "text-destructive",
+              )}
+            >
+              {legacyPlanLine(server.legacyPlan)}
+            </span>
+          )}
         </p>
 
-        {server.plan ? (
-          <Button
-            size="sm"
-            variant="gradient"
-            disabled={!reachable || !server.plan.allowsInstall}
-            render={
-              <Link href={`/dashboard/byos/deploy?serverId=${server.id}`}>
-                <Plus data-icon="inline-start" />
-                Install agent
-              </Link>
-            }
-          />
-        ) : (
-          <BuyPlanButton
-            serverId={server.id}
-            priceMonthly={priceMonthly}
-            priceYearly={priceYearly}
-          />
-        )}
+        <Button
+          size="sm"
+          variant="gradient"
+          disabled={!reachable}
+          render={
+            <Link href={`/dashboard/byos/deploy?serverId=${server.id}`}>
+              <Plus data-icon="inline-start" />
+              Install agent
+            </Link>
+          }
+        />
       </div>
     </div>
   )

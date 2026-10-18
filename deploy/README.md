@@ -143,7 +143,13 @@ Point nginx / Cloudflare Tunnel at `127.0.0.1:3000`. Standard Next.js
 reverse-proxy setup — no special headers required beyond `X-Forwarded-*`.
 
 The server binds to loopback (`HOSTNAME=127.0.0.1` in both start paths), so the
-proxy must run on the same host. Anything that called the app at
+proxy must run on the same host. **If the proxy runs on another machine** (as
+production does, with Nginx Proxy Manager), set `HOSTNAME=0.0.0.0` in `.env`,
+reload with `pm2 reload deploy/pm2.config.cjs --update-env && pm2 save`, and add
+a cloud-firewall rule that lets only the proxy's IP reach port 3000. Also deny
+`/api/internal/*` in the proxy (Caddy does it with `respond @internal 403`); the
+routes check a cron token or admin session themselves, but they are not meant to
+be reachable from outside. Anything that called the app at
 `http://<server-ip>:3000` must use the public https URL instead — in particular
 `NEXT_PUBLIC_GATEWAY_BASE_URL`, which agents post their events and usage to.
 
