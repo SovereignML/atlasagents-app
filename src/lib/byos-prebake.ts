@@ -40,6 +40,7 @@ import {
 } from "@/lib/runtimes/hermes"
 import { OPENCLAW_VERSION, OPENCLAW_VPS_MIN_NODE } from "@/lib/runtimes/openclaw"
 import { buildBakeFinalizeScript } from "@/lib/runtimes/finalize"
+import { CHAT_UI_LITE, platformChatUi } from "@/lib/runtimes/agentwebui-lite"
 import { npmSpec } from "@/lib/runtime-versions"
 import type { PreflightFacts } from "@/lib/byos-preflight-parse"
 
@@ -225,6 +226,8 @@ export function buildPrebakeScript(opts: PrebakeScriptOpts): string {
       browserDeps: opts.browserDeps === true,
       pin: opts.hermesVersion ?? undefined,
       webuiPin: opts.webuiVersion ?? undefined,
+      // AgentWebUI Lite is small and installed by the deploy itself.
+      webui: platformChatUi() !== CHAT_UI_LITE,
     }),
     buildOpenclawCacheStep(opts.openclawVersion),
     // Install + enable the systemd units and pre-start Open WebUI, so the
@@ -347,6 +350,8 @@ export function prebakeUsability(opts: {
   /** The version persisted at connect, which the deploy intends to install. */
   hermesPin?: string | null
   minNodeVersion: string
+  /** Whether the deploy needs Open WebUI (false when agents get AgentWebUI Lite). */
+  needsOpenWebui?: boolean
 }): PrebakeUsability {
   const misses: string[] = []
   const { facts } = opts
@@ -367,7 +372,7 @@ export function prebakeUsability(opts: {
       // no longer honest.
       misses.push(`hermes is ${facts.hermesVersion}, pinned to ${opts.hermesPin}`)
     }
-    if (!facts.hasOpenWebui) misses.push("open-webui is not installed")
+    if (opts.needsOpenWebui !== false && !facts.hasOpenWebui) misses.push("open-webui is not installed")
     // The prebake writes and enables both units so the deploy only has to
     // restart. A missing unit means the finalize step did not run (or was
     // undone), which is exactly the drift this probe exists to catch — it was

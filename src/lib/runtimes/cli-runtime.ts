@@ -329,7 +329,7 @@ ${args.webuiEnabled ? buildOpenWebUiStandaloneInstallSteps(args.sidecarVersion) 
           sshPort: args.sshPort,
           manageFirewall: args.manageFirewall,
         },
-        installSteps,
+        `${installSteps}${args.extraInstallSteps ?? ""}`,
       )
     },
 

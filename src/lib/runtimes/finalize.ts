@@ -13,6 +13,7 @@
  */
 
 import { getRuntime, type RuntimeId } from "@/lib/runtimes"
+import { platformChatUi, withChatUi, type ChatUi } from "@/lib/runtimes/agentwebui-lite"
 import { buildSidecarBakeSteps } from "@/lib/runtimes/open-webui-claim"
 import { renderEnvFile } from "@/lib/runtimes/shared"
 
@@ -40,9 +41,11 @@ export function buildBakeFinalizeScript(
      * because its deploy always restarts the sidecar.
      */
     waitForSidecar?: boolean
+    /** The chat UI the box was bootstrapped with. Defaults to the platform's (CHAT_UI). */
+    chatUi?: ChatUi
   } = {},
 ): string {
-  const runtime = getRuntime(runtimeId)
+  const runtime = withChatUi(getRuntime(runtimeId), opts.chatUi ?? platformChatUi())
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
   const unitB64 = Buffer.from(runtime.renderSystemdUnit(), "utf8").toString("base64")
 
@@ -58,7 +61,9 @@ ${runAs("doctor --fix")}
   }
 
   let sidecarWarm = ""
-  if (webuiEnabled && runtime.sidecar) {
+  // Only Open WebUI (the sidecar with an admin to seed) is worth prewarming.
+  // AgentWebUI Lite starts in a second; its unit is installed at claim.
+  if (webuiEnabled && runtime.sidecar?.seedAdmin) {
     const sc = runtime.sidecar
     // Placeholder env — rewritten with the real values at claim. Enough for Open
     // WebUI to boot and initialize its DB (it does not require a live upstream).

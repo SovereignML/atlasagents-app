@@ -49,7 +49,14 @@ import {
   buildReusePrewarmedSidecar,
 } from "@/lib/runtimes/open-webui-claim"
 import { buildSeedSidecarAdminScript } from "@/lib/runtimes/open-webui-seed"
-import { getRuntime, type RuntimeEngine, type RuntimeId } from "@/lib/runtimes"
+import { runtimeForInstance, type RuntimeEngine, type RuntimeId } from "@/lib/runtimes"
+import {
+  CHAT_UI_LITE,
+  CHAT_UI_OPEN_WEBUI,
+  chatUiOf,
+  liteEmbedSecret,
+} from "@/lib/runtimes/agentwebui-lite"
+import { chatUiFrameAncestors } from "@/lib/chat-ui-origins"
 import { runtimeAcceptsModel } from "@/lib/runtimes/labels"
 import { selectableModelsForRuntime } from "@/lib/allowed-models"
 import { FREE_DEMO_TTL_MS } from "@/configs/plans"
@@ -1759,6 +1766,7 @@ async function acquireBootedVm(
   const claimed = await claimWarmVm({
     runtime: runtime.id,
     webuiEnabled,
+    chatUi: chatUiOf(instance),
     instanceId: instance.id,
     candidates: decision.ranked.map((c) => ({
       providerSlug: c.providerSlug,
@@ -1903,7 +1911,7 @@ async function acquireBootedVm(
 }
 
 async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
-  const runtime = getRuntime(instance.runtime)
+  const runtime = runtimeForInstance(instance)
 
   // The Cloudflare origin cert is no longer read here and baked into the
   // bootstrap (i.e. into cloud-init user-data, which anything on the droplet
@@ -2201,7 +2209,9 @@ async function configureRuntimeOverSsh(
   // A warm-pool VM may hold a prewarmed Open WebUI. If the box confirms it
   // (marker + healthy), the claim keeps it running and signs the customer up
   // over its API instead of restarting it. See open-webui-claim.ts.
-  const mayReusePrewarmedSidecar = fromWarmPool && webuiEnabled
+  // Only Open WebUI is prewarmed; AgentWebUI Lite starts in a second and has no
+  // account to hand over.
+  const mayReusePrewarmedSidecar = fromWarmPool && webuiEnabled && chatUiOf(instance) === CHAT_UI_OPEN_WEBUI
 
   // OpenClaw uses an admin email/password for its own dashboard login. Hermes
   // authenticates with a single bearer token (API_SERVER_KEY) and has no admin
@@ -2224,7 +2234,13 @@ async function configureRuntimeOverSsh(
   // Per-instance observability ingest token (least-privilege, separate from the
   // gateway token) — injected into the env and persisted encrypted at commit.
   const eventIngestToken = generateGatewayToken()
-  const webuiSecretKey = webuiEnabled ? generateGatewayToken() : ""
+  // Open WebUI: a random session secret. AgentWebUI Lite: its embed secret,
+  // derived from the instance id so the dashboard can sign /embed links.
+  const webuiSecretKey = !webuiEnabled
+    ? ""
+    : chatUiOf(instance) === CHAT_UI_LITE
+      ? liteEmbedSecret(instance.id)
+      : generateGatewayToken()
 
   /* --- 6. Write .env ---------------------------------------------- */
   currentStage = "writing_config"
@@ -2310,6 +2326,9 @@ async function configureRuntimeOverSsh(
       secretKey: webuiSecretKey,
       publicUrl,
       enableSignup: true,
+      adminPassword,
+      frameAncestors:
+        chatUiOf(instance) === CHAT_UI_LITE ? await chatUiFrameAncestors(instance.teamId) : undefined,
       // Same slug the runtime pins as its own default — the chat UI needs it to
       // pre-select a model for the freshly seeded admin account.
       model: llmConfig.model,
@@ -2570,7 +2589,8 @@ async function configureRuntimeOverSsh(
     //
     // A warm-pool VM with a prewarmed sidecar is handed over live (no restart),
     // falling back to the restart-based seed; every other deploy seeds directly.
-    if (webuiEnabled && runtime.sidecar) {
+    // AgentWebUI Lite has no accounts: its password is in its env from Phase A.
+    if (webuiEnabled && runtime.sidecar?.seedAdmin) {
       const seeded = sidecarPrewarmed
         ? await claimPrewarmedSidecar({
             instanceId: instance.id,
@@ -2761,7 +2781,8 @@ async function seedSidecarAdmin(opts: {
 }): Promise<boolean> {
   const { instanceId, target, runtime, stage, adminEmail, adminPassword } = opts
   const sidecar = runtime.sidecar
-  if (!sidecar) return false
+  const seedAdmin = sidecar?.seedAdmin
+  if (!sidecar || !seedAdmin) return false
   const failMessage =
     "Could not create the Open WebUI admin; the chat UI was stopped so the first visitor can't claim it."
   try {
@@ -2769,7 +2790,7 @@ async function seedSidecarAdmin(opts: {
       target,
       buildSeedSidecarAdminScript({
         port: sidecar.port,
-        signupPath: sidecar.seedAdmin.signupPath,
+        signupPath: seedAdmin.signupPath,
         envPath: sidecar.envPath,
         serviceName: sidecar.serviceName,
         adminEmail,
@@ -2851,7 +2872,7 @@ async function resolveIpv4ForDns(host: string): Promise<string | null> {
 }
 
 async function provisionByosBot(instance: Instance): Promise<ProvisionResult> {
-  const runtime = getRuntime(instance.runtime)
+  const runtime = runtimeForInstance(instance)
   const host = instance.byosHost
   if (!host) {
     throw new Error("BYOS instance is missing byosHost — cannot connect")
@@ -3133,20 +3154,20 @@ async function rollbackProvisioning(
 
 /** systemd unit name for the Open WebUI sidecar, when enabled for this instance. */
 function sidecarServiceFor(instance: Instance): string | undefined {
-  const runtime = getRuntime(instance.runtime)
+  const runtime = runtimeForInstance(instance)
   return instance.webuiEnabled && runtime.sidecar ? runtime.sidecar.serviceName : undefined
 }
 
 /** systemd unit name for the runtime's browser terminal, when it has one. */
 function terminalServiceFor(instance: Instance): string | undefined {
-  return getRuntime(instance.runtime).terminal?.serviceName
+  return runtimeForInstance(instance).terminal?.serviceName
 }
 
 export async function restartBot(instance: Instance): Promise<void> {
   if (isLiveMode() && instance.ipAddress) {
     if (usesSystemd(instance)) {
       const target = sshTargetFor(instance)
-      await sshSystemctlRestart(target, getRuntime(instance.runtime).serviceName)
+      await sshSystemctlRestart(target, runtimeForInstance(instance).serviceName)
       const sidecar = sidecarServiceFor(instance)
       if (sidecar) await sshSystemctlRestart(target, sidecar)
       const terminal = terminalServiceFor(instance)
@@ -3207,7 +3228,7 @@ export async function pauseBot(instance: Instance): Promise<void> {
       if (terminal) await sshSystemctlStop(target, terminal)
       const sidecar = sidecarServiceFor(instance)
       if (sidecar) await sshSystemctlStop(target, sidecar)
-      await sshSystemctlStop(target, getRuntime(instance.runtime).serviceName)
+      await sshSystemctlStop(target, runtimeForInstance(instance).serviceName)
     } else if (instance.containerName) {
       await sshDockerStop({ host: instance.ipAddress, instanceId: instance.id }, instance.containerName)
     }
@@ -3227,7 +3248,7 @@ export async function resumeBot(instance: Instance): Promise<void> {
     if (usesSystemd(instance)) {
       const target = sshTargetFor(instance)
       // Start the gateway before the sidecar and terminal that depend on it.
-      await sshSystemctlStart(target, getRuntime(instance.runtime).serviceName)
+      await sshSystemctlStart(target, runtimeForInstance(instance).serviceName)
       const sidecar = sidecarServiceFor(instance)
       if (sidecar) await sshSystemctlStart(target, sidecar)
       const terminal = terminalServiceFor(instance)
@@ -3390,7 +3411,7 @@ export async function deleteBot(instance: Instance): Promise<DeleteResult> {
   // SSH, then mark the instance deleted. Their server stays online.
   if (instance.deploymentTarget === "byos") {
     if (isLiveMode() && instance.ipAddress) {
-      const runtime = getRuntime(instance.runtime)
+      const runtime = runtimeForInstance(instance)
       const sidecar = sidecarServiceFor(instance)
       const sidecarCleanup =
         sidecar && runtime.sidecar
@@ -3606,7 +3627,7 @@ export async function installToolDependencies(
   if (!isLiveMode() || !instance.ipAddress) return
   if (!usesSystemd(instance)) return
 
-  const runtime = getRuntime(instance.runtime)
+  const runtime = runtimeForInstance(instance)
   const tools = enabledToolsForRuntime(toolIds, runtime.id)
   const script = buildToolDepsScript(tools, runtime.id)
   if (!script) return
@@ -3912,7 +3933,7 @@ export async function syncKnowledgeBase(instance: Instance): Promise<void> {
     return
   }
   if (!usesSystemd(instance)) return
-  const runtime = getRuntime(instance.runtime)
+  const runtime = runtimeForInstance(instance)
   const { workspaceDir, systemUser } = runtime.paths
   const owner = `${systemUser}:${systemUser}`
   const target = sshTargetFor(instance)
@@ -3937,7 +3958,7 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
   const target = sshTargetFor(instance)
 
   if (usesSystemd(instance)) {
-    const runtime = getRuntime(instance.runtime)
+    const runtime = runtimeForInstance(instance)
     const { installDir, configSubdir, configPath, workspaceDir, envPath, systemUser } =
       runtime.paths
     const owner = `${systemUser}:${systemUser}`
@@ -4135,7 +4156,44 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
     //
     // Best-effort throughout: a stale default is a worse experience, not a broken
     // agent, so nothing here fails the surrounding reprovision.
-    if (webuiEnabled && runtime.sidecar) {
+    if (webuiEnabled && runtime.sidecar && chatUiOf(instance) === CHAT_UI_LITE) {
+      // AgentWebUI Lite's agent processes inherit its environment and read the
+      // engine's config when they start, so a new model only reaches chats once
+      // Lite restarts. Record the pin (and the framing origins, which follow the
+      // team's white-label domain) and restart only when either moved.
+      const sidecar = runtime.sidecar
+      const ancestors = await chatUiFrameAncestors(instance.teamId)
+      const liteStep = await sshRunScriptLogged(
+        target,
+        buildEnvKeyUpsertScript({
+          envPath: sidecar.envPath,
+          entries: [
+            { key: "ATLAS_PINNED_MODEL", value: llmConfig.model.trim() || "default" },
+            ...(ancestors.length > 0 ? [{ key: "FRAME_ANCESTORS", value: ancestors.join(" ") }] : []),
+          ],
+        }),
+        "writing_config",
+        "reprovision:chat ui model pin",
+        { timeoutMs: 30_000 },
+      )
+      await logSshStep(instance.id, liteStep)
+      if (liteStep.exitCode === 0 || liteStep.exitCode === null) {
+        if (liteStep.stdout.includes(ENV_KEY_CHANGED)) {
+          await sshSystemctlRestart(target, sidecar.serviceName)
+          await db.insert(instanceLogs).values({
+            instanceId: instance.id,
+            level: "info",
+            message: `Chat UI restarted so new chats use ${llmConfig.model || "the default model"}.`,
+          })
+        }
+      } else {
+        await db.insert(instanceLogs).values({
+          instanceId: instance.id,
+          level: "warn",
+          message: `Could not update the chat UI (exit ${liteStep.exitCode}); chats may keep the previous model until it restarts.`,
+        })
+      }
+    } else if (webuiEnabled && runtime.sidecar) {
       const sidecar = runtime.sidecar
       // The upstream connection, not just the model. A warm-pool VM bakes its
       // sidecar against a placeholder gateway token; claim re-renders the file

@@ -3,6 +3,7 @@ import {
   capacityByRuntime,
   estimateAgentCapacity,
   footprintKey,
+  getFootprint,
   HOST_RESERVE,
 } from "./agent-footprint"
 
@@ -62,5 +63,13 @@ describe("footprintKey()", () => {
 
   it("ignores the sidecar flag for runtimes that have none", () => {
     expect(footprintKey("openclaw", true)).toBe("openclaw")
+    expect(footprintKey("openclaw", true, true)).toBe("openclaw")
+  })
+
+  it("sizes an agent with AgentWebUI Lite far smaller than with Open WebUI", () => {
+    expect(footprintKey("hermes", true, true)).toBe("hermes-lite")
+    expect(footprintKey("codex", true, true)).toBe("codex-lite")
+    expect(footprintKey("hermes", false, true)).toBe("hermes")
+    expect(getFootprint("hermes-lite")!.ramMb).toBeLessThan(getFootprint("hermes-webui")!.ramMb)
   })
 })

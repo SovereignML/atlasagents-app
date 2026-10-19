@@ -43,7 +43,7 @@ describe("runtime registry exhaustiveness", () => {
 
   it("has a footprint row only for keys the registry can produce", () => {
     const producible = new Set(
-      RUNTIME_IDS.flatMap((id) => [footprintKey(id, false), footprintKey(id, true)]),
+      RUNTIME_IDS.flatMap((id) => [footprintKey(id, false), footprintKey(id, true), footprintKey(id, true, true)]),
     )
     for (const fp of AGENT_FOOTPRINTS) expect(producible.has(fp.key)).toBe(true)
   })

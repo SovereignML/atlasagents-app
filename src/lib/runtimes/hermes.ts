@@ -239,8 +239,12 @@ export function buildHermesPrebakeSteps(opts: {
   browserDeps: boolean
   pin?: string
   webuiPin?: string
+  /** False when new agents get AgentWebUI Lite: then Open WebUI is not installed. */
+  webui?: boolean
 }): string {
-  return buildHermesPlusWebuiInstallSteps(opts.browserDeps, opts.pin, opts.webuiPin)
+  return opts.webui === false
+    ? buildHermesInstallSteps(opts.browserDeps, opts.pin)
+    : buildHermesPlusWebuiInstallSteps(opts.browserDeps, opts.pin, opts.webuiPin)
 }
 
 const openWebUiSidecar: SidecarSpec = makeOpenWebUiSidecar({
@@ -392,7 +396,7 @@ WantedBy=multi-user.target
         sshPort: args.sshPort,
         manageFirewall: args.manageFirewall,
       },
-      installSteps,
+      `${installSteps}${args.extraInstallSteps ?? ""}`,
     )
   },
 

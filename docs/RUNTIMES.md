@@ -198,6 +198,17 @@ is refreshed on every provision/reprovision, so a model newly enabled in admin s
 the picker after that agent's next reprovision. The step is best-effort: if it fails, the picker
 loses its extra entries, but the agent keeps working.
 
+### AgentWebUI Lite ([`agentwebui-lite.ts`](../src/lib/runtimes/agentwebui-lite.ts))
+
+The light chat UI, in place of Open WebUI, for new agents when `CHAT_UI=agentwebui-lite`. Off by default. An agent's UI is fixed when it is created (`Instance.chatUi`, NULL = Open WebUI), so a reprovision never swaps it.
+
+- **What runs.** One small Python app (`aiohttp` only) in `/opt/agentwebui-lite`, as the **runtime's own user** with the runtime's env files, on loopback `:8080` (Open WebUI's port, so Caddy is unchanged). It talks to the engine over ACP: `hermes acp` (the `hermes-agent[acp]` extra), or the pinned ACP adapter for Claude Code / Codex (`@agentclientprotocol/claude-agent-acp`, `codex-acp`, one release behind latest). OpenClaw keeps its own UI.
+- **No accounts.** Lite's password is the agent's admin password, and its `EMBED_SECRET` is derived per agent from `INSTANCE_ENCRYPTION_KEY` (`liteEmbedSecret`). Nothing is seeded after boot, and nothing is prewarmed on the warm pool.
+- **Inside the dashboard.** The agent page's Chat card calls `POST /api/instances/[id]/chat-embed` (Operator+), which returns a one-time, one-minute `/embed` link; Lite signs the browser in with it and lets only the dashboard (and the team's white-label domain) frame it (`FRAME_ANCESTORS`). Needs the agent on HTTPS.
+- **The dashboard owns the model.** Lite runs with `LOCK_MODEL` and `LOCK_FOLDER`: no model menu, and chats always work in the agent's workspace. A model change rewrites `ATLAS_PINNED_MODEL` in Lite's env and restarts Lite, because the agent processes it starts inherit its environment.
+- **Pool and BYOS.** The pool key includes the chat UI's version, so switching `CHAT_UI` retires the old pool. The BYOS prebake skips Open WebUI when `CHAT_UI` is Lite.
+- **Install source.** Lite is not on PyPI: the default is a git install of `LITE_PINNED_COMMIT`, which needs the repository to be readable from the box. `AGENTWEBUI_LITE_PIP_SPEC` overrides it.
+
 ### Credentials & switching
 
 - **`GET /api/instances/[instanceId]/credentials`** returns the admin login for OpenClaw, and for Hermes **only when the Open WebUI sidecar is enabled** (then `openclawAdmin*` hold the Open WebUI login). A Hermes instance **without** the sidecar has no admin login at all — the route returns `409 NO_ADMIN_FOR_HERMES` and the dashboard hides the card; bots authenticate with the **gateway token** (`API_SERVER_KEY`) instead. The OpenClaw/WebUI login and the gateway token are independent — rotating one doesn't rotate the other.

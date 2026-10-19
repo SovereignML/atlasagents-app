@@ -20,6 +20,7 @@ import { canDeploy, DEPLOY_ROLE_DENIED, getMembershipRole, getUserTeam } from "@
 import { isTeamSuspended } from "@/lib/tenant"
 import { getTeamAgentLimit, countTeamAgents } from "@/lib/seats"
 import { logAuditEvent, type AuditAction } from "@/lib/audit"
+import { CHAT_UI_LITE, liteSupports, platformChatUi } from "@/lib/runtimes/agentwebui-lite"
 
 type Instance = InferSelectModel<typeof instances>
 
@@ -256,6 +257,7 @@ export function buildAgentFields(cfg: AgentConfig | null): {
   interfaceKind: string | null
   runtime: string | null
   webuiEnabled: boolean
+  chatUi: string | null
 } {
   if (!cfg) {
     return {
@@ -269,6 +271,7 @@ export function buildAgentFields(cfg: AgentConfig | null): {
       interfaceKind: null,
       runtime: null,
       webuiEnabled: false,
+      chatUi: null,
     }
   }
   const skills = selectSkills(cfg)
@@ -289,5 +292,14 @@ export function buildAgentFields(cfg: AgentConfig | null): {
     // stored as false keep working API-only (the Caddy renderer still handles
     // them) but new rows always flip this on.
     webuiEnabled: runtimeCaps(cfg.runtime).hasSidecar,
+    // Which chat UI that sidecar is: AgentWebUI Lite when CHAT_UI asks for it
+    // and the engine speaks ACP, else Open WebUI (NULL). Fixed for the agent's
+    // life, so a reprovision keeps the UI installed on its box.
+    chatUi:
+      runtimeCaps(cfg.runtime).hasSidecar &&
+      liteSupports(cfg.runtime ?? "") &&
+      platformChatUi() === CHAT_UI_LITE
+        ? CHAT_UI_LITE
+        : null,
   }
 }

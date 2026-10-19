@@ -76,8 +76,6 @@ const RUNTIME_OPTIONS: { value: Runtime; label: string; hint: string }[] = RUNTI
   (id) => ({ value: id, label: RUNTIME_CAPS[id].label, hint: RUNTIME_HINTS[id] }),
 )
 
-/** Footprint key for an engine as BYOS installs it (with its sidecar, if any). */
-const runtimeFootprintKey = (r: Runtime) => footprintKey(r, RUNTIME_CAPS[r].hasSidecar)
 
 const SELECTED_GLOW =
   "aria-pressed:border-ring aria-pressed:ring-1 aria-pressed:ring-ring aria-pressed:bg-ring/15 aria-pressed:hover:bg-ring/20 aria-pressed:text-foreground " +
@@ -110,10 +108,15 @@ export type InstallPlanContext = {
 export function ByosInstallForm({
   server,
   planContext,
+  liteChatUi = false,
 }: {
   server: InstallServer
   planContext: InstallPlanContext
+  /** New agents get AgentWebUI Lite (CHAT_UI), which sizes far smaller than Open WebUI. */
+  liteChatUi?: boolean
 }) {
+  /** Footprint key for an engine as BYOS installs it (with its chat UI, if any). */
+  const runtimeFootprintKey = (r: Runtime) => footprintKey(r, RUNTIME_CAPS[r].hasSidecar, liteChatUi)
   const router = useRouter()
 
   const [step, setStep] = useState<Step>("agent")
@@ -158,8 +161,8 @@ export function ByosInstallForm({
   const slugPreview = deploymentSlug(name)
 
   // What we measured on this box, against what each runtime needs. Hermes on
-  // BYOS always ships the Open WebUI sidecar (agent-create sets webuiEnabled
-  // from the runtime), so it is sized as the heavier "hermes-webui" variant.
+  // BYOS always ships a chat UI (agent-create sets webuiEnabled from the
+  // runtime), so it is sized with it: "hermes-webui", or "hermes-lite".
   const probed = server.hwCpuCores != null
   const capacity = capacityByRuntime({
     cpuCores: server.hwCpuCores,

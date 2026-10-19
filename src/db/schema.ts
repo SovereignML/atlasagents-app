@@ -405,6 +405,11 @@ export const instances = pgTable(
     // so the user gets a web chat UI. For Hermes+webui the dormant
     // openclawAdmin* columns below hold the Open WebUI admin login.
     webuiEnabled: boolean().default(false).notNull(),
+    // Which chat UI `webuiEnabled` installs: "agentwebui-lite", or NULL for
+    // Open WebUI (every agent made before Lite). Fixed at creation from
+    // CHAT_UI, so a reprovision keeps the UI the box has. See
+    // src/lib/runtimes/agentwebui-lite.ts.
+    chatUi: text(),
     interfaceKind: text(),
     telegramBotTokenEnc: text(),
     telegramUsername: text(),

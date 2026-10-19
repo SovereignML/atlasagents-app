@@ -18,7 +18,8 @@
 import type { db } from "@/db"
 import { sshInstallCaddyfile, sshRun, sshWriteFile } from "@/lib/ssh"
 import { ensureManagedOriginCert } from "@/lib/agent-origin-cert"
-import { getRuntime } from "@/lib/runtimes"
+import { runtimeForInstance } from "@/lib/runtimes"
+import { CHAT_UI_OPEN_WEBUI, chatUiOf } from "@/lib/runtimes/agentwebui-lite"
 import type { SidecarSpec } from "@/lib/runtimes/types"
 import { toolServicesForIds } from "@/configs/agent-tools"
 import { decryptSecret } from "@/lib/crypto-secret"
@@ -53,7 +54,7 @@ export async function reconfigureInstanceIngress(
   opts: ReconfigureIngressOpts,
 ): Promise<void> {
   const target = sshTargetForInstance(instance)
-  const runtime = getRuntime(instance.runtime)
+  const runtime = runtimeForInstance(instance)
   const { domain, proxied } = opts
 
   // Open WebUI sidecar (Hermes): when enabled, Caddy fronts the sidecar and
@@ -124,7 +125,8 @@ export async function reconfigureInstanceIngress(
     )
   }
 
-  if (webuiEnabled && runtime.sidecar) {
+  // Open WebUI only: it bakes WEBUI_URL into links. AgentWebUI Lite uses relative URLs.
+  if (webuiEnabled && runtime.sidecar && chatUiOf(instance) === CHAT_UI_OPEN_WEBUI) {
     await refreshSidecarPublicUrl(instance, runtime.sidecar, domain)
   }
 }

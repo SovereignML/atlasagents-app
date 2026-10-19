@@ -33,6 +33,12 @@ export const AGENT_FOOTPRINTS: RuntimeFootprint[] = [
   // tool-heavy turns (builds, tests) in the workspace, hence the extra disk.
   { key: "claude-code-webui", label: "Claude Code + Open WebUI", vcpu: 2, ramMb: 3072, diskGb: 12 },
   { key: "codex-webui", label: "Codex + Open WebUI", vcpu: 2, ramMb: 3072, diskGb: 12 },
+  // AgentWebUI Lite instead of Open WebUI: the page itself is ~40MB and no
+  // torch, so the engine dominates again. Codex's process is the largest
+  // (~580MB, Claude Code ~370MB), and the coding agents keep their extra disk.
+  { key: "hermes-lite", label: "Hermes + AgentWebUI Lite", vcpu: 1, ramMb: 1792, diskGb: 6 },
+  { key: "claude-code-lite", label: "Claude Code + AgentWebUI Lite", vcpu: 1, ramMb: 1792, diskGb: 8 },
+  { key: "codex-lite", label: "Codex + AgentWebUI Lite", vcpu: 1, ramMb: 2048, diskGb: 8 },
 ]
 
 /**
@@ -44,8 +50,10 @@ export const HOST_RESERVE = { vcpu: 1, ramMb: 1024, diskGb: 5 }
 /** The variant we size the headline capacity number against (the BYOS default). */
 export const DEFAULT_FOOTPRINT_KEY = "openclaw"
 
-export function footprintKey(runtime: string, webuiEnabled = false): string {
-  return runtimeCaps(runtime).hasSidecar && webuiEnabled ? `${runtime}-webui` : runtime
+export function footprintKey(runtime: string, webuiEnabled = false, liteChatUi = false): string {
+  if (!runtimeCaps(runtime).hasSidecar || !webuiEnabled) return runtime
+  const lite = `${runtime}-lite`
+  return liteChatUi && getFootprint(lite) ? lite : `${runtime}-webui`
 }
 
 export function getFootprint(key: string): RuntimeFootprint | undefined {

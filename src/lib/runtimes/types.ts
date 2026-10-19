@@ -154,6 +154,12 @@ export type PackageRegistry = "npm" | "pypi"
 
 export type BootstrapRenderArgs = {
   gatewayPort: number
+  /**
+   * Bash appended to the runtime's own install steps, inside the bootstrap
+   * framing. Used to install a different chat UI (AgentWebUI Lite) in place of
+   * the runtime's default sidecar — see withChatUi in agentwebui-lite.ts.
+   */
+  extraInstallSteps?: string
   /** When true, the runtime appends its sidecar install steps (pip + venv). */
   webuiEnabled?: boolean
   /**
@@ -213,6 +219,10 @@ export type SidecarEnvArgs = {
   publicUrl?: string | null
   /** Open signup window — true on first boot, flipped to false after the admin is seeded. */
   enableSignup: boolean
+  /** The agent's admin password: AgentWebUI Lite's sign-in password for its direct URL. */
+  adminPassword?: string
+  /** Origins that may frame the chat UI (the dashboard). AgentWebUI Lite only. */
+  frameAncestors?: string[]
   /**
    * The model slug the gateway is pinned to (same value the runtime writes as its
    * own default). A chat UI sidecar needs this to pre-select a model for a fresh
@@ -261,8 +271,11 @@ export type SidecarSpec = {
   renderEnv(args: SidecarEnvArgs): Record<string, string>
   /** systemd unit that runs the sidecar process. */
   renderSystemdUnit(): string
-  /** Admin bootstrap: POST to this path to create the first (admin) account. */
-  seedAdmin: { signupPath: string }
+  /**
+   * Admin bootstrap: POST to this path to create the first (admin) account.
+   * Absent for a sidecar with no accounts (AgentWebUI Lite).
+   */
+  seedAdmin?: { signupPath: string }
 }
 
 /**

@@ -187,6 +187,8 @@ Ed25519 keypair used to SSH into provisioned VMs.
 | `OPENCLAW_VERSION` | Optional | Override the OpenClaw version new boxes install. Unset = the code pin (`OPENCLAW_PINNED_VERSION`, one behind upstream). `latest` tracks upstream. | A tested version — or leave unset. |
 | `HERMES_VERSION` | Optional | Override the hermes-agent version. Unset = `HERMES_PINNED_VERSION`. | Same. |
 | `OPEN_WEBUI_VERSION` | Optional | Override the Open WebUI (Hermes chat UI) version. Unset = `OPEN_WEBUI_PINNED_VERSION`. | Same. |
+| `CHAT_UI` | Optional | Chat UI for new Hermes, Claude Code and Codex agents: `open-webui` (default) or `agentwebui-lite`. Existing agents keep theirs (`Instance.chatUi`). | Changing it retires the warm pool (its key includes the UI) and refills it. |
+| `AGENTWEBUI_LITE_PIP_SPEC` | Optional | pip requirement for AgentWebUI Lite. Unset = `agentwebui-lite @ git+…@LITE_PINNED_COMMIT`. | The default needs the Lite repo readable from agent boxes. |
 | `CADDY_VERSION` | Optional | Override the Caddy release installed from GitHub (not an apt repo). Unset = `CADDY_DEFAULT_VERSION`. A plain release number, e.g. `2.11.7`. | Same. |
 | `RUNTIME_MIN_NODE` | Optional | Minimum Node version enforced on runtime images. | Code default. |
 

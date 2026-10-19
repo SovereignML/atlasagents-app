@@ -33,6 +33,7 @@ import { getVmProviderBySlug } from "@/lib/providers"
 import { encryptSecret } from "@/lib/crypto-secret"
 import { createAgentSubdomain, deleteAgentSubdomain, isAgentDnsEnabled } from "@/lib/agent-dns"
 import { poolKeyFor } from "./warm-pool-key"
+import { platformChatUi, withChatUi, type ChatUi } from "@/lib/runtimes/agentwebui-lite"
 import {
   sshWaitReady,
   sshRun,
@@ -189,7 +190,7 @@ async function resolveProviderId(slug: string): Promise<string | null> {
  * later refill pass advances it to `ready`.
  */
 async function createOneWarmVm(target: PoolTarget): Promise<void> {
-  const runtime = getRuntime(target.runtime)
+  const runtime = withChatUi(getRuntime(target.runtime), platformChatUi())
   const provider = await getVmProviderBySlug(target.providerSlug)
   const providerId = await resolveProviderId(target.providerSlug)
   const rootPassword = generateRootPassword()
@@ -313,7 +314,10 @@ async function advanceWarmVm(row: typeof warmVms.$inferSelect): Promise<{
       // first boot, which is exactly the cost we want paid here, not at claim.
       await sshRunScript(
         target,
-        buildBakeFinalizeScript(row.runtime as RuntimeId, row.webuiEnabled, { waitForSidecar: true }),
+        buildBakeFinalizeScript(row.runtime as RuntimeId, row.webuiEnabled, {
+          waitForSidecar: true,
+          chatUi: platformChatUi(),
+        }),
         { timeoutMs: 480_000 },
       )
     } catch {
@@ -657,6 +661,8 @@ export type ClaimedWarmVm = {
 export async function claimWarmVm(opts: {
   runtime: RuntimeId
   webuiEnabled: boolean
+  /** The claiming agent's chat UI; only a VM baked with the same one matches. */
+  chatUi?: ChatUi
   instanceId: string
   candidates: Array<{ providerSlug: string; planCode: string; regionCode: string }>
 }): Promise<ClaimedWarmVm | null> {
@@ -668,6 +674,7 @@ export async function claimWarmVm(opts: {
       regionCode: c.regionCode,
       runtime: opts.runtime,
       webuiEnabled: opts.webuiEnabled,
+      chatUi: opts.chatUi,
     }),
   )
   if (poolKeys.length === 0) return null

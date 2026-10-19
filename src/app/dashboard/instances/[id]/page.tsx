@@ -301,6 +301,7 @@ export default async function InstanceDetailPage({
           runtime: instance.runtime ?? null,
           runtimeLabel: getRuntime(instance.runtime).displayName,
           webuiEnabled: Boolean(instance.webuiEnabled),
+          chatUi: instance.chatUi ?? null,
           byosHost: instance.byosHost ?? null,
           byosPort: instance.byosPort ?? null,
           byosUser: instance.byosUser ?? null,

@@ -15,6 +15,7 @@ import { sshTargetForServer } from "@/lib/byos-server"
 import { getRuntime } from "@/lib/runtimes"
 import { isPinned, resolveForRegistry } from "@/lib/runtime-versions"
 import { sshRunScript, type SshTarget } from "@/lib/ssh"
+import { CHAT_UI_LITE, platformChatUi } from "@/lib/runtimes/agentwebui-lite"
 
 /**
  * The connect-time prebake job (plan 007, W7): after a customer connects a
@@ -180,6 +181,7 @@ export async function checkPrebakedServer(
     facts,
     hermesPin: pins.runtimeVersion ?? server.prebakedHermesVersion,
     minNodeVersion: prebakeMinNode(),
+    needsOpenWebui: platformChatUi() !== CHAT_UI_LITE,
   })
   return {
     message: usability.fastPath
