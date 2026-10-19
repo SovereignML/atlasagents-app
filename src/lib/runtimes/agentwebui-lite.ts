@@ -26,7 +26,9 @@ import type { BootstrapRenderArgs, RuntimeEngine, SidecarEnvArgs, SidecarSpec } 
  *    CLI engines under /opt/agentwebui-lite/acp;
  *  - a systemd unit that runs AS THE RUNTIME'S USER with the runtime's own env
  *    files, because the agent processes Lite starts are the engine itself and
- *    need its sign-in, keys and workspace;
+ *    need its sign-in, keys and workspace. Lite's own settings are NOT in the
+ *    unit: Lite reads them from its .env (AWL_ENV_FILE), so they never reach
+ *    the environment the agent processes inherit;
  *  - loopback :8080, the port Open WebUI used, so Caddy routes it unchanged
  *    (`/v1/*` → the gateway, everything else → the chat page).
  *
@@ -115,6 +117,12 @@ export function acpCommand(engine: Pick<RuntimeEngine, "id" | "cliBinary">): str
   if (!adapter) throw new Error(`AgentWebUI Lite has no ACP command for ${engine.id}`)
   return `${LITE_ACP_DIR}/node_modules/.bin/${adapter.bin}`
 }
+
+/**
+ * Settings Lite reads (its .env.example). A runtime env file that set one would
+ * override Lite's own .env, since Lite lets the environment win.
+ */
+export const LITE_SETTING_KEYS = /^(HOST|PORT|PASSWORD|USER_NAME|DATA_DIR|SYSTEM_PROMPT|WORKSPACE_DIR|AGENT_IDLE_MINUTES|UPLOAD_MB|RICH_REPLIES|FILES_ROOTS|TRUST_PROXY|NOTIFY_WEBHOOK|BRAND_[A-Z_]+|EMBED_SECRET|FRAME_ANCESTORS|LOCK_MODEL|LOCK_FOLDER|PROVIDER_[A-Z0-9]+_[A-Z]+|AGENT_[A-Z0-9]+_[A-Z]+)$/
 
 /** Lite's env-file key for the one agent it serves. */
 const LITE_AGENT_KEY = "AGENT"
@@ -232,8 +240,11 @@ export function makeLiteSidecar(engine: RuntimeEngine): SidecarSpec {
     },
 
     renderSystemdUnit(): string {
-      // The runtime's env first, then Lite's own, so Lite's HOST/PORT/PASSWORD
-      // win over any same-named key in the runtime's file.
+      // Only the runtime's env goes into the process environment: the agents
+      // Lite starts inherit it and need those keys. Lite's settings (password,
+      // embed secret) stay in its .env, read through AWL_ENV_FILE, so no agent
+      // sees them. The environment wins over Lite's .env, so the runtime's
+      // files must not set a key Lite reads (see LITE_SETTING_KEYS).
       return `[Unit]
 Description=AgentWebUI Lite (${engine.displayName} chat UI)
 After=network-online.target ${engine.serviceName}.service
@@ -246,8 +257,7 @@ Group=${engine.paths.systemUser}
 WorkingDirectory=${home}
 Environment=HOME=${home}
 EnvironmentFile=${engine.paths.envPath}
-${modelEnvPath ? `EnvironmentFile=-${modelEnvPath}\n` : ""}EnvironmentFile=${envPath}
-Environment=AWL_ENV_FILE=${envPath}
+${modelEnvPath ? `EnvironmentFile=-${modelEnvPath}\n` : ""}Environment=AWL_ENV_FILE=${envPath}
 ExecStart=${LITE_BIN}
 Restart=always
 RestartSec=3

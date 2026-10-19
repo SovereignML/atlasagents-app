@@ -6,6 +6,7 @@ import {
   CHAT_UI_OPEN_WEBUI,
   LITE_PINNED_COMMIT,
   LITE_PORT,
+  LITE_SETTING_KEYS,
   buildLiteEmbedUrl,
   chatUiOf,
   liteEmbedSecret,
@@ -99,13 +100,31 @@ describe("Lite as the sidecar", () => {
     expect(env).not.toHaveProperty("FRAME_ANCESTORS")
   })
 
-  it("runs as the engine's user with the engine's env, Lite's own last so it wins", () => {
-    const unit = withChatUi(getRuntime("codex"), CHAT_UI_LITE).sidecar!.renderSystemdUnit()
+  it("runs as the engine's user with the engine's env, and keeps Lite's settings out of it", () => {
     const engine = getRuntime("codex")
+    const sidecar = withChatUi(engine, CHAT_UI_LITE).sidecar!
+    const unit = sidecar.renderSystemdUnit()
     expect(unit).toContain(`User=${engine.paths.systemUser}`)
+    // Only the engine's files reach the environment the agents inherit...
     const files = [...unit.matchAll(/^EnvironmentFile=(.+)$/gm)].map((m) => m[1])
-    expect(files).toEqual([engine.paths.envPath, `-${engine.paths.configPath}`, `${engine.paths.envPath.replace(/\/[^/]+$/, "")}/agentwebui-lite.env`])
+    expect(files).toEqual([engine.paths.envPath, `-${engine.paths.configPath}`])
+    // ...and Lite reads its own (password, embed secret) from its .env.
+    expect(unit).toContain(`Environment=AWL_ENV_FILE=${sidecar.envPath}`)
     expect(unit).toContain("ExecStart=/opt/agentwebui-lite/venv/bin/agentwebui-lite")
+  })
+
+  it("never lets an engine's env override a Lite setting", () => {
+    for (const id of ["hermes", "claude-code", "codex"]) {
+      const env = getRuntime(id).buildEnv({
+        instance: { id: "i", domain: "a.example", name: "A" } as never,
+        adminEmail: "a@b.c",
+        adminPassword: "pw",
+        gatewayToken: "tok",
+        openRouterApiKey: "sk-or",
+        baseUrl: undefined,
+      } as never)
+      expect(Object.keys(env).filter((k) => LITE_SETTING_KEYS.test(k))).toEqual([])
+    }
   })
 })
 
