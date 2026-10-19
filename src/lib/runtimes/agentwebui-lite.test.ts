@@ -2,24 +2,22 @@ import crypto from "node:crypto"
 import { afterEach, describe, expect, it } from "vitest"
 import {
   ACP_ADAPTERS,
-  CHAT_UI_LITE,
-  CHAT_UI_OPEN_WEBUI,
+  LEGACY_OPEN_WEBUI_SERVICE,
+  LITE_MIGRATED,
   LITE_PINNED_COMMIT,
   LITE_PORT,
   LITE_SETTING_KEYS,
   buildLiteEmbedUrl,
-  chatUiOf,
+  buildLiteMigrationScript,
   liteEmbedSecret,
   litePipSpec,
   liteVersion,
-  platformChatUi,
-  withChatUi,
+  runsLite,
 } from "./agentwebui-lite"
-import { getRuntime, runtimeForInstance } from "./index"
-import { OPEN_WEBUI_PORT } from "./open-webui"
+import { getRuntime } from "./index"
 import { bakeIdentity } from "@/lib/warm-pool-key"
 
-const VARS = ["CHAT_UI", "AGENTWEBUI_LITE_PIP_SPEC", "INSTANCE_ENCRYPTION_KEY"] as const
+const VARS = ["AGENTWEBUI_LITE_PIP_SPEC", "INSTANCE_ENCRYPTION_KEY"] as const
 const saved = Object.fromEntries(VARS.map((k) => [k, process.env[k]]))
 afterEach(() => {
   for (const k of VARS) {
@@ -41,43 +39,33 @@ const envArgs = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 })
 
-describe("choosing the chat UI", () => {
-  it("is Open WebUI unless CHAT_UI asks for Lite", () => {
-    delete process.env.CHAT_UI
-    expect(platformChatUi()).toBe(CHAT_UI_OPEN_WEBUI)
-    process.env.CHAT_UI = "agentwebui-lite"
-    expect(platformChatUi()).toBe(CHAT_UI_LITE)
-    process.env.CHAT_UI = "something-else"
-    expect(platformChatUi()).toBe(CHAT_UI_OPEN_WEBUI)
+describe("which agents run Lite", () => {
+  it("is every agent marked on its row; NULL is a box from before Lite", () => {
+    expect(runsLite({ chatUi: "agentwebui-lite" })).toBe(true)
+    expect(runsLite({ chatUi: null })).toBe(false)
+    expect(runsLite({})).toBe(false)
   })
 
-  it("reads an agent's own UI from its row, NULL meaning Open WebUI", () => {
-    expect(chatUiOf({ chatUi: null })).toBe(CHAT_UI_OPEN_WEBUI)
-    expect(chatUiOf({})).toBe(CHAT_UI_OPEN_WEBUI)
-    expect(chatUiOf({ chatUi: "agentwebui-lite" })).toBe(CHAT_UI_LITE)
-  })
-
-  it("leaves Open WebUI agents and OpenClaw exactly as they were", () => {
-    const hermes = getRuntime("hermes")
-    expect(withChatUi(hermes, CHAT_UI_OPEN_WEBUI)).toBe(hermes)
-    expect(runtimeForInstance({ runtime: "hermes", chatUi: null })).toBe(hermes)
-    const openclaw = getRuntime("openclaw")
-    expect(withChatUi(openclaw, CHAT_UI_LITE)).toBe(openclaw)
+  it("is the chat UI of every engine that has one; OpenClaw keeps its own", () => {
+    for (const id of ["hermes", "claude-code", "codex"]) {
+      expect(getRuntime(id).sidecar?.serviceName).toBe("agentwebui-lite")
+    }
+    expect(getRuntime("openclaw").sidecar).toBeUndefined()
   })
 })
 
 describe("Lite as the sidecar", () => {
-  it("takes Open WebUI's port, so Caddy routes it unchanged, and has no admin to seed", () => {
-    const sidecar = runtimeForInstance({ runtime: "hermes", chatUi: CHAT_UI_LITE }).sidecar!
-    expect(sidecar.serviceName).toBe("agentwebui-lite")
-    expect(sidecar.port).toBe(OPEN_WEBUI_PORT)
+  it("listens where Caddy sends the chat page, and has no admin to seed", () => {
+    const sidecar = getRuntime("hermes").sidecar!
+    expect(sidecar.port).toBe(LITE_PORT)
     expect(sidecar.healthPath).toBe("/api/health")
     expect(sidecar.seedAdmin).toBeUndefined()
   })
 
   it("starts Hermes over ACP with the model and folder locked, framed only by the dashboard", () => {
-    const sidecar = withChatUi(getRuntime("hermes"), CHAT_UI_LITE).sidecar!
-    const env = sidecar.renderEnv(envArgs({ frameAncestors: ["https://app.atlasagents.dev", "nope"] }))
+    const env = getRuntime("hermes").sidecar!.renderEnv(
+      envArgs({ frameAncestors: ["https://app.atlasagents.dev", "nope"] }),
+    )
     expect(env).toMatchObject({
       HOST: "127.0.0.1",
       PORT: String(LITE_PORT),
@@ -89,20 +77,21 @@ describe("Lite as the sidecar", () => {
       AGENT_HERMES_COMMAND: "/opt/hermes/venv/bin/hermes acp",
       AGENT_HERMES_NAME: "Research bot",
       FRAME_ANCESTORS: "https://app.atlasagents.dev",
+      ATLAS_PINNED_MODEL: "anthropic/claude-sonnet-4.6",
     })
     expect(env.FILES_ROOTS).toBe(env.WORKSPACE_DIR)
-    expect(env).not.toHaveProperty("PROVIDER_OPENROUTER_URL")
+    expect(Object.keys(env).some((k) => k.startsWith("PROVIDER_"))).toBe(false)
   })
 
   it("starts the CLI engines through their pinned ACP adapters", () => {
-    const env = withChatUi(getRuntime("claude-code"), CHAT_UI_LITE).sidecar!.renderEnv(envArgs())
+    const env = getRuntime("claude-code").sidecar!.renderEnv(envArgs())
     expect(env.AGENT_CLAUDECODE_COMMAND).toBe("/opt/agentwebui-lite/acp/node_modules/.bin/claude-agent-acp")
     expect(env).not.toHaveProperty("FRAME_ANCESTORS")
   })
 
   it("runs as the engine's user with the engine's env, and keeps Lite's settings out of it", () => {
     const engine = getRuntime("codex")
-    const sidecar = withChatUi(engine, CHAT_UI_LITE).sidecar!
+    const sidecar = engine.sidecar!
     const unit = sidecar.renderSystemdUnit()
     expect(unit).toContain(`User=${engine.paths.systemUser}`)
     // Only the engine's files reach the environment the agents inherit...
@@ -129,24 +118,24 @@ describe("Lite as the sidecar", () => {
 })
 
 describe("installing Lite", () => {
-  it("installs Lite and Hermes' ACP extra instead of Open WebUI", () => {
-    const script = withChatUi(getRuntime("hermes"), CHAT_UI_LITE).renderBootstrap({
+  it("installs Hermes with its ACP extra and Lite, and no Open WebUI", () => {
+    const script = getRuntime("hermes").renderBootstrap({
       gatewayPort: 8642,
       webuiEnabled: true,
       runtimeVersion: "0.19.0",
     })
+    expect(script).toContain("RUNTIME_PKG_SPEC='hermes-agent[acp]==0.19.0'")
     expect(script).toContain('step "install_agentwebui_lite"')
-    expect(script).toContain("'hermes-agent[acp]==0.19.0'")
     expect(script).toContain(`git+https://github.com/HackersHostel/AgentWebUI-Lite@${LITE_PINNED_COMMIT}`)
-    expect(script).not.toContain("OPEN_WEBUI_PKG_SPEC")
-    expect(script).not.toContain("/opt/open-webui/venv")
+    expect(script).not.toContain("install_hermes_acp") // already in the one Hermes install
+    expect(script).not.toContain("open-webui")
   })
 
   it("installs the CLI engines' ACP adapter at its pin", () => {
-    const script = withChatUi(getRuntime("codex"), CHAT_UI_LITE).renderBootstrap({ gatewayPort: 8650, webuiEnabled: true })
+    const script = getRuntime("codex").renderBootstrap({ gatewayPort: 8650, webuiEnabled: true })
     expect(script).toContain(`'@agentclientprotocol/codex-acp@${ACP_ADAPTERS.codex.version}'`)
     expect(script).toContain('step "python_deps"')
-    expect(script).not.toContain("OPEN_WEBUI_PKG_SPEC")
+    expect(script).not.toContain("open-webui")
   })
 
   it("takes a pip requirement from AGENTWEBUI_LITE_PIP_SPEC, and names the version it installs", () => {
@@ -157,9 +146,40 @@ describe("installing Lite", () => {
     expect(liteVersion()).toBe("1.2.0")
   })
 
-  it("keys the warm pool on the chat UI, so an agent only claims a VM with its own", () => {
-    expect(bakeIdentity("hermes", true, CHAT_UI_LITE)).not.toBe(bakeIdentity("hermes", true, CHAT_UI_OPEN_WEBUI))
-    expect(bakeIdentity("openclaw", false, CHAT_UI_LITE)).toBe(bakeIdentity("openclaw", false, CHAT_UI_OPEN_WEBUI))
+  it("keys the warm pool on Lite's version, so Open WebUI pool VMs are retired", () => {
+    expect(bakeIdentity("hermes", true)).toContain(`+${liteVersion()}@`)
+  })
+})
+
+describe("moving a box from Open WebUI to Lite", () => {
+  const engine = getRuntime("claude-code")
+  const script = buildLiteMigrationScript(engine, { envB64: "ZW52" })
+
+  it("installs Lite before touching Open WebUI, so a failed install leaves the old UI up", () => {
+    const install = script.indexOf('step "install_agentwebui_lite"')
+    const remove = script.indexOf('step "remove_open_webui"')
+    expect(install).toBeGreaterThan(-1)
+    expect(remove).toBeGreaterThan(install)
+    expect(script).toContain("set -euo pipefail")
+  })
+
+  it("has its own Python setup, and Hermes' ACP extra for a Hermes box", () => {
+    expect(script).toContain("venv_create() {")
+    expect(buildLiteMigrationScript(getRuntime("hermes"), { envB64: "ZW52" })).toContain('step "install_hermes_acp"')
+  })
+
+  it("removes Open WebUI's unit, files, env and user, then starts Lite on its port", () => {
+    expect(script).toContain(`systemctl disable --now ${LEGACY_OPEN_WEBUI_SERVICE}`)
+    expect(script).toContain("rm -rf /opt/open-webui")
+    expect(script).toContain(`rm -f '${engine.paths.envPath.replace(/\/[^/]+$/, "")}/open-webui.env'`)
+    expect(script).toContain(`userdel ${LEGACY_OPEN_WEBUI_SERVICE}`)
+    expect(script).toContain(`http://127.0.0.1:${LITE_PORT}/api/health`)
+    expect(script).toContain(`echo ${LITE_MIGRATED}`)
+  })
+
+  it("writes Lite's env readable only by the engine's user", () => {
+    expect(script).toContain(`echo 'ZW52' | base64 -d > '${engine.sidecar!.envPath}'`)
+    expect(script).toContain(`chmod 600 '${engine.sidecar!.envPath}'`)
   })
 })
 

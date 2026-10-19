@@ -20,7 +20,7 @@ import { canDeploy, DEPLOY_ROLE_DENIED, getMembershipRole, getUserTeam } from "@
 import { isTeamSuspended } from "@/lib/tenant"
 import { getTeamAgentLimit, countTeamAgents } from "@/lib/seats"
 import { logAuditEvent, type AuditAction } from "@/lib/audit"
-import { CHAT_UI_LITE, liteSupports, platformChatUi } from "@/lib/runtimes/agentwebui-lite"
+import { CHAT_UI_LITE } from "@/lib/runtimes/agentwebui-lite"
 
 type Instance = InferSelectModel<typeof instances>
 
@@ -287,19 +287,13 @@ export function buildAgentFields(cfg: AgentConfig | null): {
     deploymentTarget: cfg.deployment_target,
     interfaceKind: cfg.interface,
     runtime: cfg.runtime,
-    // Hermes always boxes Open WebUI now — every new Hermes row gets the
-    // sidecar. OpenClaw never has it. Legacy Hermes rows with the column
+    // Hermes, Claude Code and Codex always get the chat UI sidecar. OpenClaw
+    // never has it (it ships its own UI). Legacy Hermes rows with the column
     // stored as false keep working API-only (the Caddy renderer still handles
     // them) but new rows always flip this on.
     webuiEnabled: runtimeCaps(cfg.runtime).hasSidecar,
-    // Which chat UI that sidecar is: AgentWebUI Lite when CHAT_UI asks for it
-    // and the engine speaks ACP, else Open WebUI (NULL). Fixed for the agent's
-    // life, so a reprovision keeps the UI installed on its box.
-    chatUi:
-      runtimeCaps(cfg.runtime).hasSidecar &&
-      liteSupports(cfg.runtime ?? "") &&
-      platformChatUi() === CHAT_UI_LITE
-        ? CHAT_UI_LITE
-        : null,
+    // The chat UI is AgentWebUI Lite. NULL marks a box from before it, which
+    // still runs Open WebUI until its next reprovision moves it.
+    chatUi: runtimeCaps(cfg.runtime).hasSidecar ? CHAT_UI_LITE : null,
   }
 }

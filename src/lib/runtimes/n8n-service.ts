@@ -6,7 +6,7 @@ import type { ToolService, ToolServiceEnvArgs } from "./types"
  * n8n` (every box already ships Node for the runtimes), supervised by systemd
  * as a dedicated `n8n` system user, bound to loopback :5678, and mounted behind
  * Caddy at `/n8n/`. No Docker — same native-process model as the runtimes and the
- * Open WebUI sidecar. The agent controls it by driving the UI with the browser
+ * chat UI sidecar. The agent controls it by driving the UI with the browser
  * tool, which the catalog auto-enables alongside n8n.
  */
 export const N8N_SERVICE_NAME = "n8n"

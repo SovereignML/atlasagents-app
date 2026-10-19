@@ -301,7 +301,7 @@ CLOUDFLARE_BASE_DOMAIN=...
 ```dotenv
 # OPENCLAW_VERSION=          # version pins (default to code-baked versions)
 # HERMES_VERSION=
-# OPEN_WEBUI_VERSION=
+# AGENTWEBUI_LITE_PIP_SPEC=  # the chat UI's pip requirement (default: the pinned git commit)
 # HERMES_MODEL=              # override the default ≥64k Hermes model
 NVIDIA_API_KEY=...           # optional DeepSeek fallback provider (mid tier)
 ```
@@ -412,8 +412,7 @@ Common causes, in rough order:
   npm being down) is the first thing to check in a bake log.
 - **The runtime package outgrew the box's Node.** As above. Runtimes are pinned
   in code now, so an upstream release no longer reaches a bake by itself — but a
-  pin bump can. Set `OPENCLAW_VERSION` (or `HERMES_VERSION` /
-  `OPEN_WEBUI_VERSION`) in `.env` back to the last good version to recover
+  pin bump can. Set `OPENCLAW_VERSION` (or `HERMES_VERSION`) in `.env` back to the last good version to recover
   immediately, then raise `minNode` deliberately (which also selects the Node
   the bootstrap installs).
 - **An OOM during the runtime install** on an undersized `POOL_PLAN_CODE`.

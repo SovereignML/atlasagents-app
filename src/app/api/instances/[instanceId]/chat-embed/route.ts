@@ -6,12 +6,7 @@ import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { canOperateInstance } from "@/lib/instance-access"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
 import { apiError } from "@/lib/api-error"
-import {
-  CHAT_UI_LITE,
-  buildLiteEmbedUrl,
-  chatUiOf,
-  liteEmbedSecret,
-} from "@/lib/runtimes/agentwebui-lite"
+import { buildLiteEmbedUrl, liteEmbedSecret, runsLite } from "@/lib/runtimes/agentwebui-lite"
 
 /**
  * POST — a one-time link that signs this browser in to the agent's chat page
@@ -44,9 +39,17 @@ export async function POST(
     if (!isAdmin && !(await canOperateInstance(effectiveUserId, instance.id))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
-    if (!instance.webuiEnabled || chatUiOf(instance) !== CHAT_UI_LITE) {
+    if (!instance.webuiEnabled) {
       return NextResponse.json(
-        { error: "This agent's chat page can't be embedded.", code: "NOT_EMBEDDABLE" },
+        { error: "This agent has no chat page.", code: "NOT_EMBEDDABLE" },
+        { status: 409 },
+      )
+    }
+    // Made before AgentWebUI Lite and not moved yet: its next update (any
+    // reprovision) installs Lite.
+    if (!runsLite(instance)) {
+      return NextResponse.json(
+        { error: "This agent still has the old chat page. It switches to the new one on its next update.", code: "NOT_MIGRATED" },
         { status: 409 },
       )
     }

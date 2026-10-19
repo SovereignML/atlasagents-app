@@ -11,21 +11,18 @@
  * This mirrors the provisioner's ingress rendering (see `provisionVps` in
  * provisioner.ts). They used to be separate copies, which is how the two routes
  * silently drifted away from the Hermes runtime: they dropped `upstreamPort`
- * (killing the Open WebUI route) and ignored `managesOwnConfig` (overwriting the
+ * (killing the chat UI route) and ignored `managesOwnConfig` (overwriting the
  * CLI-generated config.yaml with a stub). Keep this the single source of truth.
  */
 
 import type { db } from "@/db"
 import { sshInstallCaddyfile, sshRun, sshWriteFile } from "@/lib/ssh"
 import { ensureManagedOriginCert } from "@/lib/agent-origin-cert"
-import { runtimeForInstance } from "@/lib/runtimes"
-import { CHAT_UI_OPEN_WEBUI, chatUiOf } from "@/lib/runtimes/agentwebui-lite"
-import type { SidecarSpec } from "@/lib/runtimes/types"
+import { getRuntime } from "@/lib/runtimes"
 import { toolServicesForIds } from "@/configs/agent-tools"
 import { decryptSecret } from "@/lib/crypto-secret"
 import { routeModel } from "@/lib/model-router"
 import { sshTargetForInstance } from "@/lib/ssh-target"
-import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
 import type { BudgetTier } from "@/lib/agent-config"
 
 type LoadedInstance = NonNullable<
@@ -39,10 +36,6 @@ export type ReconfigureIngressOpts = {
   proxied: boolean
 }
 
-function bashSingleQuoteForScript(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`
-}
-
 /**
  * Re-render Caddy for `domain`, refresh anything downstream that embeds the
  * public hostname, and restart the affected services. Throws on failure — the
@@ -54,10 +47,10 @@ export async function reconfigureInstanceIngress(
   opts: ReconfigureIngressOpts,
 ): Promise<void> {
   const target = sshTargetForInstance(instance)
-  const runtime = runtimeForInstance(instance)
+  const runtime = getRuntime(instance.runtime)
   const { domain, proxied } = opts
 
-  // Open WebUI sidecar (Hermes): when enabled, Caddy fronts the sidecar and
+  // Chat UI sidecar: when enabled, Caddy fronts the sidecar and
   // path-routes /v1/* to the loopback-only gateway. Same expression the
   // provisioner uses — without `upstreamPort` the renderer drops to
   // single-upstream mode and the chat UI disappears from the public host.
@@ -122,61 +115,6 @@ export async function reconfigureInstanceIngress(
   if (restartStep.code !== 0 && restartStep.code !== null) {
     throw new Error(
       `systemctl restart ${runtime.serviceName} failed (exit ${restartStep.code}): ${restartStep.stderr || restartStep.stdout}`,
-    )
-  }
-
-  // Open WebUI only: it bakes WEBUI_URL into links. AgentWebUI Lite uses relative URLs.
-  if (webuiEnabled && runtime.sidecar && chatUiOf(instance) === CHAT_UI_OPEN_WEBUI) {
-    await refreshSidecarPublicUrl(instance, runtime.sidecar, domain)
-  }
-}
-
-/**
- * Open WebUI bakes its public URL into WEBUI_URL at provision time; after a
- * domain change the stale value produces wrong absolute links and redirects.
- *
- * Patch that ONE key in place. Do not re-render the sidecar env file wholesale:
- * `renderEnv` takes `enableSignup`, and the provisioner deliberately flips
- * ENABLE_SIGNUP=false once the admin account is seeded. A full re-render would
- * silently reopen public signup on the agent's chat UI.
- */
-async function refreshSidecarPublicUrl(
-  instance: LoadedInstance,
-  sidecar: SidecarSpec,
-  domain: string | null,
-): Promise<void> {
-  const publicUrl =
-    buildPublicGatewayUrl({
-      domain,
-      managedSubdomain: instance.managedSubdomain,
-      // A freshly-bound domain has no cert yet — buildPublicGatewayUrl only
-      // returns https:// once tlsStatus is "issued".
-      tlsStatus: domain ? (instance.tlsStatus ?? "pending") : null,
-      ipAddress: instance.ipAddress,
-    })?.url ?? null
-  if (!publicUrl) return
-
-  const target = sshTargetForInstance(instance)
-  const envPath = bashSingleQuoteForScript(sidecar.envPath)
-  const service = bashSingleQuoteForScript(sidecar.serviceName)
-  // `|` as the sed delimiter — the value is a URL and contains slashes.
-  const value = bashSingleQuoteForScript(publicUrl)
-
-  const step = await sshRun(
-    target,
-    `set -uo pipefail
-ENV_PATH=${envPath}
-URL=${value}
-if grep -q '^WEBUI_URL=' "\${ENV_PATH}"; then
-  sed -i "s|^WEBUI_URL=.*|WEBUI_URL=\${URL}|" "\${ENV_PATH}"
-else
-  echo "WEBUI_URL=\${URL}" >> "\${ENV_PATH}"
-fi
-systemctl restart ${service} 2>&1`,
-  )
-  if (step.code !== 0 && step.code !== null) {
-    throw new Error(
-      `refreshing ${sidecar.serviceName} WEBUI_URL failed (exit ${step.code}): ${step.stderr || step.stdout}`,
     )
   }
 }

@@ -108,15 +108,12 @@ export type InstallPlanContext = {
 export function ByosInstallForm({
   server,
   planContext,
-  liteChatUi = false,
 }: {
   server: InstallServer
   planContext: InstallPlanContext
-  /** New agents get AgentWebUI Lite (CHAT_UI), which sizes far smaller than Open WebUI. */
-  liteChatUi?: boolean
 }) {
   /** Footprint key for an engine as BYOS installs it (with its chat UI, if any). */
-  const runtimeFootprintKey = (r: Runtime) => footprintKey(r, RUNTIME_CAPS[r].hasSidecar, liteChatUi)
+  const runtimeFootprintKey = (r: Runtime) => footprintKey(r, RUNTIME_CAPS[r].hasSidecar)
   const router = useRouter()
 
   const [step, setStep] = useState<Step>("agent")
@@ -162,7 +159,7 @@ export function ByosInstallForm({
 
   // What we measured on this box, against what each runtime needs. Hermes on
   // BYOS always ships a chat UI (agent-create sets webuiEnabled from the
-  // runtime), so it is sized with it: "hermes-webui", or "hermes-lite".
+  // runtime), so it is sized with it: "hermes-lite".
   const probed = server.hwCpuCores != null
   const capacity = capacityByRuntime({
     cpuCores: server.hwCpuCores,
@@ -460,7 +457,7 @@ export function ByosInstallForm({
                 )}
                 {runtime === "hermes" && (
                   <p className="text-xs text-muted-foreground">
-                    Hermes ships with the Open WebUI chat interface bundled, which is
+                    Hermes runs a Python agent alongside its chat page, which is
                     what makes it the heavier of the two.
                   </p>
                 )}

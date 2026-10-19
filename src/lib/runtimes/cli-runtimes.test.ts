@@ -19,7 +19,7 @@ import { CLI_GATEWAY_SOURCE } from "./cli-gateway"
 import { CLI_TERMINAL_AUTH_PATH, CLI_TERMINAL_PORT, CLI_VPS_MIN_NODE } from "./cli-runtime"
 import { hermesRuntime, HERMES_GATEWAY_PORT } from "./hermes"
 import { OPENCLAW_VPS_MIN_NODE } from "./openclaw"
-import { OPEN_WEBUI_PORT } from "./open-webui"
+import { LITE_PORT } from "./agentwebui-lite"
 import { runtimeAcceptsModel, runtimeAvailableTo } from "./labels"
 import { CLAUDE_CODE_MODELS, CODEX_MODELS, effectiveModel, isAllowedOpenRouterModel } from "@/lib/model-router"
 import { availableRuntimesFor, runtimeDeployDenial } from "@/lib/runtime-access"
@@ -55,7 +55,7 @@ afterEach(() => {
 
 describe.each(ENGINES)("$rt.displayName engine", ({ rt, port, cli, sdk }) => {
   it("does not collide with any other loopback port on the box", () => {
-    const taken = [HERMES_GATEWAY_PORT, OPEN_WEBUI_PORT, CLI_TERMINAL_PORT, 18789, 5678]
+    const taken = [HERMES_GATEWAY_PORT, LITE_PORT, CLI_TERMINAL_PORT, 18789, 5678]
     expect(taken).not.toContain(port)
     expect(claudeCodeRuntime.gatewayPort).not.toBe(codexRuntime.gatewayPort)
   })
@@ -66,7 +66,7 @@ describe.each(ENGINES)("$rt.displayName engine", ({ rt, port, cli, sdk }) => {
   })
 
   describe("renderCaddyfile()", () => {
-    const out = rt.renderCaddyfile({ domain: "agent.example.com", upstreamPort: OPEN_WEBUI_PORT })
+    const out = rt.renderCaddyfile({ domain: "agent.example.com", upstreamPort: LITE_PORT })
 
     it("guards /terminal with forward_auth against its own gateway", () => {
       expect(out).toContain("handle /terminal* {")
@@ -83,7 +83,7 @@ describe.each(ENGINES)("$rt.displayName engine", ({ rt, port, cli, sdk }) => {
       expect(t).toBeGreaterThan(-1)
       expect(v1).toBeGreaterThan(t)
       expect(out).toContain(`reverse_proxy localhost:${port}`)
-      expect(out).toContain(`reverse_proxy localhost:${OPEN_WEBUI_PORT}`)
+      expect(out).toContain(`reverse_proxy localhost:${LITE_PORT}`)
     })
 
     it("keeps the terminal route even without the sidecar", () => {
@@ -148,10 +148,12 @@ describe.each(ENGINES)("$rt.displayName engine", ({ rt, port, cli, sdk }) => {
       expect(JSON.parse(pkg!).dependencies).toEqual({ [rt.id === "codex" ? "@openai/codex-sdk" : "@anthropic-ai/claude-agent-sdk"]: sdk })
     })
 
-    it("installs ttyd/tmux best-effort and Open WebUI when the sidecar is on", () => {
+    it("installs ttyd/tmux best-effort and the chat UI when the sidecar is on", () => {
       expect(boot).toMatch(/apt-get \$APT_OPTS install -y tmux ttyd \|\| echo "WARNING/)
-      expect(boot).toContain('step "install_open_webui"')
-      expect(rt.renderBootstrap({ gatewayPort: port, webuiEnabled: false })).not.toContain("install_open_webui")
+      expect(boot).toContain('step "install_agentwebui_lite"')
+      expect(boot).toContain('step "install_acp_adapter"')
+      expect(boot).not.toContain("open-webui")
+      expect(rt.renderBootstrap({ gatewayPort: port, webuiEnabled: false })).not.toContain("install_agentwebui_lite")
     })
 
     it("honours a resolved version pin", () => {
@@ -211,7 +213,7 @@ describe.each(ENGINES)("$rt.displayName engine", ({ rt, port, cli, sdk }) => {
     expect(unit).toContain(`EnvironmentFile=-${rt.paths.configPath}`)
   })
 
-  it("turns off Open WebUI's background task generation (each would be an agent run)", () => {
+  it("chats over ACP through the engine's adapter, as the engine's user", () => {
     const env = rt.sidecar!.renderEnv({
       instance: INSTANCE,
       gatewayToken: "t",
@@ -220,10 +222,10 @@ describe.each(ENGINES)("$rt.displayName engine", ({ rt, port, cli, sdk }) => {
       enableSignup: true,
       model: "m/x",
     })
-    expect(env.ENABLE_TITLE_GENERATION).toBe("false")
-    expect(env.ENABLE_FOLLOW_UP_GENERATION).toBe("false")
-    expect(env.OPENAI_API_BASE_URL).toBe(`http://127.0.0.1:${port}/v1`)
-    expect(rt.sidecar!.renderSystemdUnit()).toContain(`Wants=network-online.target ${rt.serviceName}.service`)
+    const command = Object.entries(env).find(([k]) => k.endsWith("_COMMAND"))?.[1]
+    expect(command).toMatch(/\/opt\/agentwebui-lite\/acp\/node_modules\/\.bin\/(claude-agent|codex)-acp$/)
+    expect(env.WORKSPACE_DIR).toBe(rt.paths.workspaceDir)
+    expect(rt.sidecar!.renderSystemdUnit()).toContain(`User=${rt.paths.systemUser}`)
   })
 
   it("is beta, paid-only, and ships a sidecar plus terminal", () => {
@@ -373,7 +375,7 @@ describe("beta access", () => {
 })
 
 describe("Hermes is untouched by the CLI engines", () => {
-  it("keeps Open WebUI's task generation on and has no terminal", () => {
+  it("chats through `hermes acp` and has no terminal", () => {
     const env = hermesRuntime.sidecar!.renderEnv({
       instance: INSTANCE,
       gatewayToken: "t",
@@ -382,7 +384,7 @@ describe("Hermes is untouched by the CLI engines", () => {
       enableSignup: true,
       model: "m/x",
     })
-    expect(env.ENABLE_TITLE_GENERATION).toBeUndefined()
+    expect(env.AGENT_HERMES_COMMAND).toBe("/opt/hermes/venv/bin/hermes acp")
     expect(hermesRuntime.terminal).toBeUndefined()
     expect(hermesRuntime.renderCaddyfile({ domain: "a.example.com", upstreamPort: 8080 })).not.toContain("/terminal")
   })

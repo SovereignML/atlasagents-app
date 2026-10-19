@@ -16,11 +16,9 @@
  *
  *   - **Shared prerequisites** (apt, Caddy, Node, swap, accounts) — installed.
  *     Identical for both runtimes.
- *   - **The Hermes stack** (hermes-agent + Open WebUI) — installed, both
- *     systemd units written and enabled, and Open WebUI actually started once
- *     (see the `prebake_finalize` step) so its SQLite/alembic/bytecode
- *     first-run cost is paid here rather than mid-deploy. It is the heaviest item on the slow path and Open WebUI is not part
- *     of the customer's either/or: it is Hermes' sidecar and ships everywhere.
+ *   - **Hermes** (hermes-agent, with its ACP extra) — installed, its systemd
+ *     unit written and enabled, and its CLI warmed (see `prebake_finalize`).
+ *     The chat UI (AgentWebUI Lite) is small and installed by the deploy.
  *   - **OpenClaw** — downloaded into the npm cache only, never installed. It is
  *     the genuine either/or choice, and its 225MB / 11,428-file extract is what
  *     makes it expensive — the extract stays at deploy.
@@ -40,7 +38,6 @@ import {
 } from "@/lib/runtimes/hermes"
 import { OPENCLAW_VERSION, OPENCLAW_VPS_MIN_NODE } from "@/lib/runtimes/openclaw"
 import { buildBakeFinalizeScript } from "@/lib/runtimes/finalize"
-import { CHAT_UI_LITE, platformChatUi } from "@/lib/runtimes/agentwebui-lite"
 import { npmSpec } from "@/lib/runtime-versions"
 import type { PreflightFacts } from "@/lib/byos-preflight-parse"
 
@@ -49,7 +46,7 @@ export type PrebakeStatus = "none" | "running" | "ready" | "failed" | "skipped"
 
 /**
  * Disk a prebaked box needs beyond the preflight's general floor: shared
- * prereqs + Chrome + an installed Open WebUI venv + the OpenClaw tarball in
+ * prereqs + Chrome + the Hermes venv + the OpenClaw tarball in
  * the npm cache, on a machine that is also running whatever the customer
  * already runs.
  */
@@ -203,7 +200,6 @@ export type PrebakeScriptOpts = {
   /** Resolved pins. Null falls back to the runtime's code pin, as the deploy does. */
   openclawVersion: string | null
   hermesVersion: string | null
-  webuiVersion: string | null
   /** The customer's sshd port — the firewall rules must name the real one. */
   sshPort?: number
   /**
@@ -225,24 +221,17 @@ export function buildPrebakeScript(opts: PrebakeScriptOpts): string {
     buildHermesPrebakeSteps({
       browserDeps: opts.browserDeps === true,
       pin: opts.hermesVersion ?? undefined,
-      webuiPin: opts.webuiVersion ?? undefined,
-      // AgentWebUI Lite is small and installed by the deploy itself.
-      webui: platformChatUi() !== CHAT_UI_LITE,
     }),
     buildOpenclawCacheStep(opts.openclawVersion),
-    // Install + enable the systemd units and pre-start Open WebUI, so the
-    // deploy only rewrites config and restarts. This is the same script the
-    // warm pool runs after a bake, for the same reason — and it is where the
-    // sidecar's first-boot cost (SQLite schema, alembic migrations, importing
-    // a very large Python tree) actually gets paid. Leaving it out was the
-    // difference between "restart a warm service" and "cold-start Open WebUI
-    // while the customer watches".
+    // Install + enable the gateway unit and warm Hermes' CLI, so the deploy
+    // only rewrites config and restarts. This is the same script the warm pool
+    // runs after a bake, for the same reason.
     //
     // Hermes only: OpenClaw is merely cached here, so writing its unit would
     // point systemd at a binary that does not exist yet. The deploy writes it.
     `
 step "prebake_finalize"
-${buildBakeFinalizeScript("hermes", true)}`,
+${buildBakeFinalizeScript("hermes")}`,
   ].join("\n")
 
   return buildPrereqScript({
@@ -283,8 +272,6 @@ echo "caddy=$(command -v caddy >/dev/null 2>&1 && echo 1 || echo 0)"
 echo "uv=$(command -v uv >/dev/null 2>&1 && echo 1 || echo 0)"
 hermes_v="$(/opt/hermes/venv/bin/hermes --version 2>/dev/null | tr -d '\\n' | grep -oE '[0-9]+(\\.[0-9]+)+' | head -1)"
 echo "hermes=\${hermes_v}"
-owui="$([ -x /opt/open-webui/venv/bin/open-webui ] && echo 1 || echo 0)"
-echo "open_webui=\${owui}"
 echo "openclaw_cached=$(npm cache ls openclaw 2>/dev/null | grep -c . || echo 0)"
 echo "hermes_unit=$(systemctl list-unit-files hermes-gateway.service 2>/dev/null | grep -c hermes-gateway || echo 0)"
 echo "disk_avail_gb=$(df -BG --output=avail / 2>/dev/null | tail -1 | tr -dc '0-9')"
@@ -295,7 +282,6 @@ export type PrebakeVerifyFacts = {
   hasCaddy: boolean
   hasUv: boolean
   hermesVersion: string | null
-  hasOpenWebui: boolean
   hermesUnitInstalled: boolean
   diskAvailGb: number | null
 }
@@ -324,7 +310,6 @@ export function parsePrebakeVerify(stdout: string): PrebakeVerifyFacts {
     hasCaddy: flag("caddy"),
     hasUv: flag("uv"),
     hermesVersion: str("hermes"),
-    hasOpenWebui: flag("open_webui"),
     hermesUnitInstalled: flag("hermes_unit"),
     diskAvailGb: num("disk_avail_gb"),
   }
@@ -350,8 +335,6 @@ export function prebakeUsability(opts: {
   /** The version persisted at connect, which the deploy intends to install. */
   hermesPin?: string | null
   minNodeVersion: string
-  /** Whether the deploy needs Open WebUI (false when agents get AgentWebUI Lite). */
-  needsOpenWebui?: boolean
 }): PrebakeUsability {
   const misses: string[] = []
   const { facts } = opts
@@ -372,7 +355,6 @@ export function prebakeUsability(opts: {
       // no longer honest.
       misses.push(`hermes is ${facts.hermesVersion}, pinned to ${opts.hermesPin}`)
     }
-    if (opts.needsOpenWebui !== false && !facts.hasOpenWebui) misses.push("open-webui is not installed")
     // The prebake writes and enables both units so the deploy only has to
     // restart. A missing unit means the finalize step did not run (or was
     // undone), which is exactly the drift this probe exists to catch — it was

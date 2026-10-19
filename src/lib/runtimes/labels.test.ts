@@ -43,7 +43,7 @@ describe("runtime registry exhaustiveness", () => {
 
   it("has a footprint row only for keys the registry can produce", () => {
     const producible = new Set(
-      RUNTIME_IDS.flatMap((id) => [footprintKey(id, false), footprintKey(id, true), footprintKey(id, true, true)]),
+      RUNTIME_IDS.flatMap((id) => [footprintKey(id, false), footprintKey(id, true)]),
     )
     for (const fp of AGENT_FOOTPRINTS) expect(producible.has(fp.key)).toBe(true)
   })
@@ -80,8 +80,8 @@ describe("runtimeCaps()", () => {
 })
 
 describe("footprintKey()", () => {
-  it("adds -webui only for engines that ship a sidecar", () => {
-    expect(footprintKey("hermes", true)).toBe("hermes-webui")
+  it("adds -lite only for engines that ship a sidecar", () => {
+    expect(footprintKey("hermes", true)).toBe("hermes-lite")
     expect(footprintKey("hermes", false)).toBe("hermes")
     expect(footprintKey("openclaw", true)).toBe("openclaw")
   })

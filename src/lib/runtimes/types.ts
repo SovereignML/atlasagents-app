@@ -105,7 +105,7 @@ export type RenderCaddyfileArgs = {
   domainUseInternalTls?: boolean
   /**
    * When set, Caddy reverse-proxies the public host to this loopback port
-   * instead of the runtime's `gatewayPort`. Used to put a sidecar (Open WebUI
+   * instead of the runtime's `gatewayPort`. Used to put a sidecar (the chat UI
    * on :8080) in front of the gateway, which stays loopback-only.
    */
   upstreamPort?: number
@@ -188,7 +188,7 @@ export type BootstrapRenderArgs = {
    * Omitted → today's behaviour (env override, else `latest`).
    */
   runtimeVersion?: string
-  /** Same, for the sidecar package (Open WebUI). */
+  /** Same, for the sidecar package (the chat UI). */
   sidecarVersion?: string
   /**
    * The port sshd actually listens on. Defaults to 22. BYOS servers may use
@@ -206,7 +206,7 @@ export type BootstrapRenderArgs = {
   manageFirewall?: boolean
 }
 
-/** Inputs to a sidecar's `.env` builder (e.g. Open WebUI fronting Hermes). */
+/** Inputs to a sidecar's `.env` builder (the chat UI, AgentWebUI Lite). */
 export type SidecarEnvArgs = {
   instance: Instance
   /** Bearer token the gateway expects — becomes the sidecar's OPENAI_API_KEY. */
@@ -233,17 +233,13 @@ export type SidecarEnvArgs = {
 }
 
 /**
- * An optional process sidecar a runtime can run alongside its gateway — Hermes
- * uses this to put Open WebUI in front of its OpenAI-compatible API. The
- * gateway stays loopback-only; the sidecar (also loopback) is what Caddy proxies
- * the public host to. The provisioner supervises it as a second systemd unit.
- *
- * Transport-agnostic: the runtime decides whether the sidecar is a native
- * process (e.g. a Python venv) or a container — `installSteps`/`renderSystemdUnit`
- * encapsulate that choice. Today's only sidecar (Open WebUI) is native.
+ * An optional process sidecar a runtime can run alongside its gateway: the chat
+ * UI (AgentWebUI Lite, see agentwebui-lite.ts). The gateway stays
+ * loopback-only; the sidecar (also loopback) is what Caddy proxies the public
+ * host to. The provisioner supervises it as a second systemd unit.
  */
 export type SidecarSpec = {
-  /** systemd unit name (without ".service"), e.g. "open-webui". */
+  /** systemd unit name (without ".service"), e.g. "agentwebui-lite". */
   serviceName: string
   /** Loopback port the sidecar binds; Caddy proxies the public host here. */
   port: number
@@ -253,13 +249,10 @@ export type SidecarSpec = {
   dataDir: string
   /** Absolute path of the sidecar's env file (referenced by its systemd unit). */
   envPath: string
-  /** Bash install steps injected into the runtime bootstrap (package install, user creation, etc.). */
   /**
    * NOTE: there is deliberately no `installSteps` here. The sidecar is
-   * installed by the runtime's own bootstrap — Hermes overlaps its pip install
-   * with Open WebUI's in one parallel step — and a second, standalone
-   * description of the same install drifted out of date the moment that path
-   * moved to `uv`. One description only.
+   * installed by the runtime's own bootstrap (buildLiteInstallSteps), so there
+   * is one description of the install.
    */
   /** Package name of the sidecar itself, for version resolution. */
   packageName: string
@@ -428,7 +421,7 @@ export interface RuntimeEngine {
   /** Full cloud-init bootstrap script — runtime-specific install steps inside the shared framing. */
   renderBootstrap(args: BootstrapRenderArgs): string
   /**
-   * Optional Docker sidecar fronting the gateway (Hermes → Open WebUI).
+   * Optional sidecar fronting the gateway: the chat UI (AgentWebUI Lite).
    * Undefined for runtimes that ship their own UI (OpenClaw). Only provisioned
    * when the instance has `webuiEnabled`.
    */

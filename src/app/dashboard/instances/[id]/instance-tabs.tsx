@@ -109,7 +109,7 @@ type InstanceLite = {
   runtime: string | null
   runtimeLabel: string
   webuiEnabled: boolean
-  /** "agentwebui-lite" when the chat UI is AgentWebUI Lite (embedded below), else Open WebUI. */
+  /** "agentwebui-lite" once the box runs AgentWebUI Lite; NULL while it still runs Open WebUI (made before Lite). */
   chatUi: string | null
   byosHost: string | null
   byosPort: number | null
@@ -1008,7 +1008,7 @@ function CredentialsCard({
   tlsStatus: string | null
   ipAddress: string | null
   runtimeLabel: string
-  /** When true the admin account is the Open WebUI login (the chat UI sidecar). */
+  /** When true the admin account is the chat UI's login (Open WebUI, on a box not yet moved to Lite). */
   webui?: boolean
   /**
    * The chat UI is AgentWebUI Lite, which the Chat card opens already signed
@@ -1205,7 +1205,7 @@ function GatewayTokenCard({
 }: {
   instanceId: string
   runtimeLabel: string
-  /** Hermes surfaces the key as an advanced "Gateway API Key"; OpenWebUI is the primary path. */
+  /** Hermes surfaces the key as an advanced "Gateway API Key"; the chat is the primary path. */
   openAiApi?: boolean
 }) {
   const [token, setToken] = useState<string | null>(null)
@@ -1254,7 +1254,7 @@ function GatewayTokenCard({
       title={openAiApi ? "Gateway API Key" : "Gateway Token"}
       description={
         openAiApi
-          ? "Advanced: for programmatic access to the OpenAI-compatible API at /v1. Most users can just use Open WebUI above."
+          ? "Advanced: for programmatic access to the OpenAI-compatible API at /v1. Most users can just use the chat above."
           : `Use this token to authenticate with the ${runtimeLabel} Control UI and API.`
       }
     >
@@ -1653,7 +1653,7 @@ function OverviewTab({
               terminal={runtimeCaps(instance.runtime).hasTerminal}
             />
           ) : null
-        // Hermes leads with the Open WebUI login (primary path) and pushes the
+        // Engines with a chat lead with it (the primary path) and push the
         // gateway API key below it; OpenClaw keeps the token-first ordering.
         return openAiApi ? (
           <>

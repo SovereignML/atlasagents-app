@@ -87,18 +87,15 @@ describe("reconfigureInstanceIngress() — Hermes", () => {
     expect(renderedCaddyfile()).toContain("tls internal")
   })
 
-  it("refreshes WEBUI_URL without re-rendering the sidecar env file", async () => {
+  // The chat UI (AgentWebUI Lite) uses relative URLs, so a new domain needs
+  // nothing from it: no env rewrite and no restart dropping open chats.
+  it("leaves the chat UI alone on a domain change", async () => {
     await reconfigureInstanceIngress(instance(), {
       domain: "agent.example.com",
       proxied: false,
     })
     const cmds = sshRun.mock.calls.map((c) => String(c[1]))
-    const patch = cmds.find((c) => c.includes("WEBUI_URL"))
-    expect(patch).toBeDefined()
-    expect(patch).toContain("agent.example.com")
-    // A full re-render of the sidecar env would reset ENABLE_SIGNUP=true and
-    // reopen public signup on the agent's chat UI.
-    expect(patch).not.toContain("ENABLE_SIGNUP")
+    expect(cmds.some((c) => c.includes("WEBUI_URL") || c.includes("agentwebui-lite"))).toBe(false)
     expect(sshWriteFile).not.toHaveBeenCalled()
   })
 

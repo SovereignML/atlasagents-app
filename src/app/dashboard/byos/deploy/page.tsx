@@ -12,7 +12,6 @@ import {
 } from "@/lib/byos-plan"
 import { planAllowsInstall } from "@/lib/byos-install"
 import { ByosInstallForm, type InstallServer } from "./install-form"
-import { CHAT_UI_LITE, platformChatUi } from "@/lib/runtimes/agentwebui-lite"
 
 /**
  * Install an agent onto a server the customer has already connected.
@@ -92,7 +91,6 @@ export default async function ByosDeployPage({
           priceMonthly: BYOS_PLAN.displayPriceMonthly,
           priceYearly: BYOS_PLAN.displayPriceYearly,
         }}
-        liteChatUi={platformChatUi() === CHAT_UI_LITE}
       />
     </PageContainer>
   )

@@ -9,12 +9,8 @@ import {
   cliGatewayPackageJson,
 } from "./cli-gateway"
 import { RUNTIME_CAPS } from "./labels"
-import {
-  OPEN_WEBUI_AGENT_TASKS_OFF,
-  bashSingleQuote,
-  buildOpenWebUiStandaloneInstallSteps,
-  makeOpenWebUiSidecar,
-} from "./open-webui"
+import { bashSingleQuote } from "./python-install"
+import { buildLiteInstallSteps, makeLiteSidecar } from "./agentwebui-lite"
 import type {
   BootstrapRenderArgs,
   BuildEnvArgs,
@@ -31,9 +27,10 @@ import type {
  *
  *   <id>-gateway   the Atlas CLI gateway (cli-gateway.ts) on loopback — an
  *                  OpenAI-compatible /v1 that drives the CLI through its SDK
- *   open-webui     the same chat UI sidecar Hermes uses, pointed at the gateway
+ *   agentwebui-lite  the chat UI (AgentWebUI Lite), which drives the CLI over
+ *                  ACP through the engine's ACP adapter, not through the gateway
  *   <id>-terminal  ttyd + tmux serving the CLI's own TUI at /terminal, behind
- *                  Caddy `forward_auth` against the gateway (the chat UI login)
+ *                  Caddy `forward_auth` against the gateway (the admin login)
  *
  * Layout under the install dir (= the system user's HOME):
  *   gateway/        root-owned: gateway.mjs, terminal.sh, the pinned SDK
@@ -140,13 +137,6 @@ export function createCliRuntime(spec: CliRuntimeSpec): RuntimeEngine {
   const terminalLauncher = `${gatewayDir}/terminal.sh`
   const user = bashSingleQuote(spec.systemUser)
 
-  const sidecar = makeOpenWebUiSidecar({
-    envPath: `${atlasDir}/open-webui.env`,
-    gatewayServiceName: serviceName,
-    description: `Open WebUI (${spec.displayName} chat UI)`,
-    extraEnv: OPEN_WEBUI_AGENT_TASKS_OFF,
-  })
-
   const terminal: TerminalSpec = {
     serviceName: terminalServiceName,
     port: CLI_TERMINAL_PORT,
@@ -202,7 +192,7 @@ WantedBy=multi-user.target
     return env
   }
 
-  return {
+  const engine: RuntimeEngine = {
     id: spec.id,
     displayName: spec.displayName,
     caps: RUNTIME_CAPS[spec.id],
@@ -319,7 +309,7 @@ step "terminal_deps"
 # Best-effort: without ttyd the browser terminal does not start, but the agent,
 # its API and the chat UI are unaffected.
 apt-get $APT_OPTS install -y tmux ttyd || echo "WARNING: could not install ttyd/tmux — the browser terminal will be unavailable" >&2
-${args.webuiEnabled ? buildOpenWebUiStandaloneInstallSteps(args.sidecarVersion) : ""}`
+${args.webuiEnabled ? buildLiteInstallSteps(engine, args) : ""}`
       return buildBootstrapFraming(
         {
           installDir: spec.installDir,
@@ -381,8 +371,10 @@ echo "=== provision: ${spec.id}_init_done ==="
 `
     },
 
-    sidecar,
     terminal,
   }
+  // Lite reads the engine's paths, user and ACP command, so it is made from it.
+  engine.sidecar = makeLiteSidecar(engine)
+  return engine
 }
 
