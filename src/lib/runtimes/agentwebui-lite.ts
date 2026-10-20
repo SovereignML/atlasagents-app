@@ -281,6 +281,25 @@ WantedBy=multi-user.target
   }
 }
 
+/**
+ * Bash that removes Open WebUI from a box: its unit, its whole install under
+ * /opt/open-webui (venv, data and chat history), its env file next to any
+ * runtime's own, and its system user. Idempotent, and a no-op on a box that
+ * never had it. Never fails the script it is part of.
+ *
+ * Only run it when no agent on the box still uses Open WebUI: the provisioner
+ * checks that for BYOS servers, which can host several agents.
+ */
+export function buildOpenWebuiRemovalSteps(): string {
+  const svc = LEGACY_OPEN_WEBUI_SERVICE
+  return `systemctl disable --now ${svc} >/dev/null 2>&1 || true
+rm -f /etc/systemd/system/${svc}.service
+systemctl daemon-reload >/dev/null 2>&1 || true
+rm -rf /opt/open-webui
+rm -f /opt/*/.hermes/open-webui.env /opt/*/.atlas/open-webui.env
+if id ${svc} >/dev/null 2>&1; then userdel ${svc} >/dev/null 2>&1 || true; fi`
+}
+
 /** Printed by the migration script once Lite answers on the box. */
 export const LITE_MIGRATED = "LITE_MIGRATED"
 
@@ -297,8 +316,6 @@ export function buildLiteMigrationScript(
 ): string {
   const sidecar = engine.sidecar
   if (!sidecar) throw new Error(`${engine.id} has no chat UI to migrate`)
-  // Open WebUI's env sat next to the runtime's own (.hermes/ or .atlas/).
-  const legacyEnvPath = `${engine.paths.envPath.replace(/\/[^/]+$/, "")}/open-webui.env`
   const user = bashSingleQuote(engine.paths.systemUser)
   const unitB64 = Buffer.from(sidecar.renderSystemdUnit(), "utf8").toString("base64")
   return `#!/bin/bash
@@ -318,11 +335,7 @@ step "write_lite_unit"
 echo ${bashSingleQuote(unitB64)} | base64 -d > "/etc/systemd/system/${sidecar.serviceName}.service"
 
 step "remove_open_webui"
-systemctl disable --now ${LEGACY_OPEN_WEBUI_SERVICE} 2>/dev/null || true
-rm -f /etc/systemd/system/${LEGACY_OPEN_WEBUI_SERVICE}.service
-rm -rf /opt/open-webui
-rm -f ${bashSingleQuote(legacyEnvPath)}
-if id ${LEGACY_OPEN_WEBUI_SERVICE} >/dev/null 2>&1; then userdel ${LEGACY_OPEN_WEBUI_SERVICE} || true; fi
+${buildOpenWebuiRemovalSteps()}
 
 step "start_lite"
 systemctl daemon-reload

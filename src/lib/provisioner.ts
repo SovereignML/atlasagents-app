@@ -2,7 +2,7 @@ import crypto from "node:crypto"
 import { isIP } from "node:net"
 import { lookup } from "node:dns/promises"
 import type { InferSelectModel } from "drizzle-orm"
-import { db, instances, instanceLogs, instanceKnowledge, regions, serverConfigs, providerHealthLogs, sshKeys, eq, and } from "@/db"
+import { db, instances, instanceLogs, instanceKnowledge, regions, serverConfigs, providerHealthLogs, sshKeys, eq, and, ne, isNull } from "@/db"
 import {
   logInstanceEvent,
   transitionInstance,
@@ -47,6 +47,7 @@ import {
   LEGACY_OPEN_WEBUI_SERVICE,
   LITE_MIGRATED,
   buildLiteMigrationScript,
+  buildOpenWebuiRemovalSteps,
   runsLite,
 } from "@/lib/runtimes/agentwebui-lite"
 import { runtimeAcceptsModel } from "@/lib/runtimes/labels"
@@ -605,6 +606,11 @@ function buildPhaseInstallAndStart(opts: {
   /** Ordered: dependencies first (gateway), public-facing service last (e.g. sidecar). */
   services: PhaseService[]
   caddyB64: string
+  /**
+   * Delete Open WebUI from the box first (see buildOpenWebuiRemovalSteps).
+   * False when another agent on the same BYOS server still uses it.
+   */
+  removeLegacyOpenWebui: boolean
 }): string {
   const writeUnits = opts.services
     .map(
@@ -631,11 +637,16 @@ export SYSTEMD_PAGER=cat
 MAX_CD_RETRIES=2
 
 # --- Phase B: Caddy + systemd ---
-# A box made before AgentWebUI Lite may still run Open WebUI on the chat UI's
-# port. Lite replaces it, so stop and remove its unit first (no-op elsewhere).
-systemctl disable --now ${LEGACY_OPEN_WEBUI_SERVICE} >/dev/null 2>&1 || true
-rm -f /etc/systemd/system/${LEGACY_OPEN_WEBUI_SERVICE}.service
-echo "=== provision: caddyfile_write ==="
+${
+  opts.removeLegacyOpenWebui
+    ? `# A box made before AgentWebUI Lite (or a BYOS server prebaked with it) may
+# still have Open WebUI: its service on the chat UI's port and several GB of
+# packages. No agent here uses it any more, so remove it (no-op elsewhere).
+echo "=== provision: remove_open_webui ==="
+${buildOpenWebuiRemovalSteps()}
+`
+    : ""
+}echo "=== provision: caddyfile_write ==="
 # We replace the Caddyfile wholesale. On a BYOS box that file may be the
 # customer's, serving sites that have nothing to do with us, so keep a
 # timestamped copy before clobbering it — recovering their config should not
@@ -2447,9 +2458,24 @@ async function configureRuntimeOverSsh(
   /* Phase B+C+D — install Caddy + systemd, start service, health check (single SSH session) */
   currentStage = "installing_service"
   await setProvisionStage(instance.id, currentStage)
+  // Open WebUI on this box is only ours to delete when no other agent still
+  // uses it. A managed VPS holds one agent; a BYOS server can hold several.
+  const otherOpenWebuiAgent = instance.byosServerId
+    ? await db.query.instances.findFirst({
+        where: and(
+          eq(instances.byosServerId, instance.byosServerId),
+          ne(instances.id, instance.id),
+          ne(instances.status, "deleted"),
+          eq(instances.webuiEnabled, true),
+          isNull(instances.chatUi),
+        ),
+        columns: { id: true },
+      })
+    : undefined
   const installStep = await sshRunScriptLogged(
     target,
     buildPhaseInstallAndStart({
+      removeLegacyOpenWebui: !otherOpenWebuiAgent,
       services: [
         {
           serviceName: runtime.serviceName,

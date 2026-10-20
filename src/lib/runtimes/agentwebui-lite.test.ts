@@ -7,6 +7,7 @@ import {
   LITE_PORT,
   LITE_SETTING_KEYS,
   buildLiteMigrationScript,
+  buildOpenWebuiRemovalSteps,
   liteModelId,
   litePipSpec,
   liteVersion,
@@ -199,10 +200,7 @@ describe("moving a box from Open WebUI to Lite", () => {
   })
 
   it("removes Open WebUI's unit, files, env and user, then starts Lite on its port", () => {
-    expect(script).toContain(`systemctl disable --now ${LEGACY_OPEN_WEBUI_SERVICE}`)
-    expect(script).toContain("rm -rf /opt/open-webui")
-    expect(script).toContain(`rm -f '${engine.paths.envPath.replace(/\/[^/]+$/, "")}/open-webui.env'`)
-    expect(script).toContain(`userdel ${LEGACY_OPEN_WEBUI_SERVICE}`)
+    expect(script).toContain(buildOpenWebuiRemovalSteps())
     expect(script).toContain(`http://127.0.0.1:${LITE_PORT}/api/health`)
     expect(script).toContain(`echo ${LITE_MIGRATED}`)
   })
@@ -212,3 +210,35 @@ describe("moving a box from Open WebUI to Lite", () => {
     expect(script).toContain(`chmod 600 '${engine.sidecar!.envPath}'`)
   })
 })
+
+describe("removing Open WebUI from a box", () => {
+  const steps = buildOpenWebuiRemovalSteps()
+
+  it("removes its service, install, env files and user", () => {
+    expect(steps).toContain(`systemctl disable --now ${LEGACY_OPEN_WEBUI_SERVICE}`)
+    expect(steps).toContain(`rm -f /etc/systemd/system/${LEGACY_OPEN_WEBUI_SERVICE}.service`)
+    expect(steps).toContain("rm -rf /opt/open-webui")
+    // Wherever a runtime kept it: Hermes in .hermes/, the CLI engines in .atlas/.
+    for (const id of ["hermes", "claude-code", "codex"]) {
+      const dir = getRuntime(id).paths.envPath.replace(/\/[^/]+$/, "")
+      const pattern = dir.replace(/^\/opt\/[^/]+/, "/opt/*")
+      expect(steps).toContain(`${pattern}/open-webui.env`)
+    }
+    expect(steps).toContain(`userdel ${LEGACY_OPEN_WEBUI_SERVICE}`)
+  })
+
+  // It runs inside the provisioner's install script and the migration, on
+  // boxes that may never have had Open WebUI: no line may fail the script.
+  it("never fails, so it is safe on a box that never had Open WebUI", () => {
+    for (const line of steps.split("\n")) {
+      const safe = line.includes("|| true") || line.startsWith("rm -f ") || line.startsWith("rm -rf ") || line.startsWith("if id ")
+      expect(safe, line).toBe(true)
+    }
+  })
+
+  it("only deletes what Open WebUI owned", () => {
+    expect(steps).not.toMatch(/rm -rf \/opt\/(?!open-webui\b)/)
+    expect(steps).not.toMatch(/\/opt\/(hermes|claude-code|codex)\/(?!\.)/) // never a runtime's own files
+  })
+})
+
