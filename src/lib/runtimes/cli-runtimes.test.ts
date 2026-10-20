@@ -218,8 +218,9 @@ describe.each(ENGINES)("$rt.displayName engine", ({ rt, port, cli, sdk }) => {
       instance: INSTANCE,
       gatewayToken: "t",
       gatewayPort: port,
-      secretKey: "s",
       enableSignup: true,
+      adminEmail: "a@b.local",
+      adminPassword: "pw",
       model: "m/x",
     })
     const command = Object.entries(env).find(([k]) => k.endsWith("_COMMAND"))?.[1]
@@ -380,8 +381,9 @@ describe("Hermes is untouched by the CLI engines", () => {
       instance: INSTANCE,
       gatewayToken: "t",
       gatewayPort: HERMES_GATEWAY_PORT,
-      secretKey: "s",
       enableSignup: true,
+      adminEmail: "a@b.local",
+      adminPassword: "pw",
       model: "m/x",
     })
     expect(env.AGENT_HERMES_COMMAND).toBe("/opt/hermes/venv/bin/hermes acp")

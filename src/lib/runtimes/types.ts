@@ -213,16 +213,19 @@ export type SidecarEnvArgs = {
   gatewayToken: string
   /** Loopback port the runtime gateway binds — becomes OPENAI_API_BASE_URL host:port. */
   gatewayPort: number
-  /** Random secret persisted in the sidecar env (session signing). */
-  secretKey: string
   /** Public URL the sidecar is reached at (absolute links / cookies behind the proxy). */
   publicUrl?: string | null
   /** Open signup window — true on first boot, flipped to false after the admin is seeded. */
   enableSignup: boolean
-  /** The agent's admin password: AgentWebUI Lite's sign-in password for its direct URL. */
-  adminPassword?: string
-  /** Origins that may frame the chat UI (the dashboard). AgentWebUI Lite only. */
-  frameAncestors?: string[]
+  /** The agent's admin email and password: AgentWebUI Lite's sign-in, shown under Access. */
+  adminEmail: string
+  adminPassword: string
+  /**
+   * The OpenRouter slugs an admin enabled for this engine (Admin · Models).
+   * The chat UI offers these (with `model` first). Empty for a provider other
+   * than OpenRouter, where the engine keeps its configured model.
+   */
+  selectableModels?: string[]
   /**
    * The model slug the gateway is pinned to (same value the runtime writes as its
    * own default). A chat UI sidecar needs this to pre-select a model for a fresh

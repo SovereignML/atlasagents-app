@@ -47,10 +47,8 @@ import {
   LEGACY_OPEN_WEBUI_SERVICE,
   LITE_MIGRATED,
   buildLiteMigrationScript,
-  liteEmbedSecret,
   runsLite,
 } from "@/lib/runtimes/agentwebui-lite"
-import { chatUiFrameAncestors } from "@/lib/chat-ui-origins"
 import { runtimeAcceptsModel } from "@/lib/runtimes/labels"
 import { selectableModelsForRuntime } from "@/lib/allowed-models"
 import { FREE_DEMO_TTL_MS } from "@/configs/plans"
@@ -431,6 +429,28 @@ async function selectableModelSlugs(runtimeId: string | null): Promise<string[]>
     console.error("[provisioner] could not load selectable models:", err)
     return []
   }
+}
+
+/**
+ * The models the chat UI offers: the admin-enabled slugs, which are OpenRouter
+ * slugs, so only when the agent's models go through OpenRouter. Any other
+ * provider (BYOS own key, NVIDIA) keeps its configured model, unswitchable.
+ */
+async function chatUiModelSlugs(runtimeId: string | null, providerToken: string): Promise<string[]> {
+  return providerToken === "openrouter" ? selectableModelSlugs(runtimeId) : []
+}
+
+/** Whether the box runs Lite at the pinned release (else it is moved or upgraded to it). */
+function liteIsCurrent(
+  instance: Pick<Instance, "chatUi" | "sidecarVersion">,
+  sidecar: NonNullable<RuntimeEngine["sidecar"]>,
+): boolean {
+  return runsLite(instance) && instance.sidecarVersion === sidecar.version()
+}
+
+/** The generated sign-in email an agent keeps for life (chat page, OpenClaw admin, terminal). */
+function agentAdminEmail(instance: Pick<Instance, "id" | "openclawAdminEmail">, runtimeId: string): string {
+  return instance.openclawAdminEmail ?? `admin+${instance.id.slice(0, 8)}@${runtimeId}.local`
 }
 
 /**
@@ -2190,10 +2210,7 @@ async function configureRuntimeOverSsh(
   // Every new Hermes row arrives with webuiEnabled=true, so the !webuiEnabled
   // branch only applies to legacy rows.
   const needsAdmin = runtime.caps.nativeAdminLogin || webuiEnabled
-  const adminEmail = needsAdmin
-    ? (instance.openclawAdminEmail ??
-      `admin+${instance.id.slice(0, 8)}@${runtime.id}.local`)
-    : ""
+  const adminEmail = needsAdmin ? agentAdminEmail(instance, runtime.id) : ""
   const adminPassword = needsAdmin
     ? (instance.openclawAdminPasswordEnc
       ? decryptSecret(instance.openclawAdminPasswordEnc)
@@ -2203,9 +2220,6 @@ async function configureRuntimeOverSsh(
   // Per-instance observability ingest token (least-privilege, separate from the
   // gateway token) — injected into the env and persisted encrypted at commit.
   const eventIngestToken = generateGatewayToken()
-  // The chat UI's embed secret, derived from the instance id so the dashboard
-  // can sign /embed links without storing it.
-  const webuiSecretKey = webuiEnabled ? liteEmbedSecret(instance.id) : ""
 
   /* --- 6. Write .env ---------------------------------------------- */
   currentStage = "writing_config"
@@ -2287,14 +2301,13 @@ async function configureRuntimeOverSsh(
       instance,
       gatewayToken,
       gatewayPort: runtime.gatewayPort,
-      secretKey: webuiSecretKey,
       publicUrl,
       enableSignup: true,
+      adminEmail,
       adminPassword,
-      frameAncestors: await chatUiFrameAncestors(instance.teamId),
-      // Same slug the runtime pins as its own default — the chat UI needs it to
-      // pre-select a model for the freshly seeded admin account.
+      // Same slug the runtime pins as its own default: new chats start on it.
       model: llmConfig.model,
+      selectableModels: await chatUiModelSlugs(instance.runtime, llmConfig.providerToken),
     })
     sidecarEnvB64 = Buffer.from(renderEnvFile(sidecarEnv), "utf8").toString("base64")
     sidecarEnvPath = runtime.sidecar.envPath
@@ -3725,29 +3738,46 @@ async function writeKnowledgeFiles(
  * Move an agent made before AgentWebUI Lite from Open WebUI to Lite, in place:
  * install Lite, then remove Open WebUI (its chats go with it) and start Lite on
  * the same port. Lite is installed before Open WebUI is touched, so a failure
- * leaves the old chat UI working and a later reprovision tries again. Returns
- * whether the box now runs Lite. Never throws.
+ * leaves the old chat UI working and a later reprovision tries again.
+ *
+ * The same script brings a box that already runs Lite up to the pinned
+ * release (its env rewritten whole), which is how boxes stuck on Lite 0.1.0,
+ * which exits at start, are repaired. Returns whether the box now runs the
+ * pinned Lite. Never throws.
  */
 export async function migrateChatUiToLite(
   instance: Instance,
   runtime: RuntimeEngine,
   target: SshTarget,
   model: string,
+  providerToken: string,
 ): Promise<boolean> {
   const sidecar = runtime.sidecar
-  if (!sidecar || runsLite(instance)) return runsLite(instance)
+  if (!sidecar) return false
+  if (liteIsCurrent(instance, sidecar)) return true
+  const upgrading = runsLite(instance)
   try {
+    // Lite signs in with the agent's generated email and password, which an
+    // agent made with Open WebUI already has; mint them for one that doesn't.
+    const adminEmail = agentAdminEmail(instance, runtime.id)
+    const adminPassword = instance.openclawAdminPasswordEnc
+      ? decryptSecret(instance.openclawAdminPasswordEnc)
+      : generateAdminPassword()
+    if (!instance.openclawAdminPasswordEnc || !instance.openclawAdminEmail) {
+      await db
+        .update(instances)
+        .set({ openclawAdminEmail: adminEmail, openclawAdminPasswordEnc: encryptSecret(adminPassword) })
+        .where(eq(instances.id, instance.id))
+    }
     const env = sidecar.renderEnv({
       instance,
       gatewayToken: "",
       gatewayPort: runtime.gatewayPort,
-      secretKey: liteEmbedSecret(instance.id),
       enableSignup: false,
-      adminPassword: instance.openclawAdminPasswordEnc
-        ? decryptSecret(instance.openclawAdminPasswordEnc)
-        : undefined,
-      frameAncestors: await chatUiFrameAncestors(instance.teamId),
+      adminEmail,
+      adminPassword,
       model,
+      selectableModels: await chatUiModelSlugs(instance.runtime, providerToken),
     })
     const step = await sshRunScriptLogged(
       target,
@@ -3755,7 +3785,7 @@ export async function migrateChatUiToLite(
         envB64: Buffer.from(renderEnvFile(env), "utf8").toString("base64"),
       }),
       "writing_config",
-      "migrate:chat ui (Open WebUI → AgentWebUI Lite)",
+      upgrading ? "upgrade:chat ui (AgentWebUI Lite)" : "migrate:chat ui (Open WebUI → AgentWebUI Lite)",
       { timeoutMs: 600_000 },
     )
     await logSshStep(instance.id, step)
@@ -3770,8 +3800,12 @@ export async function migrateChatUiToLite(
       instanceId: instance.id,
       level: ok ? "info" : "warn",
       message: ok
-        ? "Chat UI moved to AgentWebUI Lite; Open WebUI and its chat history were removed."
-        : `Could not move the chat UI to AgentWebUI Lite (exit ${step.exitCode}); Open WebUI keeps running, and the next reprovision tries again.`,
+        ? upgrading
+          ? `Chat UI updated to AgentWebUI Lite ${sidecar.version()}.`
+          : "Chat UI moved to AgentWebUI Lite; Open WebUI and its chat history were removed."
+        : upgrading
+          ? `Could not update the chat UI to AgentWebUI Lite ${sidecar.version()} (exit ${step.exitCode}); the next reprovision tries again.`
+          : `Could not move the chat UI to AgentWebUI Lite (exit ${step.exitCode}); Open WebUI keeps running, and the next reprovision tries again.`,
     })
     return ok
   } catch (err) {
@@ -3835,10 +3869,7 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
     // email/password it minted at first provision. The CLI engines need the
     // chat UI's login in the env too: it is what guards their /terminal.
     const hasAdminLogin = runtime.caps.nativeAdminLogin || runtime.caps.hasTerminal
-    const adminEmail = hasAdminLogin
-      ? (instance.openclawAdminEmail ??
-        `admin+${instance.id.slice(0, 8)}@${runtime.id}.local`)
-      : ""
+    const adminEmail = hasAdminLogin ? agentAdminEmail(instance, runtime.id) : ""
     const adminPassword = hasAdminLogin
       ? (instance.openclawAdminPasswordEnc
         ? decryptSecret(instance.openclawAdminPasswordEnc)
@@ -4009,7 +4040,8 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
     await startRuntimeTerminal(instance.id, target, runtime, "writing_config")
 
     // Keep the chat UI in step with the model. An agent made before AgentWebUI
-    // Lite is moved to it here first (Open WebUI and its chats are removed).
+    // Lite is moved to it here first (Open WebUI and its chats are removed),
+    // and a box on an older Lite release is brought up to the pinned one.
     //
     // reprovisionBotEnv is driven by eight routes (tools, skills, instructions,
     // model, agent-type, token, byos-key, backup-restore), and only some change the
@@ -4019,23 +4051,29 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
     //
     // Best-effort throughout: a stale model is a worse experience, not a broken
     // agent, so nothing here fails the surrounding reprovision.
-    if (webuiEnabled && runtime.sidecar && !runsLite(instance)) {
-      await migrateChatUiToLite(instance, runtime, target, llmConfig.model)
-    } else if (webuiEnabled && runtime.sidecar) {
+    if (webuiEnabled && runtime.sidecar && !liteIsCurrent(instance, runtime.sidecar)) {
+      await migrateChatUiToLite(instance, runtime, target, llmConfig.model, llmConfig.providerToken)
+    } else if (webuiEnabled && runtime.sidecar && instance.openclawAdminPasswordEnc) {
       // AgentWebUI Lite's agent processes inherit its environment and read the
-      // engine's config when they start, so a new model only reaches chats once
-      // Lite restarts. Record the pin (and the framing origins, which follow the
-      // team's white-label domain) and restart only when either moved.
+      // engine's config when they start, so a new model (or a change to the
+      // models an admin enabled) only reaches chats once Lite restarts. Rewrite
+      // every key Lite's env is made of and restart only when one moved.
       const sidecar = runtime.sidecar
-      const ancestors = await chatUiFrameAncestors(instance.teamId)
+      const liteEnv = sidecar.renderEnv({
+        instance,
+        gatewayToken: "",
+        gatewayPort: runtime.gatewayPort,
+        enableSignup: false,
+        adminEmail: agentAdminEmail(instance, runtime.id),
+        adminPassword: decryptSecret(instance.openclawAdminPasswordEnc),
+        model: llmConfig.model,
+        selectableModels: await chatUiModelSlugs(instance.runtime, llmConfig.providerToken),
+      })
       const liteStep = await sshRunScriptLogged(
         target,
         buildEnvKeyUpsertScript({
           envPath: sidecar.envPath,
-          entries: [
-            { key: "ATLAS_PINNED_MODEL", value: llmConfig.model.trim() || "default" },
-            ...(ancestors.length > 0 ? [{ key: "FRAME_ANCESTORS", value: ancestors.join(" ") }] : []),
-          ],
+          entries: Object.entries({ ATLAS_PINNED_MODEL: "default", ...liteEnv }).map(([key, value]) => ({ key, value })),
         }),
         "writing_config",
         "reprovision:chat ui model pin",

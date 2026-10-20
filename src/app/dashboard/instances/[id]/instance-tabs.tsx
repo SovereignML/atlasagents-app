@@ -14,7 +14,6 @@ import {
   Link2,
   Loader2,
   MemoryStick,
-  MessageSquare,
   RefreshCw,
   RotateCcw,
   Trash2,
@@ -901,95 +900,6 @@ function ManagedHostnameCard({ instance }: { instance: InstanceLite }) {
  * fresh one-time sign-in link (POST /api/instances/[id]/chat-embed), so no
  * password reaches the browser and a copied link is useless a minute later.
  */
-function AgentChatCard({ instanceId, runtimeLabel }: { instanceId: string; runtimeLabel: string }) {
-  const [src, setSrc] = useState<string | null>(null)
-  const [busy, setBusy] = useState<"here" | "tab" | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  async function signInLink(): Promise<string | null> {
-    const r = await fetch(`/api/instances/${instanceId}/chat-embed`, { method: "POST", cache: "no-store" })
-    const j = await r.json().catch(() => ({}))
-    if (!r.ok || typeof j.url !== "string") {
-      setError(j.error ?? `Couldn't open the chat (${r.status})`)
-      return null
-    }
-    return j.url
-  }
-
-  async function openHere() {
-    setBusy("here")
-    setError(null)
-    try {
-      const url = await signInLink()
-      if (url) setSrc(url)
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  async function openTab() {
-    // Open the tab inside the click, before the await, or the popup blocker
-    // eats it; then point it at the link once it arrives.
-    const tab = window.open("about:blank", "_blank")
-    setBusy("tab")
-    setError(null)
-    try {
-      const url = await signInLink()
-      if (url && tab) {
-        tab.opener = null
-        tab.location.href = url
-      } else {
-        tab?.close()
-      }
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  return (
-    <SectionCard
-      title="Chat"
-      description={`Talk to your ${runtimeLabel} agent here. It asks before it acts, and works only in its own workspace.`}
-    >
-      <div className="space-y-3">
-        <div className="flex flex-wrap gap-2">
-          {src ? (
-            <Button size="sm" variant="outline" onClick={() => setSrc(null)}>
-              Close chat
-            </Button>
-          ) : (
-            <Button size="sm" onClick={openHere} disabled={busy !== null}>
-              {busy === "here" ? (
-                <Loader2 data-icon="inline-start" className="animate-spin" />
-              ) : (
-                <MessageSquare data-icon="inline-start" />
-              )}
-              Open chat
-            </Button>
-          )}
-          <Button size="sm" variant="outline" onClick={openTab} disabled={busy !== null}>
-            {busy === "tab" ? (
-              <Loader2 data-icon="inline-start" className="animate-spin" />
-            ) : (
-              <ExternalLink data-icon="inline-start" />
-            )}
-            Open in a new tab
-          </Button>
-        </div>
-        {error && <p className="font-mono text-xs text-destructive">{error}</p>}
-        {src && (
-          <iframe
-            src={src}
-            title={`${runtimeLabel} chat`}
-            className="h-[70vh] min-h-[480px] w-full rounded-md border border-border bg-background"
-            allow="clipboard-write; microphone"
-          />
-        )}
-      </div>
-    </SectionCard>
-  )
-}
-
 /* ───────────── CREDENTIALS CARD ───────────── */
 function CredentialsCard({
   instanceId,
@@ -1010,10 +920,7 @@ function CredentialsCard({
   runtimeLabel: string
   /** When true the admin account is the chat UI's login (Open WebUI, on a box not yet moved to Lite). */
   webui?: boolean
-  /**
-   * The chat UI is AgentWebUI Lite, which the Chat card opens already signed
-   * in. Its password is only for reaching the page at its own address.
-   */
+  /** The chat UI is AgentWebUI Lite: this email and password sign in to it at the agent's address. */
   liteChat?: boolean
   /** When true the same login also opens the browser terminal at /terminal. */
   terminal?: boolean
@@ -1053,13 +960,13 @@ function CredentialsCard({
     null
 
   return (
-    <SectionCard title={liteChat ? "Chat Page Password" : webui ? "Open WebUI Login" : "Admin Credentials"}>
+    <SectionCard title={liteChat ? "Chat Login" : webui ? "Open WebUI Login" : "Admin Credentials"}>
       {!revealed ? (
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
             {liteChat
-              ? `The Chat card opens your ${runtimeLabel} agent's chat already signed in. To reach the chat page at its own address, sign in there with this password.${
-                  terminal ? " The email and password also open its browser terminal." : ""
+              ? `Chat with your ${runtimeLabel} agent at its address above. Sign in there with this email and password.${
+                  terminal ? " The same login opens its browser terminal." : ""
                 }`
               : webui
               ? `Log into Open WebUI (the web chat UI for your ${runtimeLabel} agent) with the auto-generated admin account.${
@@ -1075,9 +982,7 @@ function CredentialsCard({
         </div>
       ) : (
         <div className="space-y-2 text-sm">
-          {(!liteChat || terminal) && (
-            <CredRow label="Email" value={revealed.email} onCopy={() => copy(revealed.email)} />
-          )}
+          <CredRow label="Email" value={revealed.email} onCopy={() => copy(revealed.email)} />
           <CredRow label="Password" value={revealed.password} onCopy={() => copy(revealed.password)} mono />
           {loginUrl && (
             <p className="mt-2 font-mono text-[10px] text-muted-foreground">
@@ -1620,7 +1525,7 @@ function OverviewTab({
         <ManagedHostnameCard instance={instance} />
       )}
       {(() => {
-        // Engines with an OpenAI-compatible API (Hermes) lead with the chat UI.
+        // Engines with an OpenAI-compatible API (Hermes) lead with the chat login.
         const openAiApi = runtimeCaps(instance.runtime).exposesOpenAiApi
         const gatewayCard =
           instance.hasGatewayToken &&
@@ -1635,10 +1540,6 @@ function OverviewTab({
           runtimeCaps(instance.runtime).hasSidecar &&
           instance.webuiEnabled &&
           instance.chatUi === "agentwebui-lite"
-        const chatCard =
-          liteChat && instance.status === "running" ? (
-            <AgentChatCard instanceId={instance.id} runtimeLabel={instance.runtimeLabel} />
-          ) : null
         const credentialsCard =
           instance.hasOpenclawPassword && instance.status === "running" ? (
             <CredentialsCard
@@ -1653,11 +1554,10 @@ function OverviewTab({
               terminal={runtimeCaps(instance.runtime).hasTerminal}
             />
           ) : null
-        // Engines with a chat lead with it (the primary path) and push the
-        // gateway API key below it; OpenClaw keeps the token-first ordering.
+        // Engines with a chat lead with its login (the primary path) and push
+        // the gateway API key below it; OpenClaw keeps the token-first ordering.
         return openAiApi ? (
           <>
-            {chatCard}
             {credentialsCard}
             {gatewayCard}
           </>
@@ -2027,7 +1927,6 @@ function ControlsTab({
         </div>
       </SectionCard>
       <CustomInstructionsCard instance={instance} />
-      <ModelSelectCard instance={instance} />
       <AgentTypeCard instance={instance} />
       {!isVps && (
         <SectionCard
@@ -2184,176 +2083,6 @@ function CustomInstructionsCard({ instance }: { instance: InstanceLite }) {
         <Button size="sm" className="mt-3" onClick={save} disabled={saving || tooLong}>
           {saving ? "Saving…" : "Save & Apply"}
         </Button>
-      )}
-    </SectionCard>
-  )
-}
-
-/* ───────────── MODEL SELECT CARD ───────────── */
-const DEFAULT_MODEL = "__default__"
-
-type ModelTag = "cheap" | "quality" | "allrounder"
-type ModelOption = {
-  slug: string
-  label: string
-  contextLength: number | null
-  tag: ModelTag | null
-}
-type ModelInfo = {
-  current: string | null
-  tierDefault: string
-  runtime: string
-  options: ModelOption[]
-}
-
-function formatContext(ctx: number | null): string | null {
-  if (ctx == null) return null
-  return ctx >= 1000 ? `${Math.round(ctx / 1000)}k ctx` : `${ctx} ctx`
-}
-
-// At-a-glance positioning for the model picker — label + accent color per tag.
-const MODEL_TAG_META: Record<ModelTag, { label: string; className: string }> = {
-  cheap: {
-    label: "Cheap",
-    className: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  },
-  quality: {
-    label: "Best output",
-    className: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  },
-  allrounder: {
-    label: "All-rounder",
-    className: "border-sky-500/40 bg-sky-500/10 text-sky-600 dark:text-sky-400",
-  },
-}
-
-function ModelTagBadge({ tag }: { tag: ModelTag | null }) {
-  if (!tag) return null
-  const meta = MODEL_TAG_META[tag]
-  return (
-    <Badge variant="outline" className={cn("ml-1 px-1.5 py-0 text-[10px]", meta.className)}>
-      {meta.label}
-    </Badge>
-  )
-}
-
-function ModelSelectCard({ instance }: { instance: InstanceLite }) {
-  const [info, setInfo] = useState<ModelInfo | null>(null)
-  const [selected, setSelected] = useState<string>(DEFAULT_MODEL)
-  const [saving, setSaving] = useState(false)
-  const router = useRouter()
-
-  useEffect(() => {
-    let active = true
-    fetch(`/api/instances/${instance.id}/model`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j: ModelInfo | null) => {
-        if (!active || !j) return
-        setInfo(j)
-        setSelected(j.current ?? DEFAULT_MODEL)
-      })
-      .catch(() => {})
-    return () => {
-      active = false
-    }
-  }, [instance.id])
-
-  const initial = info?.current ?? DEFAULT_MODEL
-  const isDirty = selected !== initial
-
-  async function save() {
-    setSaving(true)
-    try {
-      const modelSlug = selected === DEFAULT_MODEL ? null : selected
-      const r = await fetch(`/api/instances/${instance.id}/model`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modelSlug }),
-      })
-      const j = await r.json()
-      if (!r.ok) {
-        toast.error(j.error || "Failed to update model")
-        return
-      }
-      if (j.warning) {
-        toast.warning(j.warning)
-      } else {
-        toast.success(
-          modelSlug
-            ? `Model updated to "${modelSlug}".${instance.status === "running" ? " Agent restarting." : ""}`
-            : "Model reset to the tier default.",
-        )
-      }
-      setInfo((prev) => (prev ? { ...prev, current: modelSlug } : prev))
-      router.refresh()
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const tierDefaultCtx = formatContext(
-    info?.options.find((o) => o.slug === info?.tierDefault)?.contextLength ?? null,
-  )
-
-  return (
-    <SectionCard
-      title="Model"
-      description="LLM for this agent (runtime-valid models only)."
-    >
-      {!info ? (
-        <p className="text-sm text-muted-foreground">Loading models…</p>
-      ) : (
-        <>
-          <Select value={selected} onValueChange={(v) => v && setSelected(v)}>
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value={DEFAULT_MODEL}>
-                  Default for tier ({info.tierDefault})
-                </SelectItem>
-                {info.options.map((m) => (
-                  <SelectItem key={m.slug} value={m.slug}>
-                    {m.label}
-                    {formatContext(m.contextLength)
-                      ? ` · ${formatContext(m.contextLength)}`
-                      : ""}
-                    <ModelTagBadge tag={m.tag} />
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <p className="mt-2 flex flex-wrap items-center gap-2 font-mono text-[10px] text-muted-foreground">
-            <Badge variant="outline">{info.runtime}</Badge>
-            <span>
-              {selected === DEFAULT_MODEL ? (
-                <>
-                  Using tier default:{" "}
-                  <span className="text-foreground">{info.tierDefault}</span>
-                  {tierDefaultCtx ? ` · ${tierDefaultCtx}` : ""}
-                </>
-              ) : (
-                <>
-                  Override:{" "}
-                  <span className="text-foreground">{selected}</span>
-                </>
-              )}
-            </span>
-          </p>
-          {info.options.length === 0 && (
-            <p className="mt-2 text-xs text-muted-foreground">
-              No selectable models for this runtime yet. An admin may need to sync model
-              metadata in Admin · Models.
-            </p>
-          )}
-          {isDirty && (
-            <Button size="sm" className="mt-3" onClick={save} disabled={saving}>
-              {saving ? "Saving…" : "Save & Apply"}
-            </Button>
-          )}
-        </>
       )}
     </SectionCard>
   )
