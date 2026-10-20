@@ -6,7 +6,7 @@ import type { BootstrapRenderArgs, RuntimeEngine, SidecarEnvArgs, SidecarSpec } 
 
 /* --- AgentWebUI Lite: the chat UI ------------------------------------------ */
 /**
- * AgentWebUI Lite (github.com/HackersHostel/AgentWebUI-Lite) is the chat page
+ * AgentWebUI Lite (github.com/SovereignML/AgentWebUI-Lite, published to PyPI as `agentwebui-lite`) is the chat page
  * every Hermes, Claude Code and Codex agent ships. It talks to the agent over
  * the Agent Client Protocol (ACP): it starts the engine's own ACP command
  * (`hermes acp`, Claude Code / Codex through their ACP adapters) and streams
@@ -60,25 +60,21 @@ export const LITE_ACP_DIR = `${LITE_INSTALL_DIR}/acp`
 const LITE_PYTHON_MAX_EXCLUSIVE = "3.15"
 
 /**
- * The Lite commit new boxes install. Lite is not on PyPI, so this is a git
- * install, and the repository must be readable from the box (public, or
- * published to PyPI and named in AGENTWEBUI_LITE_PIP_SPEC).
+ * The Lite release new boxes install, from PyPI (`agentwebui-lite`). Lite's
+ * repo (SovereignML/AgentWebUI-Lite) publishes a release when a `v*` tag is
+ * pushed; bump this on purpose after a test deploy.
  */
-export const LITE_PINNED_COMMIT = "49d65df07c503388f8d308073ae0e644a350d82e"
-export const LITE_REPO = "https://github.com/HackersHostel/AgentWebUI-Lite"
+export const LITE_PINNED_VERSION = "0.1.0"
 
-/** pip requirement for Lite. `AGENTWEBUI_LITE_PIP_SPEC` overrides it (e.g. `agentwebui-lite==1.2.0`). */
+/** pip requirement for Lite. `AGENTWEBUI_LITE_PIP_SPEC` overrides it (e.g. `agentwebui-lite==0.1.1`). */
 export function litePipSpec(): string {
-  return (
-    process.env.AGENTWEBUI_LITE_PIP_SPEC?.trim() ||
-    `agentwebui-lite @ git+${LITE_REPO}@${LITE_PINNED_COMMIT}`
-  )
+  return process.env.AGENTWEBUI_LITE_PIP_SPEC?.trim() || pypiSpec("agentwebui-lite", LITE_PINNED_VERSION)
 }
 
 /** What a box's Lite is, for the pool key and Instance.sidecarVersion. */
 export function liteVersion(): string {
   const override = process.env.AGENTWEBUI_LITE_PIP_SPEC?.trim()
-  if (!override) return `git-${LITE_PINNED_COMMIT.slice(0, 12)}`
+  if (!override) return LITE_PINNED_VERSION
   const pinned = override.match(/==\s*([A-Za-z0-9._+-]+)$/)?.[1]
   return pinned && isPinned(pinned) ? pinned : "custom"
 }
@@ -167,7 +163,7 @@ export function buildLiteInstallSteps(
       ? ""
       : `
 step "python_deps"
-apt-get $APT_OPTS install -y python3 python3-venv python3-pip git
+apt-get $APT_OPTS install -y python3 python3-venv python3-pip
 
 ${buildVerifyPythonStep(LITE_PYTHON_MAX_EXCLUSIVE)}
 
@@ -190,7 +186,6 @@ chmod -R a+rX ${bashSingleQuote(LITE_ACP_DIR)}`
       : ""
   return `${pythonSetup}
 step "install_agentwebui_lite"
-command -v git >/dev/null 2>&1 || apt-get $APT_OPTS install -y git
 install -d -m 0755 ${bashSingleQuote(LITE_INSTALL_DIR)}
 venv_create ${bashSingleQuote(LITE_VENV)}
 py_install ${bashSingleQuote(LITE_VENV)} ${bashSingleQuote(litePipSpec())} /var/tmp/py-cache-awl

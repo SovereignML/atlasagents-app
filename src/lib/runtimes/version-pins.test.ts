@@ -1,7 +1,7 @@
 import { afterEach, describe, it, expect } from "vitest"
 import { OPENCLAW_PINNED_VERSION, OPENCLAW_VERSION, openclawRuntime } from "./openclaw"
 import { HERMES_PINNED_VERSION, HERMES_VERSION, hermesRuntime } from "./hermes"
-import { ACP_ADAPTERS, LITE_PINNED_COMMIT } from "./agentwebui-lite"
+import { ACP_ADAPTERS, LITE_PINNED_VERSION } from "./agentwebui-lite"
 import { isPinned, isSafeVersion } from "@/lib/runtime-versions"
 
 const VARS = ["OPENCLAW_VERSION", "HERMES_VERSION", "AGENTWEBUI_LITE_PIP_SPEC"] as const
@@ -17,7 +17,7 @@ for (const k of VARS) delete process.env[k]
 describe("runtime version pins", () => {
   it("are concrete, shell-safe versions — never latest", () => {
     const adapters = Object.values(ACP_ADAPTERS).map((a) => a.version)
-    for (const v of [OPENCLAW_PINNED_VERSION, HERMES_PINNED_VERSION, ...adapters]) {
+    for (const v of [OPENCLAW_PINNED_VERSION, HERMES_PINNED_VERSION, LITE_PINNED_VERSION, ...adapters]) {
       expect(isPinned(v)).toBe(true)
       expect(isSafeVersion(v)).toBe(true)
     }
@@ -32,7 +32,7 @@ describe("runtime version pins", () => {
     )
     const hermes = hermesRuntime.renderBootstrap({ gatewayPort: 8642, webuiEnabled: true })
     expect(hermes).toContain(`RUNTIME_PKG_SPEC='hermes-agent[acp]==${HERMES_PINNED_VERSION}'`)
-    expect(hermes).toContain(`AgentWebUI-Lite@${LITE_PINNED_COMMIT}`)
+    expect(hermes).toContain(`'agentwebui-lite==${LITE_PINNED_VERSION}'`)
   })
 
   // How a bad pin gets rolled back, or upstream tracked again, without a code deploy.

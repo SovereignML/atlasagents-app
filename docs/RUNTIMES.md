@@ -89,7 +89,7 @@ Both are CLIs with no server of their own, so one factory (`createCliRuntime`) g
 |---------|----------------|--------|
 | openclaw | `OPENCLAW_PINNED_VERSION` (`openclaw.ts`) | One release behind npm `latest`. |
 | hermes-agent | `HERMES_PINNED_VERSION` (`hermes.ts`) | Newest release that has soaked (0.19.0 has been latest since 2026-07-20). |
-| AgentWebUI Lite | `LITE_PINNED_COMMIT` (`agentwebui-lite.ts`) | A git commit; not on PyPI. Override: `AGENTWEBUI_LITE_PIP_SPEC`. |
+| agentwebui-lite | `LITE_PINNED_VERSION` (`agentwebui-lite.ts`) | A PyPI release of our own `SovereignML/AgentWebUI-Lite` (published by a `v*` tag). Override: `AGENTWEBUI_LITE_PIP_SPEC`. |
 | ACP adapters | `ACP_ADAPTERS` (`agentwebui-lite.ts`) | `claude-agent-acp`, `codex-acp`: one behind npm latest. |
 | @anthropic-ai/claude-code + claude-agent-sdk | `CLAUDE_CODE_PINNED_VERSION`, `CLAUDE_AGENT_SDK_PINNED_VERSION` (`claude-code.ts`) | One behind npm latest; bump together. Override: `ATLAS_CLAUDE_CODE_VERSION` / `ATLAS_CLAUDE_AGENT_SDK_VERSION` — **not** `CLAUDE_CODE_VERSION`, which Claude Code exports to every process it spawns. |
 | @openai/codex + codex-sdk | `CODEX_PINNED_VERSION`, `CODEX_SDK_PINNED_VERSION` (`codex.ts`) | One behind npm latest; bump together. Override: `CODEX_VERSION` / `CODEX_SDK_VERSION`. |
@@ -164,7 +164,7 @@ The chat UI of every Hermes, Claude Code and Codex agent. It replaced Open WebUI
 - **No accounts.** Lite's password is the agent's admin password, and its `EMBED_SECRET` is derived per agent from `INSTANCE_ENCRYPTION_KEY` (`liteEmbedSecret`). Nothing is seeded after boot, and nothing is prewarmed: the warm pool and the BYOS prebake only warm the engine.
 - **Inside the dashboard.** The agent page's Chat card calls `POST /api/instances/[id]/chat-embed` (Operator+), which returns a one-time, one-minute `/embed` link; Lite signs the browser in with it and lets only the dashboard (and the team's white-label domain) frame it (`FRAME_ANCESTORS`). Needs the agent on HTTPS.
 - **The dashboard owns the model.** Lite runs with `LOCK_MODEL` and `LOCK_FOLDER`: no model menu, and chats always work in the agent's workspace. A model change rewrites `ATLAS_PINNED_MODEL` in Lite's env and restarts Lite, because the agent processes it starts inherit its environment.
-- **Install source.** Lite is not on PyPI: the default is a git install of `LITE_PINNED_COMMIT`, which needs the repository to be readable from the box. `AGENTWEBUI_LITE_PIP_SPEC` overrides it.
+- **Install source.** PyPI: `agentwebui-lite==LITE_PINNED_VERSION`, published from `SovereignML/AgentWebUI-Lite` when a `v*` tag is pushed (trusted publishing, no stored token). A prebuilt wheel, so no clone and no `git` on the box. The package is public on PyPI but proprietary (its LICENSE grants no use). `AGENTWEBUI_LITE_PIP_SPEC` overrides the requirement.
 
 **Agents made before Lite** (`Instance.chatUi` NULL) still run Open WebUI. Their next reprovision moves them (`migrateChatUiToLite`): it installs Lite, then stops and deletes Open WebUI (unit, venv, env, user, **and its chat history**) and starts Lite on the same port. Lite is installed before Open WebUI is touched, so a failed install leaves the old chat working and the next reprovision retries. To move them all at once: `npm run chat-ui:migrate` (dry run), then `npm run chat-ui:migrate -- --apply`. A full re-provision of such a box also removes Open WebUI's unit before starting Lite.
 
