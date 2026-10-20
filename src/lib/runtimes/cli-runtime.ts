@@ -22,7 +22,8 @@ import type {
 } from "./types"
 
 /**
- * Shared engine for coding-agent CLIs (Claude Code, Codex). They have no
+ * Shared engine for coding-agent CLIs (Claude Code, Codex, OpenCode, Pi,
+ * Gemini CLI, Grok). They have no
  * server of their own, so each box runs:
  *
  *   <id>-gateway   the Atlas CLI gateway (cli-gateway.ts) on loopback — an
@@ -54,7 +55,7 @@ export const CLI_TERMINAL_AUTH_PATH = "/_atlas/terminal-auth"
 export const CLI_VPS_MIN_NODE = "24.16.0"
 
 export type CliRuntimeSpec = {
-  id: "claude-code" | "codex" | "opencode" | "pi"
+  id: "claude-code" | "codex" | "opencode" | "pi" | "gemini-cli" | "grok"
   displayName: string
   /** The CLI users run in the terminal, installed globally with npm. */
   cliPackage: string
@@ -72,7 +73,7 @@ export type CliRuntimeSpec = {
   installDir: string
   systemUser: string
   /** Engine-specific `.env` keys (endpoints, auth, telemetry switches). */
-  engineEnv(args: { openRouterApiKey: string; installDir: string }): Record<string, string>
+  engineEnv(args: { openRouterApiKey: string; installDir: string; gatewayToken: string }): Record<string, string>
   /**
    * Engine-specific keys for `.atlas/model.env`, which the init script rewrites
    * on every (re)provision so a model change reaches the gateway and terminal.
@@ -201,7 +202,11 @@ WantedBy=multi-user.target
       OPENROUTER_API_KEY: args.openRouterApiKey,
       INSTANCE_ID: args.instance.id,
       DOMAIN: args.instance.domain ?? "",
-      ...spec.engineEnv({ openRouterApiKey: args.openRouterApiKey, installDir: spec.installDir }),
+      ...spec.engineEnv({
+        openRouterApiKey: args.openRouterApiKey,
+        installDir: spec.installDir,
+        gatewayToken: args.gatewayToken,
+      }),
     }
     // The terminal shares the chat UI's admin login. Only its sha256 lands on
     // the box (the password is 24 random characters, so a fast hash is enough);

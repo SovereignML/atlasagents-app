@@ -3,7 +3,7 @@ import { z } from "zod"
 import { auth } from "@/auth"
 import { getEffectiveUserId } from "@/lib/effective-user"
 import { db, instances, instanceLogs, subscriptions, backupRecords, eq, and } from "@/db"
-import { getFreeTierUsage, checkFreeDeployAllowed, type FreeRuntime } from "@/lib/free-tier"
+import { getFreeTierUsage, checkFreeDeployAllowed, normalizeRuntime } from "@/lib/free-tier"
 import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { canOperateInstance } from "@/lib/instance-access"
 import { logAuditEvent } from "@/lib/audit"
@@ -207,10 +207,7 @@ export async function POST(
   }
 
   // Enforce the same per-runtime + lifetime free guard as the deploy route.
-  const restoreRuntime: FreeRuntime =
-    (fields.agentConfig as { runtime?: string } | null)?.runtime === "hermes"
-      ? "hermes"
-      : "openclaw"
+  const restoreRuntime = normalizeRuntime((fields.agentConfig as { runtime?: string } | null)?.runtime)
   const usage = await getFreeTierUsage(ownerId)
   const blocked = checkFreeDeployAllowed(usage, restoreRuntime)
   if (blocked) {

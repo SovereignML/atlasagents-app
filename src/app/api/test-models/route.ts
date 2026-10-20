@@ -5,6 +5,10 @@ import type { BudgetTier } from "@/lib/agent-config"
 import { allowedModelSlugs } from "@/lib/allowed-models"
 import {
   OPENROUTER_BASE_URL,
+  claudeCodeModel,
+  codexModel,
+  geminiCliModel,
+  grokModel,
   hermesModel,
   isValidOpenRouterSlug,
   routeModel,
@@ -75,10 +79,17 @@ function configuredModels(): { model: string; role: string }[] {
   const entries: { model: string; role: string }[] = [
     { model: route.model, role: "OpenClaw primary" },
     { model: route.fallback, role: "OpenClaw fallback" },
-    ...TIERS.map((tier) => ({
-      model: hermesModel(tier),
-      role: `Hermes ${tier} tier`,
-    })),
+    ...(
+      [
+        ["Hermes, OpenCode, Pi", hermesModel],
+        ["Claude Code", claudeCodeModel],
+        ["Codex", codexModel],
+        ["Gemini CLI", geminiCliModel],
+        ["Grok", grokModel],
+      ] as const
+    ).flatMap(([engine, ladder]) =>
+      TIERS.map((tier) => ({ model: ladder(tier), role: `${engine} ${tier} tier` })),
+    ),
   ]
   // Dedupe by slug, merging roles, so shared slugs probe (and bill) once.
   const byModel = new Map<string, string[]>()

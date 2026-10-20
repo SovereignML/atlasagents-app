@@ -15,13 +15,19 @@ export const registerSchema = z.object({
 // loosely typed here — its full shape is validated downstream by
 // parseAgentConfig (src/lib/agent-config.ts).
 export const deploySchema = z.object({
-  name: z.string().min(1, "Agent name is required").max(60),
+  // Optional: the wizard leaves naming to the server (generateProjectName).
+  name: z.string().trim().min(1).max(60).optional(),
   planSlug: z.string().min(1).default("builder"),
   regionSlug: z.string().min(1).optional(),
   billingInterval: z.enum(["month", "year"]).default("month"),
   rootPassword: z.string().min(8).max(128).optional(),
   sshPublicKey: z.string().optional(),
   agentConfig: z.unknown().optional(),
+})
+
+// Renaming an agent (PATCH /api/instances/<id>): the display name only.
+export const instanceRenameSchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(60, "Use at most 60 characters"),
 })
 
 // Agent observability events POSTed to /api/instances/<id>/events. The agent
@@ -149,7 +155,8 @@ export const byosServerConnectSchema = z.object({
 const secret = z.string().max(512)
 const url = z.string().trim().max(2048)
 export const byosDeploySchema = z.object({
-  name: z.string().trim().min(1, "Missing required fields (name, byosServerId)").max(60),
+  // Optional: the install wizard leaves naming to the server.
+  name: z.string().trim().min(1).max(60).optional(),
   byosServerId: id,
   llmMode: z.enum(["managed_credits", "own_key"], { message: "Invalid llmMode" }),
   ownApiKey: secret.optional(),
@@ -279,6 +286,7 @@ const modelSlug = z.string().trim().min(1, "slug is required").max(200)
 const modelKind = z.enum(["chat", "image", "moderation"], { message: "kind must be chat | image | moderation" })
 export const adminModelAddSchema = z.union([
   z.object({ action: z.literal("sync") }),
+  z.object({ action: z.literal("reset") }),
   z.object({
     action: z.undefined().optional(),
     slug: modelSlug,

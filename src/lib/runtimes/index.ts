@@ -4,6 +4,8 @@ import { claudeCodeRuntime } from "./claude-code"
 import { codexRuntime } from "./codex"
 import { opencodeRuntime } from "./opencode"
 import { piRuntime } from "./pi"
+import { geminiCliRuntime } from "./gemini-cli"
+import { grokRuntime } from "./grok"
 import type { RuntimeEngine, RuntimeId } from "./types"
 
 export const RUNTIMES: Record<RuntimeId, RuntimeEngine> = {
@@ -13,6 +15,8 @@ export const RUNTIMES: Record<RuntimeId, RuntimeEngine> = {
   codex: codexRuntime,
   opencode: opencodeRuntime,
   pi: piRuntime,
+  "gemini-cli": geminiCliRuntime,
+  grok: grokRuntime,
 }
 
 /** All selectable runtimes, in display order, for UI menus. */
@@ -23,6 +27,8 @@ export const RUNTIME_LIST: RuntimeEngine[] = [
   codexRuntime,
   opencodeRuntime,
   piRuntime,
+  geminiCliRuntime,
+  grokRuntime,
 ]
 
 /** Default runtime for instances with no explicit choice (backward compat). */

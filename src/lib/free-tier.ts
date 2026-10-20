@@ -5,8 +5,9 @@
 // snapshot:
 //
 //   1. Concurrency — at most ONE live free agent per runtime. A user may run
-//      one free OpenClaw AND one free Hermes simultaneously, but not two of
-//      the same runtime.
+//      one free OpenClaw AND one free Hermes (or Grok, …) simultaneously, but
+//      not two of the same runtime. Which engines Free offers at all is
+//      `allowedOnFree` in runtimes/labels.ts.
 //   2. Lifetime — a user may ever deploy at most FREE_LIFETIME_LIMIT free
 //      agents. Once that allowance is spent the Free plan is removed for them
 //      (hidden in the deploy UI, rejected by the API).
@@ -18,12 +19,14 @@
 // the current concurrency picture.
 
 import { db, instances, users, eq, and, isNotNull } from "@/db"
+import { isRuntimeId, runtimeLabel } from "@/lib/runtimes/labels"
+import type { RuntimeId } from "@/lib/runtimes/types"
 
 /** Default max free-tier (demo) agents a user may ever deploy, absent a
  *  per-user override (users.freeAgentLimit). */
 export const FREE_LIFETIME_LIMIT = 3
 
-export type FreeRuntime = "openclaw" | "hermes"
+export type FreeRuntime = RuntimeId
 
 export type FreeTierUsage = {
   /** Free agents this user has ever deployed (any status, including deleted). */
@@ -40,8 +43,9 @@ export type FreeTierUsage = {
 
 const DEAD_STATUSES = new Set(["deleting", "deleted"])
 
-function normalizeRuntime(runtime: string | null): FreeRuntime {
-  return runtime === "hermes" ? "hermes" : "openclaw"
+/** A row's runtime; NULL / unknown is OpenClaw, as everywhere else. */
+export function normalizeRuntime(runtime: string | null | undefined): FreeRuntime {
+  return isRuntimeId(runtime) ? runtime : "openclaw"
 }
 
 /** Snapshot of a user's free-tier usage, used to gate new free deployments. */
@@ -96,7 +100,7 @@ export function checkFreeDeployAllowed(
     }
   }
   if (usage.activeRuntimes.includes(runtime)) {
-    const label = runtime === "hermes" ? "Hermes" : "OpenClaw"
+    const label = runtimeLabel(runtime)
     return {
       status: 409,
       body: {

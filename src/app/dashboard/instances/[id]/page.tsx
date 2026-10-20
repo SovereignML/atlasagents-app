@@ -34,6 +34,7 @@ import { whereUserInstanceVisible } from "@/lib/instance-queries"
 import { getEffectiveUserId } from "@/lib/effective-user"
 import { getInstanceAccessLevel, levelAtLeast } from "@/lib/instance-access"
 import { getRuntime } from "@/lib/runtimes"
+import { AgentName } from "./agent-name"
 import { InstanceTabs } from "./instance-tabs"
 
 function statusBadgeVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
@@ -65,6 +66,7 @@ export default async function InstanceDetailPage({
   if (!session?.user?.id) redirect("/login")
   // Resolve through impersonation so an admin viewing-as a user can open their agents.
   const effectiveUserId = (await getEffectiveUserId()) ?? session.user.id
+  const isPlatformAdmin = (session.user as { role?: string }).role === "admin"
 
   const { id } = await params
   const { tab } = await searchParams
@@ -165,7 +167,11 @@ export default async function InstanceDetailPage({
             </BreadcrumbList>
           </Breadcrumb>
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-[34px] font-semibold tracking-tight">{instance.name}</h1>
+            <AgentName
+              instanceId={instance.id}
+              name={instance.name}
+              canRename={instance.status !== "deleted" && (isPlatformAdmin || accessControl.canManageAccess)}
+            />
             {instance.status === "running" ? (
               <Badge
                 variant="default"

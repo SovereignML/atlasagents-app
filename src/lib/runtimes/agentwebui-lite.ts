@@ -7,9 +7,9 @@ import type { BootstrapRenderArgs, RuntimeEngine, SidecarEnvArgs, SidecarSpec } 
 /* --- AgentWebUI Lite: the chat UI ------------------------------------------ */
 /**
  * AgentWebUI Lite (github.com/SovereignML/AgentWebUI-Lite, published to PyPI as `agentwebui-lite`) is the chat page
- * every Hermes, Claude Code, Codex, OpenCode and Pi agent ships. It talks to
- * the agent over the Agent Client Protocol (ACP): it starts the engine's own
- * ACP command (`hermes acp`, `opencode acp`; Claude Code, Codex and Pi through
+ * every agent but OpenClaw ships. It talks to the agent over the Agent Client
+ * Protocol (ACP): it starts the engine's own ACP command (`hermes acp`,
+ * `opencode acp`, `gemini --acp`, `grok agent stdio`; Claude Code, Codex and Pi through
  * their ACP adapters) and streams its replies, plans, tool calls and
  * permission questions.
  *
@@ -95,20 +95,25 @@ export const ACP_ADAPTERS: Record<string, { pkg: string; version: string; bin: s
   pi: { pkg: "pi-acp", version: "0.0.33", bin: "pi-acp" },
 }
 
-/** Engines whose own CLI speaks ACP (`<cli> acp`), with no adapter. */
-const NATIVE_ACP = new Set(["hermes", "opencode"])
+/** Engines whose own CLI speaks ACP, with no adapter: the arguments that start it. */
+const NATIVE_ACP: Record<string, string> = {
+  hermes: "acp",
+  opencode: "acp",
+  "gemini-cli": "--acp",
+  grok: "agent stdio",
+}
 
 /** hermes-agent's ACP server is an optional extra (`agent-client-protocol`). */
 const HERMES_ACP_EXTRA = "hermes-agent[acp]"
 
 /** Whether Lite can front this engine. OpenClaw keeps its own UI. */
 export function liteSupports(runtimeId: string): boolean {
-  return NATIVE_ACP.has(runtimeId) || runtimeId in ACP_ADAPTERS
+  return runtimeId in NATIVE_ACP || runtimeId in ACP_ADAPTERS
 }
 
 /** The ACP command Lite starts for an engine. */
 export function acpCommand(engine: Pick<RuntimeEngine, "id" | "cliBinary">): string {
-  if (NATIVE_ACP.has(engine.id)) return `${engine.cliBinary} acp`
+  if (engine.id in NATIVE_ACP) return `${engine.cliBinary} ${NATIVE_ACP[engine.id]}`
   const adapter = ACP_ADAPTERS[engine.id]
   if (!adapter) throw new Error(`AgentWebUI Lite has no ACP command for ${engine.id}`)
   return `${LITE_ACP_DIR}/node_modules/.bin/${adapter.bin}`
@@ -121,11 +126,15 @@ export function acpCommand(engine: Pick<RuntimeEngine, "id" | "cliBinary">): str
  *    OpenRouter (with the patch in hermes.ts; a bare slug can be taken to
  *    another provider whose catalog also lists it);
  *  - OpenCode and Pi list `openrouter/<slug>`;
- *  - Claude Code and Codex use the slug as their engine config names it.
+ *  - Claude Code and Codex use the slug as their engine config names it;
+ *  - Gemini CLI and Grok use their vendor's own model name (the slug without
+ *    `google/` or `x-ai/`), as their config maps it onto OpenRouter.
  */
 export function liteModelId(engineId: string, slug: string): string {
   if (engineId === "hermes") return `openrouter:${slug}`
   if (engineId === "opencode" || engineId === "pi") return `openrouter/${slug}`
+  if (engineId === "gemini-cli") return slug.replace(/^google\//, "")
+  if (engineId === "grok") return slug.replace(/^x-ai\//, "")
   return slug
 }
 

@@ -147,8 +147,8 @@ Direct OpenAI-compatible fallback (`https://integrate.api.nvidia.com/v1`). Eithe
 | Variable | Required? | What it does | How to obtain / generate |
 |----------|-----------|--------------|--------------------------|
 | `NVIDIA_API_KEY` | Feature | Legacy single key — back-compat fallback when the slot keys are unset. | [build.nvidia.com](https://build.nvidia.com/). |
-| `NVIDIA_API_KEY_PRIMARY` | Feature | Per-slot key for the admin Models panel; pairs with `mistralai/mistral-medium-3.5-128b`. | Same. |
-| `NVIDIA_API_KEY_SECONDARY` | Feature | Per-slot key; pairs with `z-ai/glm-5.1`. | Same. |
+| `NVIDIA_API_KEY_PRIMARY` | Feature | Per-slot key for the admin Models panel; pairs with `z-ai/glm-5.3`. | Same. |
+| `NVIDIA_API_KEY_SECONDARY` | Feature | Per-slot key; pairs with `nvidia/nemotron-3.5-super-vl-120b-a12b`. | Same. |
 
 ## 15. LLM default provider
 
@@ -305,8 +305,10 @@ Pre-booted, pre-URL'd VMs kept ready so a deploy can **claim** one and skip cold
 | Variable | Required? | What it does | How to obtain / generate |
 |----------|-----------|--------------|--------------------------|
 | `POOL_ENABLED` | Optional | Set `false` to disable the pool entirely; blank = auto-on when creds present. | Leave blank, or `false`. |
-| `POOL_SIZE_UNIVERSAL` | Optional | Target ready universal VMs: every chat-UI engine (Hermes, Claude Code, Codex, OpenCode, Pi) and AgentWebUI Lite installed, so a deploy of any of them claims one. `0` disables it. | Default `2`. `POOL_SIZE_HERMES`, its old name, is still read when this is unset. |
+| `POOL_SIZE_UNIVERSAL` | Optional | Target ready universal VMs: every engine but OpenClaw (Hermes, Claude Code, Codex, OpenCode, Pi, Gemini CLI, Grok) and AgentWebUI Lite installed, so a deploy of any of them claims one. `0` disables it. | Default `2`. `POOL_SIZE_HERMES`, its old name, is still read when this is unset. |
 | `ATLAS_OPENCODE_VERSION` / `ATLAS_PI_VERSION` / `ATLAS_PI_ACP_VERSION` | Optional | Override the OpenCode / Pi / `pi-acp` pins (a version, or `latest`). | Defaults in `opencode.ts` / `pi.ts`. |
+| `ATLAS_GEMINI_CLI_VERSION` / `ATLAS_GROK_VERSION` | Optional | Override the Gemini CLI / Grok pins (a version, or `latest`). | Defaults in `gemini-cli.ts` / `grok.ts`. |
+| `GEMINI_CLI_MODEL` / `GROK_MODEL` | Optional | Pin one model for every tier of Gemini CLI / Grok agents (`google/…` / `x-ai/…`). | Defaults: `GEMINI_CLI_MODELS` / `GROK_MODELS` in `model-router.ts`. |
 | `POOL_SIZE_OPENCLAW` | Optional | Target ready OpenClaw VMs. `0` disables the OpenClaw pool. | Default `1`. |
 | `POOL_REFILL_INTERVAL_MS` | Optional | In-process refill cadence (ms). | Default `60000`. |
 | `POOL_PROVIDER_SLUG` | Optional | Provider the pool warms — **must match where deploys route** or claims miss. | Align to your primary provider (e.g. `digitalocean`). |

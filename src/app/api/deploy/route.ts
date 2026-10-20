@@ -13,13 +13,14 @@ import { planUnitAmountCents } from "@/lib/pricing"
 import { findPlanBySlug } from "@/configs/plans"
 import { BRANDING } from "@/configs/branding"
 import { parseAgentConfig } from "@/lib/agent-config"
-import { getFreeTierUsage, checkFreeDeployAllowed, type FreeRuntime } from "@/lib/free-tier"
+import { getFreeTierUsage, checkFreeDeployAllowed, normalizeRuntime } from "@/lib/free-tier"
 import { provisionBot } from "@/lib/provisioner"
 import { describeVmError } from "@/lib/vm-provider"
 import { addPlanCredits } from "@/lib/wallet"
 import { creditGrantSchedule } from "@/lib/plan-period"
 import { getEffectiveTeam } from "@/lib/effective-user"
 import { createInstanceFromAgentFields } from "@/lib/agent-create"
+import { generateProjectName } from "@/lib/project-name"
 import { runtimeDeployDenial } from "@/lib/runtime-access"
 import { deploySchema } from "@/lib/validations"
 import { stripeIdempotencyKey } from "@/lib/stripe-idempotency"
@@ -55,7 +56,7 @@ async function handleDeploy(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 })
   }
   const {
-    name,
+    name: requestedName,
     planSlug,
     regionSlug,
     billingInterval,
@@ -63,6 +64,8 @@ async function handleDeploy(req: NextRequest) {
     sshPublicKey,
     agentConfig: agentConfigInput,
   } = parsed.data
+
+  const name = requestedName || generateProjectName()
 
   // ── Resolve plan ──────────────────────────────────────────────────
   const planConfig = findPlanBySlug(planSlug)
@@ -88,13 +91,10 @@ async function handleDeploy(req: NextRequest) {
   }
 
   // ── Free tier: per-runtime concurrency + lifetime cap ─────────────
-  // One live free agent per runtime (OpenClaw + Hermes), up to a lifetime of
+  // One live free agent per runtime, up to a lifetime of
   // FREE_LIFETIME_LIMIT deploys total. See src/lib/free-tier.ts.
   if (planConfig.tier === "free") {
-    const runtime: FreeRuntime =
-      parsedAgentConfig?.ok && parsedAgentConfig.data.runtime === "hermes"
-        ? "hermes"
-        : "openclaw"
+    const runtime = normalizeRuntime(parsedAgentConfig?.ok ? parsedAgentConfig.data.runtime : null)
     const usage = await getFreeTierUsage(effectiveUserId)
     const blocked = checkFreeDeployAllowed(usage, runtime)
     if (blocked) {
