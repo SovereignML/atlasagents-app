@@ -64,7 +64,7 @@ const LITE_PYTHON_MAX_EXCLUSIVE = "3.15"
  * install, and the repository must be readable from the box (public, or
  * published to PyPI and named in AGENTWEBUI_LITE_PIP_SPEC).
  */
-export const LITE_PINNED_COMMIT = "79e1c51757acc154e4c19c6d21f3e9e2ceaf2518"
+export const LITE_PINNED_COMMIT = "49d65df07c503388f8d308073ae0e644a350d82e"
 export const LITE_REPO = "https://github.com/HackersHostel/AgentWebUI-Lite"
 
 /** pip requirement for Lite. `AGENTWEBUI_LITE_PIP_SPEC` overrides it (e.g. `agentwebui-lite==1.2.0`). */
