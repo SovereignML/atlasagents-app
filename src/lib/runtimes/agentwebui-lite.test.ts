@@ -4,7 +4,7 @@ import {
   ACP_ADAPTERS,
   LEGACY_OPEN_WEBUI_SERVICE,
   LITE_MIGRATED,
-  LITE_PINNED_COMMIT,
+  LITE_PINNED_VERSION,
   LITE_PORT,
   LITE_SETTING_KEYS,
   buildLiteEmbedUrl,
@@ -126,7 +126,8 @@ describe("installing Lite", () => {
     })
     expect(script).toContain("RUNTIME_PKG_SPEC='hermes-agent[acp]==0.19.0'")
     expect(script).toContain('step "install_agentwebui_lite"')
-    expect(script).toContain(`git+https://github.com/HackersHostel/AgentWebUI-Lite@${LITE_PINNED_COMMIT}`)
+    expect(script).toContain(`'agentwebui-lite==${LITE_PINNED_VERSION}'`)
+    expect(script).not.toContain("git+") // a PyPI release: no clone, no git on the box
     expect(script).not.toContain("install_hermes_acp") // already in the one Hermes install
     expect(script).not.toContain("open-webui")
   })
@@ -140,7 +141,7 @@ describe("installing Lite", () => {
 
   it("takes a pip requirement from AGENTWEBUI_LITE_PIP_SPEC, and names the version it installs", () => {
     delete process.env.AGENTWEBUI_LITE_PIP_SPEC
-    expect(liteVersion()).toBe(`git-${LITE_PINNED_COMMIT.slice(0, 12)}`)
+    expect(liteVersion()).toBe(LITE_PINNED_VERSION)
     process.env.AGENTWEBUI_LITE_PIP_SPEC = "agentwebui-lite==1.2.0"
     expect(litePipSpec()).toBe("agentwebui-lite==1.2.0")
     expect(liteVersion()).toBe("1.2.0")
