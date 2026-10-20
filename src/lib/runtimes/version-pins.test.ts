@@ -31,7 +31,7 @@ describe("runtime version pins", () => {
       `RUNTIME_PKG_SPEC='openclaw@${OPENCLAW_PINNED_VERSION}'`,
     )
     const hermes = hermesRuntime.renderBootstrap({ gatewayPort: 8642, webuiEnabled: true })
-    expect(hermes).toContain(`RUNTIME_PKG_SPEC='hermes-agent[acp]==${HERMES_PINNED_VERSION}'`)
+    expect(hermes).toContain(`RUNTIME_PKG_SPEC='hermes-agent[acp,messaging]==${HERMES_PINNED_VERSION}'`)
     expect(hermes).toContain(`'agentwebui-lite==${LITE_PINNED_VERSION}'`)
   })
 
@@ -43,7 +43,7 @@ describe("runtime version pins", () => {
     expect(OPENCLAW_VERSION()).toBe("2026.8.35")
     expect(HERMES_VERSION()).toBe("latest")
     const hermes = hermesRuntime.renderBootstrap({ gatewayPort: 8642, webuiEnabled: true })
-    expect(hermes).toContain("RUNTIME_PKG_SPEC='hermes-agent[acp]'")
+    expect(hermes).toContain("RUNTIME_PKG_SPEC='hermes-agent[acp,messaging]'")
     expect(hermes).toContain("'agentwebui-lite==1.2.0'")
   })
 })

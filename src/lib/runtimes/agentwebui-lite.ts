@@ -103,8 +103,12 @@ const NATIVE_ACP: Record<string, string> = {
   grok: "agent stdio",
 }
 
-/** hermes-agent's ACP server is an optional extra (`agent-client-protocol`). */
-const HERMES_ACP_EXTRA = "hermes-agent[acp]"
+/**
+ * hermes-agent's ACP server is an optional extra (`agent-client-protocol`).
+ * `messaging` comes along so a box moved to Lite also has aiohttp, which the
+ * gateway's API server needs (same spec as a fresh install, hermes.ts).
+ */
+const HERMES_ACP_EXTRA = "hermes-agent[acp,messaging]"
 
 /** Whether Lite can front this engine. OpenClaw keeps its own UI. */
 export function liteSupports(runtimeId: string): boolean {

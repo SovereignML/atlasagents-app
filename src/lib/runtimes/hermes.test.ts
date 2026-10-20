@@ -206,13 +206,15 @@ describe("Hermes bootstrap — Node floor and browser dependencies", () => {
 })
 
 describe("Hermes bootstrap — version pinning", () => {
-  it("pins the runtime, with its ACP extra, when resolved", () => {
+  it("pins the runtime, with its ACP and messaging extras, when resolved", () => {
     const script = hermesRuntime.renderBootstrap({
       gatewayPort: hermesRuntime.gatewayPort,
       webuiEnabled: true,
       runtimeVersion: "0.19.0",
     })
-    expect(script).toContain("RUNTIME_PKG_SPEC='hermes-agent[acp]==0.19.0'")
+    expect(script).toContain("RUNTIME_PKG_SPEC='hermes-agent[acp,messaging]==0.19.0'")
+    // aiohttp (from `messaging`) is what lets the gateway serve /v1 on :8642.
+    expect(script).toContain(`'/opt/hermes/venv/bin/python' -c 'import aiohttp'`)
   })
 
   // No resolved pin means the code pins, not a bare dist name (which is how
@@ -222,7 +224,7 @@ describe("Hermes bootstrap — version pinning", () => {
       gatewayPort: hermesRuntime.gatewayPort,
       webuiEnabled: true,
     })
-    expect(script).toContain(`RUNTIME_PKG_SPEC='hermes-agent[acp]==${HERMES_PINNED_VERSION}'`)
+    expect(script).toContain(`RUNTIME_PKG_SPEC='hermes-agent[acp,messaging]==${HERMES_PINNED_VERSION}'`)
   })
 })
 

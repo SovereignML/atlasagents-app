@@ -96,11 +96,16 @@ const HERMES_WORKSPACE_DIR = `${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}/work
 const HERMES_ENV_PATH = `${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}/.env`
 
 /**
- * hermes-agent with its `acp` extra (`agent-client-protocol`): `hermes acp` is
- * how the chat UI (AgentWebUI Lite) talks to it. One install, not two.
+ * hermes-agent with two extras, in one install:
+ *  - `acp` (`agent-client-protocol`): `hermes acp` is how the chat UI
+ *    (AgentWebUI Lite) talks to it;
+ *  - `messaging`: brings `aiohttp`, without which the gateway never starts its
+ *    API server ("API Server: aiohttp not installed") and :8642 never listens,
+ *    plus the Telegram / Discord / Slack clients its interfaces use. aiohttp is
+ *    not a core dependency of hermes-agent 0.19.0.
  */
 function pipPackageSpec(pin?: string): string {
-  return pypiSpec(`${HERMES_PYPI_DIST}[acp]`, pin ?? HERMES_VERSION())
+  return pypiSpec(`${HERMES_PYPI_DIST}[acp,messaging]`, pin ?? HERMES_VERSION())
 }
 
 /**
@@ -147,6 +152,11 @@ py_install ${bashSingleQuote(HERMES_VENV)} "$RUNTIME_PKG_SPEC" /var/tmp/py-cache
 
 step "verify_hermes_cli"
 ${bashSingleQuote(HERMES_CLI)} --version
+
+step "verify_hermes_api_server_deps"
+# Without aiohttp the gateway runs but never serves /v1 on :8642: fail here,
+# with the reason, instead of a minute later at the port check.
+${bashSingleQuote(`${HERMES_VENV}/bin/python`)} -c 'import aiohttp' || { echo "aiohttp is missing from the Hermes venv: the API server cannot start" >&2; exit 1; }
 
 ${buildHermesAcpProviderPatch(HERMES_VENV)}
 
