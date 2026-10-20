@@ -260,7 +260,7 @@ async function handleByosDeploy(req: NextRequest) {
   if (runtimeDenial) return NextResponse.json({ error: runtimeDenial }, { status: 403 })
   // Derive the shared agent columns the same way the managed deploy path does
   // (soul, skills, botToken, runtime, and — critically — webuiEnabled, which
-  // Hermes needs so the Open WebUI sidecar is installed and fronted by Caddy).
+  // the engines with a chat UI need so it is installed and fronted by Caddy).
   const agentFields = buildAgentFields(cfg)
 
   // ── BYO provider + optional fallback validation (own_key only) ─────

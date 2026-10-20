@@ -309,11 +309,11 @@ async function advanceWarmVm(row: typeof warmVms.$inferSelect): Promise<{
     // Bootstrap complete — run bake-finalize + capture the host fingerprint,
     // then mark ready. Failures here are non-fatal (best-effort warmup).
     try {
-      // Long timeout on purpose: with a sidecar this waits for Open WebUI's
-      // first boot, which is exactly the cost we want paid here, not at claim.
+      // Generous timeout: Hermes' setup/doctor warm-up is the slow part, and it
+      // is exactly the cost we want paid here, not at claim.
       await sshRunScript(
         target,
-        buildBakeFinalizeScript(row.runtime as RuntimeId, row.webuiEnabled, { waitForSidecar: true }),
+        buildBakeFinalizeScript(row.runtime as RuntimeId),
         { timeoutMs: 480_000 },
       )
     } catch {

@@ -396,15 +396,20 @@ export const instances = pgTable(
      * src/lib/runtime-versions.ts.
      */
     runtimeVersion: text(),
-    /** Same, for the Open WebUI sidecar when `webuiEnabled`. */
+    /** Same, for the chat UI sidecar (AgentWebUI Lite) when `webuiEnabled`. */
     sidecarVersion: text(),
     // LLM provider override: "openrouter" | "nvidia". NULL → platform default
     // (LLM_DEFAULT_PROVIDER, else "openrouter"). See resolveLlmProvider().
     llmProvider: text(),
-    // Hermes-only: provision Open WebUI as a Docker sidecar fronting the gateway
-    // so the user gets a web chat UI. For Hermes+webui the dormant
-    // openclawAdmin* columns below hold the Open WebUI admin login.
+    // Provision the chat UI sidecar (AgentWebUI Lite) in front of the gateway
+    // (Hermes, Claude Code, Codex). The dormant openclawAdmin* columns below
+    // hold its password.
     webuiEnabled: boolean().default(false).notNull(),
+    // "agentwebui-lite" once the box runs AgentWebUI Lite. NULL: a box made
+    // before Lite that still runs Open WebUI, until a reprovision (or
+    // scripts/migrate-chat-ui-to-lite.ts) moves it. See
+    // src/lib/runtimes/agentwebui-lite.ts.
+    chatUi: text(),
     interfaceKind: text(),
     telegramBotTokenEnc: text(),
     telegramUsername: text(),

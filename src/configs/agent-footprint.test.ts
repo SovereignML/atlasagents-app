@@ -3,6 +3,7 @@ import {
   capacityByRuntime,
   estimateAgentCapacity,
   footprintKey,
+  getFootprint,
   HOST_RESERVE,
 } from "./agent-footprint"
 
@@ -17,8 +18,8 @@ describe("estimateAgentCapacity()", () => {
 
   it("fits fewer of the heavier variants", () => {
     const byRuntime = capacityByRuntime(MIDSIZE)
-    expect(byRuntime["openclaw"]).toBeGreaterThan(byRuntime["hermes-webui"])
-    expect(byRuntime["hermes"]).toBeGreaterThanOrEqual(byRuntime["hermes-webui"])
+    expect(byRuntime["openclaw"]).toBeGreaterThanOrEqual(byRuntime["hermes-lite"])
+    expect(byRuntime["hermes"]).toBeGreaterThanOrEqual(byRuntime["hermes-lite"])
   })
 
   it("takes the binding constraint, not the most generous one", () => {
@@ -31,12 +32,12 @@ describe("estimateAgentCapacity()", () => {
     expect(estimateAgentCapacity({ cpuCores: 1, ramTotalMb: 512, diskTotalGb: 10 })).toBe(0)
   })
 
-  // A box can be big enough for OpenClaw and still too small for the Open WebUI
+  // A box can be big enough for OpenClaw and still too small for the Hermes + chat UI
   // variant — the UI needs that distinction to disable the right options.
   it("can fit the light runtime but not the heavy one", () => {
     const small = { cpuCores: 2, ramTotalMb: 2048, diskTotalGb: 20 }
     expect(estimateAgentCapacity(small, "openclaw")).toBe(1)
-    expect(estimateAgentCapacity(small, "hermes-webui")).toBe(0)
+    expect(estimateAgentCapacity(small, "hermes-lite")).toBe(0)
   })
 
   // Never show a negative or a fabricated number before the first probe lands.
@@ -56,11 +57,16 @@ describe("estimateAgentCapacity()", () => {
 
 describe("footprintKey()", () => {
   it("separates Hermes with and without the sidecar", () => {
-    expect(footprintKey("hermes", true)).toBe("hermes-webui")
+    expect(footprintKey("hermes", true)).toBe("hermes-lite")
     expect(footprintKey("hermes", false)).toBe("hermes")
   })
 
   it("ignores the sidecar flag for runtimes that have none", () => {
     expect(footprintKey("openclaw", true)).toBe("openclaw")
+  })
+
+  it("sizes the coding agents with their chat UI", () => {
+    expect(footprintKey("codex", true)).toBe("codex-lite")
+    expect(getFootprint("codex-lite")!.ramMb).toBeGreaterThan(getFootprint("hermes")!.ramMb)
   })
 })

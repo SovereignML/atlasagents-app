@@ -2,7 +2,7 @@
 
 Hermes instances ship with two interfaces behind a single public URL:
 
-- **`/`** — Open WebUI chat interface (humans, browser, password login)
+- **`/`** — the chat page, AgentWebUI Lite (humans; also shown inside the dashboard, or a password login at its own address)
 - **`/v1/*`** — OpenAI-compatible API (bots and scripts, bearer-token auth)
 
 Caddy path-routes these on the same host. You don't need a separate subdomain or
@@ -73,9 +73,10 @@ console.log(resp.choices[0].message.content)
 ## CORS
 
 Only `/v1/*` is CORS-enabled (so browser clients on your allowed origins can hit
-the API directly). The Open WebUI surface assumes same-origin browser use and
-ships its own headers — don't add a different origin to the dashboard's
-"allowed origins" expecting it to work for the WebUI itself.
+the API directly). The chat page assumes same-origin browser use and ships its
+own headers; only the dashboard (and a team's white-label domain) may frame it.
+Don't add a different origin to the "allowed origins" expecting it to work for
+the chat page itself.
 
 The allow-list is built from the instance's custom domain and managed
 subdomain. If you need additional origins, configure them on the instance
@@ -85,11 +86,11 @@ settings page.
 
 | Audience | URL | Credential | Where to find it |
 |---|---|---|---|
-| Humans (browser) | `https://<host>/` | Open WebUI admin email + password | Credentials card on the instance page |
+| Humans (browser) | The Chat card on the instance page, or `https://<host>/` | Signed in by the dashboard, or the chat page password | Chat / Chat Page Password cards on the instance page |
 | Bots / scripts | `https://<host>/v1/chat/completions` | Gateway token (Bearer) | Gateway Token card on the instance page |
 | You (operator, SSH) | `ssh root@<ip>` | Root password | Credentials card on the instance page |
 
-The Open WebUI login and the gateway token are independent — rotating one
+The chat page password and the gateway token are independent — rotating one
 doesn't rotate the other. Don't share the gateway token publicly; it's a full
 admin bearer for the Hermes API.
 
@@ -102,8 +103,8 @@ tier-to-model map.
 
 ## Legacy API-only Hermes instances
 
-Instances provisioned before Open WebUI became mandatory (those with
+Instances provisioned before the chat UI became mandatory (those with
 `webuiEnabled=false` in the database) keep their original topology: the public
-URL serves Hermes directly at every path, no Open WebUI in front. The
+URL serves Hermes directly at every path, no chat page in front. The
 `/v1/chat/completions` example above still works on those — you just won't see
 a browser UI at `/`. New deploys all get the dual-route shape.

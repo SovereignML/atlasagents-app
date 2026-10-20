@@ -2,7 +2,8 @@
  * The Atlas CLI gateway — the small HTTP server that turns a coding-agent CLI
  * (Claude Code, Codex) into the same shape as Hermes: an OpenAI-compatible
  * `/v1/chat/completions` + `/v1/models` on loopback behind the gateway token,
- * which Open WebUI and external bots talk to. Neither CLI ships a server of its
+ * which external bots and API clients talk to (the chat UI talks to the CLI
+ * over ACP instead). Neither CLI ships a server of its
  * own, so this one drives them through their official SDKs
  * (`@anthropic-ai/claude-agent-sdk`'s `query()`, `@openai/codex-sdk`'s threads).
  *
@@ -29,7 +30,7 @@
  *   ATLAS_CODEX_BIN       Codex only: the globally installed `codex` binary,
  *                         so the API and the terminal run the same build
  *
- * Sessions: Open WebUI resends the whole history every turn, and OpenAI-style
+ * Sessions: an OpenAI-style client resends the whole history every turn, and
  * clients have no conversation id. After each turn the gateway records
  * sha256(history + its own reply) → the harness session id; the next request's
  * history-before-the-last-user-message hashes to the same key and resumes that

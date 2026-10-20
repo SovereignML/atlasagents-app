@@ -80,8 +80,8 @@ describe("runtimeCaps()", () => {
 })
 
 describe("footprintKey()", () => {
-  it("adds -webui only for engines that ship a sidecar", () => {
-    expect(footprintKey("hermes", true)).toBe("hermes-webui")
+  it("adds -lite only for engines that ship a sidecar", () => {
+    expect(footprintKey("hermes", true)).toBe("hermes-lite")
     expect(footprintKey("hermes", false)).toBe("hermes")
     expect(footprintKey("openclaw", true)).toBe("openclaw")
   })

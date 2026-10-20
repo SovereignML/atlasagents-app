@@ -14,6 +14,7 @@ import {
   Link2,
   Loader2,
   MemoryStick,
+  MessageSquare,
   RefreshCw,
   RotateCcw,
   Trash2,
@@ -108,6 +109,8 @@ type InstanceLite = {
   runtime: string | null
   runtimeLabel: string
   webuiEnabled: boolean
+  /** "agentwebui-lite" once the box runs AgentWebUI Lite; NULL while it still runs Open WebUI (made before Lite). */
+  chatUi: string | null
   byosHost: string | null
   byosPort: number | null
   byosUser: string | null
@@ -892,6 +895,101 @@ function ManagedHostnameCard({ instance }: { instance: InstanceLite }) {
   )
 }
 
+/* ───────────── AGENT CHAT (AgentWebUI Lite) ───────────── */
+/**
+ * The agent's chat page inside the dashboard. Every open asks the server for a
+ * fresh one-time sign-in link (POST /api/instances/[id]/chat-embed), so no
+ * password reaches the browser and a copied link is useless a minute later.
+ */
+function AgentChatCard({ instanceId, runtimeLabel }: { instanceId: string; runtimeLabel: string }) {
+  const [src, setSrc] = useState<string | null>(null)
+  const [busy, setBusy] = useState<"here" | "tab" | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function signInLink(): Promise<string | null> {
+    const r = await fetch(`/api/instances/${instanceId}/chat-embed`, { method: "POST", cache: "no-store" })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok || typeof j.url !== "string") {
+      setError(j.error ?? `Couldn't open the chat (${r.status})`)
+      return null
+    }
+    return j.url
+  }
+
+  async function openHere() {
+    setBusy("here")
+    setError(null)
+    try {
+      const url = await signInLink()
+      if (url) setSrc(url)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function openTab() {
+    // Open the tab inside the click, before the await, or the popup blocker
+    // eats it; then point it at the link once it arrives.
+    const tab = window.open("about:blank", "_blank")
+    setBusy("tab")
+    setError(null)
+    try {
+      const url = await signInLink()
+      if (url && tab) {
+        tab.opener = null
+        tab.location.href = url
+      } else {
+        tab?.close()
+      }
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <SectionCard
+      title="Chat"
+      description={`Talk to your ${runtimeLabel} agent here. It asks before it acts, and works only in its own workspace.`}
+    >
+      <div className="space-y-3">
+        <div className="flex flex-wrap gap-2">
+          {src ? (
+            <Button size="sm" variant="outline" onClick={() => setSrc(null)}>
+              Close chat
+            </Button>
+          ) : (
+            <Button size="sm" onClick={openHere} disabled={busy !== null}>
+              {busy === "here" ? (
+                <Loader2 data-icon="inline-start" className="animate-spin" />
+              ) : (
+                <MessageSquare data-icon="inline-start" />
+              )}
+              Open chat
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={openTab} disabled={busy !== null}>
+            {busy === "tab" ? (
+              <Loader2 data-icon="inline-start" className="animate-spin" />
+            ) : (
+              <ExternalLink data-icon="inline-start" />
+            )}
+            Open in a new tab
+          </Button>
+        </div>
+        {error && <p className="font-mono text-xs text-destructive">{error}</p>}
+        {src && (
+          <iframe
+            src={src}
+            title={`${runtimeLabel} chat`}
+            className="h-[70vh] min-h-[480px] w-full rounded-md border border-border bg-background"
+            allow="clipboard-write; microphone"
+          />
+        )}
+      </div>
+    </SectionCard>
+  )
+}
+
 /* ───────────── CREDENTIALS CARD ───────────── */
 function CredentialsCard({
   instanceId,
@@ -901,6 +999,7 @@ function CredentialsCard({
   ipAddress,
   runtimeLabel,
   webui,
+  liteChat,
   terminal,
 }: {
   instanceId: string
@@ -909,8 +1008,13 @@ function CredentialsCard({
   tlsStatus: string | null
   ipAddress: string | null
   runtimeLabel: string
-  /** When true the admin account is the Open WebUI login (the chat UI sidecar). */
+  /** When true the admin account is the chat UI's login (Open WebUI, on a box not yet moved to Lite). */
   webui?: boolean
+  /**
+   * The chat UI is AgentWebUI Lite, which the Chat card opens already signed
+   * in. Its password is only for reaching the page at its own address.
+   */
+  liteChat?: boolean
   /** When true the same login also opens the browser terminal at /terminal. */
   terminal?: boolean
 }) {
@@ -949,11 +1053,15 @@ function CredentialsCard({
     null
 
   return (
-    <SectionCard title={webui ? "Open WebUI Login" : "Admin Credentials"}>
+    <SectionCard title={liteChat ? "Chat Page Password" : webui ? "Open WebUI Login" : "Admin Credentials"}>
       {!revealed ? (
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            {webui
+            {liteChat
+              ? `The Chat card opens your ${runtimeLabel} agent's chat already signed in. To reach the chat page at its own address, sign in there with this password.${
+                  terminal ? " The email and password also open its browser terminal." : ""
+                }`
+              : webui
               ? `Log into Open WebUI (the web chat UI for your ${runtimeLabel} agent) with the auto-generated admin account.${
                   terminal ? " The same login opens its browser terminal." : ""
                 }`
@@ -967,7 +1075,9 @@ function CredentialsCard({
         </div>
       ) : (
         <div className="space-y-2 text-sm">
-          <CredRow label="Email" value={revealed.email} onCopy={() => copy(revealed.email)} />
+          {(!liteChat || terminal) && (
+            <CredRow label="Email" value={revealed.email} onCopy={() => copy(revealed.email)} />
+          )}
           <CredRow label="Password" value={revealed.password} onCopy={() => copy(revealed.password)} mono />
           {loginUrl && (
             <p className="mt-2 font-mono text-[10px] text-muted-foreground">
@@ -1095,7 +1205,7 @@ function GatewayTokenCard({
 }: {
   instanceId: string
   runtimeLabel: string
-  /** Hermes surfaces the key as an advanced "Gateway API Key"; OpenWebUI is the primary path. */
+  /** Hermes surfaces the key as an advanced "Gateway API Key"; the chat is the primary path. */
   openAiApi?: boolean
 }) {
   const [token, setToken] = useState<string | null>(null)
@@ -1144,7 +1254,7 @@ function GatewayTokenCard({
       title={openAiApi ? "Gateway API Key" : "Gateway Token"}
       description={
         openAiApi
-          ? "Advanced: for programmatic access to the OpenAI-compatible API at /v1. Most users can just use Open WebUI above."
+          ? "Advanced: for programmatic access to the OpenAI-compatible API at /v1. Most users can just use the chat above."
           : `Use this token to authenticate with the ${runtimeLabel} Control UI and API.`
       }
     >
@@ -1521,6 +1631,14 @@ function OverviewTab({
               openAiApi={openAiApi}
             />
           ) : null
+        const liteChat =
+          runtimeCaps(instance.runtime).hasSidecar &&
+          instance.webuiEnabled &&
+          instance.chatUi === "agentwebui-lite"
+        const chatCard =
+          liteChat && instance.status === "running" ? (
+            <AgentChatCard instanceId={instance.id} runtimeLabel={instance.runtimeLabel} />
+          ) : null
         const credentialsCard =
           instance.hasOpenclawPassword && instance.status === "running" ? (
             <CredentialsCard
@@ -1531,13 +1649,15 @@ function OverviewTab({
               ipAddress={instance.ipAddress}
               runtimeLabel={instance.runtimeLabel}
               webui={runtimeCaps(instance.runtime).hasSidecar && instance.webuiEnabled}
+              liteChat={liteChat}
               terminal={runtimeCaps(instance.runtime).hasTerminal}
             />
           ) : null
-        // Hermes leads with the Open WebUI login (primary path) and pushes the
+        // Engines with a chat lead with it (the primary path) and push the
         // gateway API key below it; OpenClaw keeps the token-first ordering.
         return openAiApi ? (
           <>
+            {chatCard}
             {credentialsCard}
             {gatewayCard}
           </>

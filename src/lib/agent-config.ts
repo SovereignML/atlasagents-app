@@ -25,7 +25,7 @@ export const AgentConfigSchema = z.object({
   custom_instructions: z.string().default(""),
   // VPS-only: which agent runtime engine powers the bot.
   runtime: RuntimeSchema.default("openclaw"),
-  // Hermes-only: provision Open WebUI as a Docker sidecar for a web chat UI.
+  // Provision the chat UI sidecar (engines that ship one).
   webui_enabled: z.boolean().default(false),
 })
 
@@ -50,7 +50,7 @@ export function normalizeAgentConfig(cfg: AgentConfig): AgentConfig {
   if (cfg.deployment_target !== "vps" && cfg.deployment_target !== "byos") {
     return { ...cfg, runtime: "openclaw", webui_enabled: false }
   }
-  // The Open WebUI sidecar only exists for engines that ship one (Hermes).
+  // The chat UI sidecar only exists for engines that ship one.
   if (!runtimeCaps(cfg.runtime).hasSidecar) {
     return { ...cfg, webui_enabled: false }
   }

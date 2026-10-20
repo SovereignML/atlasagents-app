@@ -8,11 +8,7 @@ import {
   prebakeMinNode,
   prebakeUsability,
 } from "./byos-prebake"
-import {
-  HERMES_PINNED_VERSION,
-  HERMES_VPS_MIN_NODE,
-  OPEN_WEBUI_PINNED_VERSION,
-} from "./runtimes/hermes"
+import { HERMES_PINNED_VERSION, HERMES_VPS_MIN_NODE } from "./runtimes/hermes"
 import { OPENCLAW_PINNED_VERSION, OPENCLAW_VPS_MIN_NODE } from "./runtimes/openclaw"
 
 const CLEAN = {
@@ -103,7 +99,6 @@ describe("buildPrebakeScript()", () => {
   const script = buildPrebakeScript({
     openclawVersion: "2026.9.5",
     hermesVersion: "0.19.0",
-    webuiVersion: "0.11.3",
     sshPort: 2222,
   })
 
@@ -112,10 +107,10 @@ describe("buildPrebakeScript()", () => {
     expect(script).toContain("useradd --system --home-dir '/opt/openclaw'")
   })
 
-  it("installs the Hermes stack outright", () => {
-    expect(script).toContain("hermes-agent==0.19.0")
-    expect(script).toContain("open-webui==0.11.3")
-    expect(script).toContain("install_pkgs_parallel")
+  it("installs Hermes outright, and leaves the chat UI to the deploy", () => {
+    expect(script).toContain("hermes-agent[acp]==0.19.0")
+    expect(script).not.toContain("open-webui")
+    expect(script).not.toContain("agentwebui-lite")
   })
 
   // OpenClaw is the genuine either/or. Its 225MB / 11,428-file extract is the
@@ -168,7 +163,6 @@ describe("buildPrebakeScript()", () => {
     const withBrowser = buildPrebakeScript({
       openclawVersion: null,
       hermesVersion: null,
-      webuiVersion: null,
       browserDeps: true,
     })
     expect(withBrowser).toContain("google-chrome-stable")
@@ -181,11 +175,9 @@ describe("buildPrebakeScript()", () => {
     const unpinned = buildPrebakeScript({
       openclawVersion: null,
       hermesVersion: null,
-      webuiVersion: null,
     })
     expect(unpinned).toContain(`'openclaw@${OPENCLAW_PINNED_VERSION}'`)
-    expect(unpinned).toContain(`RUNTIME_PKG_SPEC='hermes-agent==${HERMES_PINNED_VERSION}'`)
-    expect(unpinned).toContain(`OPEN_WEBUI_PKG_SPEC='open-webui==${OPEN_WEBUI_PINNED_VERSION}'`)
+    expect(unpinned).toContain(`RUNTIME_PKG_SPEC='hermes-agent[acp]==${HERMES_PINNED_VERSION}'`)
     expect(unpinned).not.toContain("openclaw@latest")
   })
 
@@ -196,16 +188,9 @@ describe("buildPrebakeScript()", () => {
   })
 
   // The snippet bakes in a single gatewayPort and the engine is unknown here.
-  // The regression this guards: the module header and docs/BYOS.md both said
-  // the prebake pre-boots Open WebUI, and for a while the script did not —
-  // which quietly left the sidecar's first-boot cost (SQLite schema, alembic
-  // migrations, importing a very large Python tree) on the deploy path, the
-  // exact cost the prebake exists to remove.
-  it("installs both systemd units and pre-starts Open WebUI", () => {
+  it("installs and enables the Hermes gateway unit", () => {
     expect(script).toContain("prebake_finalize")
     expect(script).toContain("/etc/systemd/system/hermes-gateway.service")
-    expect(script).toContain("/etc/systemd/system/open-webui.service")
-    expect(script).toContain("systemctl restart 'open-webui'")
     expect(script).toContain("systemctl enable 'hermes-gateway'")
   })
 
@@ -236,7 +221,6 @@ describe("parsePrebakeVerify()", () => {
         "caddy=1",
         "uv=1",
         "hermes=0.19.0",
-        "open_webui=1",
         "openclaw_cached=1",
         "hermes_unit=1",
         "disk_avail_gb=40",
@@ -247,14 +231,13 @@ describe("parsePrebakeVerify()", () => {
       hasCaddy: true,
       hasUv: true,
       hermesVersion: "0.19.0",
-      hasOpenWebui: true,
       hermesUnitInstalled: true,
       diskAvailGb: 40,
     })
   })
 
   it("survives a box where nothing is installed", () => {
-    const facts = parsePrebakeVerify("node=\ncaddy=0\nhermes=\nopen_webui=0\n")
+    const facts = parsePrebakeVerify("node=\ncaddy=0\nhermes=\n")
     expect(facts.nodeVersion).toBeNull()
     expect(facts.hasCaddy).toBe(false)
     expect(facts.hermesVersion).toBeNull()
@@ -273,7 +256,6 @@ describe("prebakeUsability()", () => {
     hasCaddy: true,
     hasUv: true,
     hermesVersion: "0.19.0",
-    hasOpenWebui: true,
     hermesUnitInstalled: true,
     diskAvailGb: 40,
   }
@@ -295,13 +277,12 @@ describe("prebakeUsability()", () => {
   it("notices a box that has drifted since the prebake", () => {
     const r = prebakeUsability({
       runtime: "hermes",
-      facts: { ...READY, hasCaddy: false, hasOpenWebui: false },
+      facts: { ...READY, hasCaddy: false },
       hermesPin: "0.19.0",
       minNodeVersion: "24.16.0",
     })
     expect(r.fastPath).toBe(false)
     expect(r.misses).toContain("caddy is not installed")
-    expect(r.misses).toContain("open-webui is not installed")
   })
 
   it("notices a missing systemd unit", () => {
@@ -331,7 +312,7 @@ describe("prebakeUsability()", () => {
     expect(
       prebakeUsability({
         runtime: "openclaw",
-        facts: { ...READY, hermesVersion: null, hasOpenWebui: false },
+        facts: { ...READY, hermesVersion: null },
         minNodeVersion: "24.16.0",
       }).fastPath,
     ).toBe(true)

@@ -1,12 +1,13 @@
 import { afterEach, describe, it, expect } from "vitest"
 import { bakeIdentity, poolKeyFor } from "./warm-pool-key"
 import { OPENCLAW_PINNED_VERSION } from "./runtimes/openclaw"
-import { HERMES_PINNED_VERSION, OPEN_WEBUI_PINNED_VERSION } from "./runtimes/hermes"
+import { HERMES_PINNED_VERSION } from "./runtimes/hermes"
+import { liteVersion } from "./runtimes/agentwebui-lite"
 
 const VARS = [
   "OPENCLAW_VERSION",
   "HERMES_VERSION",
-  "OPEN_WEBUI_VERSION",
+  "AGENTWEBUI_LITE_PIP_SPEC",
   "CLOUDFLARE_BASE_DOMAIN",
   "CLOUDFLARE_AGENT_DOMAIN",
   "CLOUDFLARE_AGENT_ZONE_ID",
@@ -32,7 +33,7 @@ describe("poolKeyFor()", () => {
       `digitalocean|s-2vcpu-4gb|fra1|openclaw|0|${OPENCLAW_PINNED_VERSION}@sovereignclaw.xyz`,
     )
     expect(poolKeyFor({ ...target, runtime: "hermes", webuiEnabled: true })).toBe(
-      `digitalocean|s-2vcpu-4gb|fra1|hermes|1|${HERMES_PINNED_VERSION}+${OPEN_WEBUI_PINNED_VERSION}@sovereignclaw.xyz`,
+      `digitalocean|s-2vcpu-4gb|fra1|hermes|1|${HERMES_PINNED_VERSION}+${liteVersion()}@sovereignclaw.xyz`,
     )
   })
 

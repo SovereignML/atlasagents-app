@@ -162,8 +162,8 @@ export default function DeployPage() {
 
   const coreActions = selectedCategoryObj?.examples ? [...selectedCategoryObj.examples] : []
 
-  // Each engine has a RAM floor (`minRamGb`). Hermes boxes Open WebUI as a
-  // sidecar, so it needs ≥2GB RAM. The Free demo runs on a 4GB machine, so
+  // Each engine has a RAM floor (`minRamGb`). Hermes (a Python agent plus its
+  // chat UI) needs ≥2GB RAM. The Free demo runs on a 4GB machine, so
   // Hermes is allowed on Free; only sub-2GB plans are blocked.
   function planSupportsRuntime(plan: PlanConfig, rt: Runtime = runtime): boolean {
     const { minRamGb, allowedOnFree } = RUNTIME_CAPS[rt]

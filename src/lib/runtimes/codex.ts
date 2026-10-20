@@ -1,5 +1,5 @@
 import { createCliRuntime, pinOverride } from "./cli-runtime"
-import { bashSingleQuote } from "./open-webui"
+import { bashSingleQuote } from "./python-install"
 
 /**
  * Codex as an agent runtime: OpenAI's coding agent, driven through
