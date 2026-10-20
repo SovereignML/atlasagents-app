@@ -112,6 +112,34 @@ export const RUNTIME_CAPS: Record<RuntimeId, RuntimeCaps> = {
     allowedOnFree: false,
     beta: true,
   },
+  // OpenCode and Pi drive any OpenRouter model, so no slug prefix, but with
+  // Hermes' context floor: a coding agent's system prompt and tool schemas do
+  // not fit a short window. Beta, like the other CLI engines; Pi's ACP adapter
+  // is a community one (pi-acp).
+  opencode: {
+    label: "OpenCode",
+    minRamGb: 2,
+    exposesOpenAiApi: true,
+    nativeAdminLogin: false,
+    supportsCustomBaseUrl: false,
+    hasSidecar: true,
+    minContext: HERMES_MIN_CONTEXT,
+    hasTerminal: true,
+    allowedOnFree: false,
+    beta: true,
+  },
+  pi: {
+    label: "Pi",
+    minRamGb: 2,
+    exposesOpenAiApi: true,
+    nativeAdminLogin: false,
+    supportsCustomBaseUrl: false,
+    hasSidecar: true,
+    minContext: HERMES_MIN_CONTEXT,
+    hasTerminal: true,
+    allowedOnFree: false,
+    beta: true,
+  },
 }
 
 /** Default for NULL / unknown ids — mirrors `getRuntime()`'s fallback. */
@@ -154,4 +182,9 @@ export const RUNTIME_LABELS = Object.fromEntries(
 /** Resolve a runtime id to its display label, defaulting to OpenClaw. */
 export function runtimeLabel(id: string | null | undefined): string {
   return runtimeCaps(id).label
+}
+
+/** A warm-pool slot's label: an engine's own pool, or the universal image every chat-UI engine shares. */
+export function poolRuntimeLabel(id: string | null | undefined): string {
+  return id === "universal" ? "Universal (Hermes, Claude Code, Codex, OpenCode, Pi)" : runtimeLabel(id)
 }

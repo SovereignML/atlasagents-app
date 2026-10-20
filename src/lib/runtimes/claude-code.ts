@@ -81,9 +81,23 @@ export const claudeCodeRuntime = createCliRuntime({
     return { ANTHROPIC_MODEL: model }
   },
 
-  renderEngineConfig({ installDir, workspaceDir, systemUser }) {
+  renderEngineConfig({ models, installDir, workspaceDir, systemUser }) {
     const user = bashSingleQuote(systemUser)
     const memory = Buffer.from(CLAUDE_WORKSPACE_MEMORY, "utf8").toString("base64")
+    // The ACP adapter offers, and accepts, only the models Claude Code lists:
+    // its aliases plus ANTHROPIC_MODEL, unless settings.json carries an
+    // `availableModels` allowlist, whose exact ids it then offers. Those are
+    // the chat UI's models (OpenRouter slugs); with none, the key is removed.
+    const mergeSettings = [
+      'const fs = require("fs")',
+      'const p = process.env.HOME + "/.claude/settings.json"',
+      "let j = {}",
+      "try { j = JSON.parse(fs.readFileSync(p, \"utf8\")) } catch {}",
+      "const m = JSON.parse(process.env.ATLAS_MODELS)",
+      "if (m.length) j.availableModels = m; else delete j.availableModels",
+      'fs.mkdirSync(process.env.HOME + "/.claude", { recursive: true, mode: 0o700 })',
+      "fs.writeFileSync(p, JSON.stringify(j, null, 2), { mode: 0o600 })",
+    ].join("; ")
     // Mark onboarding done and the workspace trusted in ~/.claude.json so the
     // terminal opens straight into a session instead of a theme picker and a
     // trust prompt. Merged, not overwritten: Claude Code keeps state there.
@@ -100,6 +114,7 @@ export const claudeCodeRuntime = createCliRuntime({
     ].join("; ")
     return `echo ${bashSingleQuote(memory)} | base64 -d > ${bashSingleQuote(`${workspaceDir}/CLAUDE.md`)}
 chown ${user}:${user} ${bashSingleQuote(`${workspaceDir}/CLAUDE.md`)}
-sudo -u ${user} env HOME=${bashSingleQuote(installDir)} ATLAS_WORKSPACE=${bashSingleQuote(workspaceDir)} node -e ${bashSingleQuote(mergeState)}`
+sudo -u ${user} env HOME=${bashSingleQuote(installDir)} ATLAS_WORKSPACE=${bashSingleQuote(workspaceDir)} node -e ${bashSingleQuote(mergeState)}
+sudo -u ${user} env HOME=${bashSingleQuote(installDir)} ATLAS_MODELS=${bashSingleQuote(JSON.stringify(models))} node -e ${bashSingleQuote(mergeSettings)}`
   },
 })

@@ -11,6 +11,7 @@ import { buildGatewayAllowedOrigins } from "@/lib/instance-gateway-access"
 import { pypiSpec } from "@/lib/runtime-versions"
 import { bashSingleQuote, buildPyInstallPrelude, buildVerifyPythonStep } from "./python-install"
 import { buildLiteInstallSteps, makeLiteSidecar } from "./agentwebui-lite"
+import { buildHermesAcpProviderPatch } from "./hermes-acp-patch"
 import { resolveLlmProvider, nvidiaKeyForSlot } from "@/lib/model-router"
 import { enabledToolsForRuntime } from "@/configs/agent-tools"
 import { renderGatewayCaddyfile } from "./caddy-gateway"
@@ -146,6 +147,8 @@ py_install ${bashSingleQuote(HERMES_VENV)} "$RUNTIME_PKG_SPEC" /var/tmp/py-cache
 
 step "verify_hermes_cli"
 ${bashSingleQuote(HERMES_CLI)} --version
+
+${buildHermesAcpProviderPatch(HERMES_VENV)}
 
 step "hermes_config_dir"
 install -d -m 0750 -o ${bashSingleQuote(HERMES_SYSTEM_USER)} -g ${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(`${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}`)}
@@ -285,16 +288,21 @@ WantedBy=multi-user.target
 `
   },
 
-  renderBootstrap(args: BootstrapRenderArgs): string {
+  renderInstallSteps(args: BootstrapRenderArgs): string {
     // Hermes, then its chat UI (AgentWebUI Lite) when the sidecar is on.
     // Chrome is ~142MB and `agent-browser` needs a global npm install; both
     // are browser-tool-only. Default true preserves the old always-bake
     // behaviour for callers that have no instance to read tools from (the
     // warm pool, where bake time is ours and free).
     const browserDeps = args.browserDeps !== false
-    const installSteps =
+    return (
       buildHermesInstallSteps(browserDeps, args.runtimeVersion) +
       (args.webuiEnabled ? buildLiteInstallSteps(hermesRuntime, args) : "")
+    )
+  },
+
+  renderBootstrap(args: BootstrapRenderArgs): string {
+    const installSteps = hermesRuntime.renderInstallSteps!(args)
     return buildBootstrapFraming(
       {
         installDir: HERMES_INSTALL_DIR,

@@ -1,4 +1,3 @@
-import crypto from "node:crypto"
 import { afterEach, describe, expect, it } from "vitest"
 import {
   ACP_ADAPTERS,
@@ -7,9 +6,8 @@ import {
   LITE_PINNED_VERSION,
   LITE_PORT,
   LITE_SETTING_KEYS,
-  buildLiteEmbedUrl,
   buildLiteMigrationScript,
-  liteEmbedSecret,
+  liteModelId,
   litePipSpec,
   liteVersion,
   runsLite,
@@ -17,7 +15,7 @@ import {
 import { getRuntime } from "./index"
 import { bakeIdentity } from "@/lib/warm-pool-key"
 
-const VARS = ["AGENTWEBUI_LITE_PIP_SPEC", "INSTANCE_ENCRYPTION_KEY"] as const
+const VARS = ["AGENTWEBUI_LITE_PIP_SPEC"] as const
 const saved = Object.fromEntries(VARS.map((k) => [k, process.env[k]]))
 afterEach(() => {
   for (const k of VARS) {
@@ -31,11 +29,12 @@ const envArgs = (extra: Record<string, unknown> = {}) => ({
   instance,
   gatewayToken: "tok",
   gatewayPort: 8642,
-  secretKey: "e".repeat(64),
   publicUrl: "https://a.atlasdeploy.xyz",
   enableSignup: true,
+  adminEmail: "admin+inst_1@hermes.local",
   adminPassword: "pw",
   model: "anthropic/claude-sonnet-4.6",
+  selectableModels: ["z-ai/glm-5.1", "anthropic/claude-sonnet-4.6"],
   ...extra,
 })
 
@@ -62,25 +61,55 @@ describe("Lite as the sidecar", () => {
     expect(sidecar.seedAdmin).toBeUndefined()
   })
 
-  it("starts Hermes over ACP with the model and folder locked, framed only by the dashboard", () => {
-    const env = getRuntime("hermes").sidecar!.renderEnv(
-      envArgs({ frameAncestors: ["https://app.atlasagents.dev", "nope"] }),
-    )
+  it("starts Hermes over ACP behind the agent's email and password, offering the enabled models", () => {
+    const env = getRuntime("hermes").sidecar!.renderEnv(envArgs())
     expect(env).toMatchObject({
       HOST: "127.0.0.1",
       PORT: String(LITE_PORT),
+      LOGIN_EMAIL: "admin+inst_1@hermes.local",
       PASSWORD: "pw",
-      EMBED_SECRET: "e".repeat(64),
       TRUST_PROXY: "true",
-      LOCK_MODEL: "true",
+      LOCK_MODEL: "false",
       LOCK_FOLDER: "true",
       AGENT_HERMES_COMMAND: "/opt/hermes/venv/bin/hermes acp",
       AGENT_HERMES_NAME: "Research bot",
-      FRAME_ANCESTORS: "https://app.atlasagents.dev",
+      // Hermes keeps an OpenRouter model on OpenRouter only when it is named
+      // with the provider; the default comes first and is not repeated.
+      AGENT_HERMES_MODEL: "openrouter:anthropic/claude-sonnet-4.6",
+      AGENT_HERMES_MODELS: "openrouter:anthropic/claude-sonnet-4.6,openrouter:z-ai/glm-5.1",
       ATLAS_PINNED_MODEL: "anthropic/claude-sonnet-4.6",
     })
     expect(env.FILES_ROOTS).toBe(env.WORKSPACE_DIR)
     expect(Object.keys(env).some((k) => k.startsWith("PROVIDER_"))).toBe(false)
+    expect(env).not.toHaveProperty("EMBED_SECRET")
+    expect(env).not.toHaveProperty("FRAME_ANCESTORS")
+  })
+
+  it("locks the model when no models are enabled (a provider other than OpenRouter)", () => {
+    const env = getRuntime("codex").sidecar!.renderEnv(envArgs({ selectableModels: [] }))
+    expect(env.LOCK_MODEL).toBe("true")
+    expect(env).not.toHaveProperty("AGENT_CODEX_MODEL")
+    expect(env).not.toHaveProperty("AGENT_CODEX_MODELS")
+  })
+
+  it("names models the way each engine's ACP server lists them", () => {
+    expect(liteModelId("hermes", "z-ai/glm-5.1")).toBe("openrouter:z-ai/glm-5.1")
+    expect(liteModelId("opencode", "z-ai/glm-5.1")).toBe("openrouter/z-ai/glm-5.1")
+    expect(liteModelId("pi", "z-ai/glm-5.1")).toBe("openrouter/z-ai/glm-5.1")
+    expect(liteModelId("claude-code", "z-ai/glm-5.1")).toBe("z-ai/glm-5.1")
+    expect(liteModelId("codex", "z-ai/glm-5.1")).toBe("z-ai/glm-5.1")
+  })
+
+  it("writes no key Lite would read as a second agent or a provider", () => {
+    // Lite's config.py takes every ^(PROVIDER|AGENT)_<ID>_<FIELD>$ key as an
+    // agent or provider, and exits at start when one has no COMMAND/URL. A
+    // stray AGENT_IDLE_MINUTES did exactly that on every deploy.
+    for (const [id, agentKey] of [["hermes", "AGENT_HERMES"], ["claude-code", "AGENT_CLAUDECODE"], ["codex", "AGENT_CODEX"]]) {
+      const env = getRuntime(id).sidecar!.renderEnv(envArgs())
+      const parsed = Object.keys(env).filter((k) => /^(PROVIDER|AGENT)_[A-Z0-9]+_[A-Z]+$/.test(k))
+      expect(parsed.every((k) => k.startsWith(`${agentKey}_`))).toBe(true)
+      expect(env).toHaveProperty(`${agentKey}_COMMAND`)
+    }
   })
 
   it("starts the CLI engines through their pinned ACP adapters", () => {
@@ -97,7 +126,7 @@ describe("Lite as the sidecar", () => {
     // Only the engine's files reach the environment the agents inherit...
     const files = [...unit.matchAll(/^EnvironmentFile=(.+)$/gm)].map((m) => m[1])
     expect(files).toEqual([engine.paths.envPath, `-${engine.paths.configPath}`])
-    // ...and Lite reads its own (password, embed secret) from its .env.
+    // ...and Lite reads its own (sign-in email and password) from its .env.
     expect(unit).toContain(`Environment=AWL_ENV_FILE=${sidecar.envPath}`)
     expect(unit).toContain("ExecStart=/opt/agentwebui-lite/venv/bin/agentwebui-lite")
   })
@@ -181,26 +210,5 @@ describe("moving a box from Open WebUI to Lite", () => {
   it("writes Lite's env readable only by the engine's user", () => {
     expect(script).toContain(`echo 'ZW52' | base64 -d > '${engine.sidecar!.envPath}'`)
     expect(script).toContain(`chmod 600 '${engine.sidecar!.envPath}'`)
-  })
-})
-
-describe("signing the dashboard in", () => {
-  it("derives a different, stable embed secret per agent", () => {
-    process.env.INSTANCE_ENCRYPTION_KEY = "k".repeat(64)
-    expect(liteEmbedSecret("a")).toBe(liteEmbedSecret("a"))
-    expect(liteEmbedSecret("a")).not.toBe(liteEmbedSecret("b"))
-    delete process.env.INSTANCE_ENCRYPTION_KEY
-    expect(() => liteEmbedSecret("a")).toThrow(/INSTANCE_ENCRYPTION_KEY/)
-  })
-
-  it("makes a one-minute link in Lite's format: base64url claims, a dot, the hex HMAC", () => {
-    const now = Date.UTC(2026, 9, 20)
-    const url = new URL(buildLiteEmbedUrl("https://a.atlasdeploy.xyz/", "s".repeat(64), now))
-    expect(url.origin + url.pathname).toBe("https://a.atlasdeploy.xyz/embed")
-    const [text, signature] = url.searchParams.get("token")!.split(".")
-    expect(signature).toBe(crypto.createHmac("sha256", "s".repeat(64)).update(text).digest("hex"))
-    const claims = JSON.parse(Buffer.from(text, "base64url").toString("utf8"))
-    expect(claims.exp).toBe(now / 1000 + 60)
-    expect(claims.nonce).toMatch(/^[0-9a-f]{32}$/)
   })
 })

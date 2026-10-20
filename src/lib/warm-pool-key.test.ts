@@ -1,12 +1,14 @@
 import { afterEach, describe, it, expect } from "vitest"
-import { bakeIdentity, poolKeyFor } from "./warm-pool-key"
+import { bakeIdentity, poolKeyFor, poolRuntimeFor } from "./warm-pool-key"
 import { OPENCLAW_PINNED_VERSION } from "./runtimes/openclaw"
 import { HERMES_PINNED_VERSION } from "./runtimes/hermes"
 import { liteVersion } from "./runtimes/agentwebui-lite"
+import { LITE_ENGINES } from "./runtimes/universal"
 
 const VARS = [
   "OPENCLAW_VERSION",
   "HERMES_VERSION",
+  "ATLAS_OPENCODE_VERSION",
   "AGENTWEBUI_LITE_PIP_SPEC",
   "CLOUDFLARE_BASE_DOMAIN",
   "CLOUDFLARE_AGENT_DOMAIN",
@@ -32,9 +34,25 @@ describe("poolKeyFor()", () => {
     expect(poolKeyFor({ ...target, runtime: "openclaw", webuiEnabled: false })).toBe(
       `digitalocean|s-2vcpu-4gb|fra1|openclaw|0|${OPENCLAW_PINNED_VERSION}@sovereignclaw.xyz`,
     )
-    expect(poolKeyFor({ ...target, runtime: "hermes", webuiEnabled: true })).toBe(
-      `digitalocean|s-2vcpu-4gb|fra1|hermes|1|${HERMES_PINNED_VERSION}+${liteVersion()}@sovereignclaw.xyz`,
-    )
+    const universal = poolKeyFor({ ...target, runtime: "hermes", webuiEnabled: true })
+    expect(universal.startsWith("digitalocean|s-2vcpu-4gb|fra1|universal|1|")).toBe(true)
+    expect(universal).toContain(`hermes@${HERMES_PINNED_VERSION}+`)
+    expect(universal).toContain(`+lite@${liteVersion()}@sovereignclaw.xyz`)
+  })
+
+  it("serves every chat-UI engine from the one universal pool, and OpenClaw from its own", () => {
+    const keys = LITE_ENGINES.map((runtime) => poolKeyFor({ ...target, runtime, webuiEnabled: true }))
+    expect(new Set(keys).size).toBe(1)
+    expect(poolKeyFor({ ...target, runtime: "openclaw", webuiEnabled: false })).not.toBe(keys[0])
+    // An engine deployed without its chat UI is not what a universal VM serves.
+    expect(poolRuntimeFor("hermes", false)).toBe("hermes")
+    expect(poolRuntimeFor("openclaw", true)).toBe("openclaw")
+  })
+
+  it("retires universal VMs when any engine's pin changes", () => {
+    const before = poolKeyFor({ ...target, runtime: "codex", webuiEnabled: true })
+    process.env.ATLAS_OPENCODE_VERSION = "1.19.3"
+    expect(poolKeyFor({ ...target, runtime: "codex", webuiEnabled: true })).not.toBe(before)
   })
 
   // The stale-key reap is what retires old VMs, so a change that should

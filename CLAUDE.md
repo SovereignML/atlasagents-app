@@ -70,8 +70,8 @@ tests, build, and `npm audit --omit=dev --audit-level=critical`.
   - `src/lib/instance-access.ts` — per-agent ACL (viewer/operator/manager)
   - `src/lib/effective-user.ts` — honored impersonation (`getHonoredImpersonatedUserId`)
   - `src/lib/team.ts` — team membership / management
-- **Runtimes**: four agent engines — OpenClaw (default), Hermes, and the beta
-  Claude Code and Codex (flag `CLI_RUNTIMES_ENABLED`; admins always) — behind
+- **Runtimes**: six agent engines — OpenClaw (default), Hermes, and the beta
+  Claude Code, Codex, OpenCode and Pi (flag `CLI_RUNTIMES_ENABLED`; admins always) — behind
   `src/lib/runtimes/`. Import `getRuntime` from `@/lib/runtimes`; branch on
   `runtimeCaps(id)` / `engine.caps`, never on `runtime === "hermes"`.
   ([`docs/RUNTIMES.md`](docs/RUNTIMES.md))

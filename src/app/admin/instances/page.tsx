@@ -2,7 +2,7 @@ import Link from "next/link"
 
 import { db, desc, instances, orphanEvents, sql } from "@/db"
 import { requireAdminPage } from "@/lib/admin-guard"
-import { runtimeLabel } from "@/lib/runtimes/labels"
+import { poolRuntimeLabel, runtimeLabel } from "@/lib/runtimes/labels"
 import {
   getPoolHealth,
   listRecentBakeFailures,
@@ -309,7 +309,7 @@ function PoolTab({
                 <CardHeader>
                   <div className="flex items-center justify-between gap-2">
                     <CardTitle className="text-sm">
-                      {runtimeLabel(e.runtime)}
+                      {poolRuntimeLabel(e.runtime)}
                       {e.webuiEnabled && (
                         <span className="ml-2 text-xs font-normal text-muted-foreground">+ WebUI</span>
                       )}
@@ -394,7 +394,7 @@ function PoolTab({
                   <div className="flex items-center gap-3">
                     <StatusBadge status={vm.status} mono />
                     <Badge variant="outline" className="font-mono">
-                      {runtimeLabel(vm.runtime)}
+                      {poolRuntimeLabel(vm.runtime)}
                     </Badge>
                     {vm.webuiEnabled && (
                       <span className="text-[10px] text-muted-foreground">+ WebUI</span>

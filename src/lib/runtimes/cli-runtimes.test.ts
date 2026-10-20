@@ -218,8 +218,9 @@ describe.each(ENGINES)("$rt.displayName engine", ({ rt, port, cli, sdk }) => {
       instance: INSTANCE,
       gatewayToken: "t",
       gatewayPort: port,
-      secretKey: "s",
       enableSignup: true,
+      adminEmail: "a@b.local",
+      adminPassword: "pw",
       model: "m/x",
     })
     const command = Object.entries(env).find(([k]) => k.endsWith("_COMMAND"))?.[1]
@@ -357,9 +358,10 @@ describe("beta access", () => {
     delete process.env.CLI_RUNTIMES_ENABLED
     expect(availableRuntimesFor(customer)).toEqual(["openclaw", "hermes"])
     expect(runtimeDeployDenial("codex", customer)).toMatch(/not available/)
+    expect(runtimeDeployDenial("pi", customer)).toMatch(/not available/)
     expect(runtimeDeployDenial("hermes", customer)).toBeNull()
     process.env.CLI_RUNTIMES_ENABLED = "true"
-    expect(availableRuntimesFor(customer)).toEqual(["openclaw", "hermes", "claude-code", "codex"])
+    expect(availableRuntimesFor(customer)).toEqual(["openclaw", "hermes", "claude-code", "codex", "opencode", "pi"])
     expect(runtimeDeployDenial("codex", customer)).toBeNull()
   })
 
@@ -380,8 +382,9 @@ describe("Hermes is untouched by the CLI engines", () => {
       instance: INSTANCE,
       gatewayToken: "t",
       gatewayPort: HERMES_GATEWAY_PORT,
-      secretKey: "s",
       enableSignup: true,
+      adminEmail: "a@b.local",
+      adminPassword: "pw",
       model: "m/x",
     })
     expect(env.AGENT_HERMES_COMMAND).toBe("/opt/hermes/venv/bin/hermes acp")

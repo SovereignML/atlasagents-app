@@ -29,6 +29,7 @@ import {
 } from "@/db"
 import { getRuntime, type RuntimeId } from "@/lib/runtimes"
 import { buildBakeFinalizeScript } from "@/lib/runtimes/finalize"
+import { UNIVERSAL_POOL_RUNTIME, renderUniversalBootstrap } from "@/lib/runtimes/universal"
 import { getVmProviderBySlug } from "@/lib/providers"
 import { encryptSecret } from "@/lib/crypto-secret"
 import { createAgentSubdomain, deleteAgentSubdomain, isAgentDnsEnabled } from "@/lib/agent-dns"
@@ -51,8 +52,11 @@ import {
   recordFailure,
 } from "@/lib/warm-pool-breaker"
 
+/** An engine's own pool, or the universal one every chat-UI engine draws from. */
+export type PoolRuntime = RuntimeId | typeof UNIVERSAL_POOL_RUNTIME
+
 export type PoolTarget = {
-  runtime: RuntimeId
+  runtime: PoolRuntime
   webuiEnabled: boolean
   providerSlug: string
   planCode: string
@@ -117,24 +121,27 @@ const DEFAULT_POOL_PLAN = process.env.POOL_PLAN_CODE ?? "s-2vcpu-4gb"
 const DEFAULT_POOL_REGION = process.env.POOL_REGION_CODE ?? "fra1"
 
 /**
- * Policy: 2 Hermes + 1 OpenClaw ready in the primary region (was 3 + 2). A
- * claim fires an immediate replacement, so after one claim of each runtime the
- * transient floor is 1 Hermes + 0 OpenClaw until the replacements reach
- * `ready` — an OpenClaw deploy arriving during that window takes the cold path.
- * That is the accepted trade for holding fewer idle VMs. Sizes are
- * env-overridable via POOL_SIZE_HERMES / POOL_SIZE_OPENCLAW, and a size of 0
- * disables that target entirely (it is then skipped by both the create loop and
- * the reap's active-key set).
+ * Policy: 2 universal + 1 OpenClaw ready in the primary region. A universal VM
+ * has every chat-UI engine installed (Hermes, Claude Code, Codex, OpenCode, Pi;
+ * see runtimes/universal.ts), so a deploy of any of them claims one; it
+ * replaced the Hermes-only target, whose 2 VMs served Hermes alone. A claim
+ * fires an immediate replacement, so after one claim of each kind the
+ * transient floor is 1 universal + 0 OpenClaw until the replacements reach
+ * `ready` — a deploy arriving during that window takes the cold path. That is
+ * the accepted trade for holding fewer idle VMs. Sizes are env-overridable via
+ * POOL_SIZE_UNIVERSAL (POOL_SIZE_HERMES is still read, as its old name) and
+ * POOL_SIZE_OPENCLAW, and a size of 0 disables that target entirely (it is then
+ * skipped by both the create loop and the reap's active-key set).
  */
 export function getPoolTargets(): PoolTarget[] {
   return [
     {
-      runtime: "hermes",
+      runtime: UNIVERSAL_POOL_RUNTIME,
       webuiEnabled: true,
       providerSlug: DEFAULT_POOL_PROVIDER,
       planCode: DEFAULT_POOL_PLAN,
       regionCode: DEFAULT_POOL_REGION,
-      size: Number(process.env.POOL_SIZE_HERMES ?? 2),
+      size: Number(process.env.POOL_SIZE_UNIVERSAL ?? process.env.POOL_SIZE_HERMES ?? 2),
     },
     {
       runtime: "openclaw",
@@ -189,24 +196,28 @@ async function resolveProviderId(slug: string): Promise<string | null> {
  * later refill pass advances it to `ready`.
  */
 async function createOneWarmVm(target: PoolTarget): Promise<void> {
-  const runtime = getRuntime(target.runtime)
+  const universal = target.runtime === UNIVERSAL_POOL_RUNTIME
+  const runtime = universal ? null : getRuntime(target.runtime)
+  const slot = universal ? UNIVERSAL_POOL_RUNTIME : runtime!.id
   const provider = await getVmProviderBySlug(target.providerSlug)
   const providerId = await resolveProviderId(target.providerSlug)
   const rootPassword = generateRootPassword()
   const publicKey = process.env.SSH_FLEET_PUBLIC_KEY
 
-  const bootstrapScript = runtime.renderBootstrap({
-    gatewayPort: runtime.gatewayPort,
-    webuiEnabled: target.webuiEnabled && Boolean(runtime.sidecar),
-  })
+  const bootstrapScript = runtime
+    ? runtime.renderBootstrap({
+        gatewayPort: runtime.gatewayPort,
+        webuiEnabled: target.webuiEnabled && Boolean(runtime.sidecar),
+      })
+    : renderUniversalBootstrap()
 
   const vm = await provider.createVM({
-    label: `sovereign-pool-${runtime.id}-${crypto.randomBytes(4).toString("hex")}`,
+    label: `sovereign-pool-${slot}-${crypto.randomBytes(4).toString("hex")}`,
     plan: target.planCode,
     region: target.regionCode,
     rootPassword,
     authorizedKeys: publicKey ? [publicKey] : undefined,
-    tags: ["sovereignml", runtime.id, "vps", "pool"],
+    tags: ["sovereignml", slot, "vps", "pool"],
     userData: bootstrapScript,
   })
 
@@ -223,7 +234,7 @@ async function createOneWarmVm(target: PoolTarget): Promise<void> {
       providerSlug: target.providerSlug,
       providerPlanCode: target.planCode,
       providerRegionCode: target.regionCode,
-      runtime: runtime.id,
+      runtime: slot,
       webuiEnabled: target.webuiEnabled,
       vmId: vm.id,
       ipAddress: vm.ipv4?.[0] ?? null,
@@ -313,7 +324,7 @@ async function advanceWarmVm(row: typeof warmVms.$inferSelect): Promise<{
       // is exactly the cost we want paid here, not at claim.
       await sshRunScript(
         target,
-        buildBakeFinalizeScript(row.runtime as RuntimeId),
+        buildBakeFinalizeScript(row.runtime as PoolRuntime),
         { timeoutMs: 480_000 },
       )
     } catch {
@@ -744,7 +755,7 @@ export async function listWarmVms(): Promise<Array<typeof warmVms.$inferSelect>>
 /** Per-poolKey fill snapshot for the admin health summary. */
 export type PoolHealthEntry = {
   poolKey: string
-  runtime: RuntimeId
+  runtime: PoolRuntime
   webuiEnabled: boolean
   providerSlug: string
   planCode: string

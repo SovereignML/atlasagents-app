@@ -1,21 +1,22 @@
-import crypto from "node:crypto"
 import { isPinned, npmSpec, pypiSpec } from "@/lib/runtime-versions"
 import { APT_OPTS_LITERAL } from "./bootstrap"
 import { bashSingleQuote, buildPyInstallPrelude, buildVerifyPythonStep } from "./python-install"
+import { buildHermesAcpProviderPatch } from "./hermes-acp-patch"
 import type { BootstrapRenderArgs, RuntimeEngine, SidecarEnvArgs, SidecarSpec } from "./types"
 
 /* --- AgentWebUI Lite: the chat UI ------------------------------------------ */
 /**
  * AgentWebUI Lite (github.com/SovereignML/AgentWebUI-Lite, published to PyPI as `agentwebui-lite`) is the chat page
- * every Hermes, Claude Code and Codex agent ships. It talks to the agent over
- * the Agent Client Protocol (ACP): it starts the engine's own ACP command
- * (`hermes acp`, Claude Code / Codex through their ACP adapters) and streams
- * its replies, plans, tool calls and permission questions.
+ * every Hermes, Claude Code, Codex, OpenCode and Pi agent ships. It talks to
+ * the agent over the Agent Client Protocol (ACP): it starts the engine's own
+ * ACP command (`hermes acp`, `opencode acp`; Claude Code, Codex and Pi through
+ * their ACP adapters) and streams its replies, plans, tool calls and
+ * permission questions.
  *
  * It replaced Open WebUI to make installs fast: Open WebUI was most of a cold
  * install (a 146MB wheel, ~116 dependencies and torch) and of an agent's memory.
  * Lite is one dependency (`aiohttp`), starts in about a second, and has no
- * accounts to seed: its password and embed secret are in its .env from Phase A.
+ * accounts to seed: its sign-in email and password are in its .env from Phase A.
  *
  * How it sits on the box:
  *  - one Python venv under /opt/agentwebui-lite, plus the ACP adapter for the
@@ -27,10 +28,10 @@ import type { BootstrapRenderArgs, RuntimeEngine, SidecarEnvArgs, SidecarSpec } 
  *    the environment the agent processes inherit;
  *  - loopback :8080, where Caddy sends everything but `/v1/*` (the gateway).
  *
- * The dashboard frames it: Lite only lets the dashboard's origins frame it
- * (FRAME_ANCESTORS), and the dashboard signs the browser in with a one-time
- * `/embed` link signed with EMBED_SECRET (see buildLiteEmbedUrl). The model is
- * the dashboard's choice (LOCK_MODEL) and the agent works only in its
+ * Customers open it at the agent's own address and sign in with the email and
+ * password the dashboard shows (LOGIN_EMAIL + PASSWORD, the same generated
+ * pair Open WebUI's admin had). The model menu offers only the models an admin
+ * enabled (AGENT_<ID>_MODELS, see liteModelId), and the agent works only in its
  * workspace (LOCK_FOLDER).
  *
  * Agents made before Lite run Open WebUI until their box is migrated
@@ -64,7 +65,7 @@ const LITE_PYTHON_MAX_EXCLUSIVE = "3.15"
  * repo (SovereignML/AgentWebUI-Lite) publishes a release when a `v*` tag is
  * pushed; bump this on purpose after a test deploy.
  */
-export const LITE_PINNED_VERSION = "0.1.0"
+export const LITE_PINNED_VERSION = "0.2.0"
 
 /** pip requirement for Lite. `AGENTWEBUI_LITE_PIP_SPEC` overrides it (e.g. `agentwebui-lite==0.1.1`). */
 export function litePipSpec(): string {
@@ -90,59 +91,53 @@ export const ACP_ADAPTERS: Record<string, { pkg: string; version: string; bin: s
     bin: "claude-agent-acp",
   },
   codex: { pkg: "@agentclientprotocol/codex-acp", version: "2.2.1", bin: "codex-acp" },
+  // Community adapter (svkozak/pi-acp): it runs `pi --mode rpc`, so Pi must be on PATH.
+  pi: { pkg: "pi-acp", version: "0.0.33", bin: "pi-acp" },
 }
+
+/** Engines whose own CLI speaks ACP (`<cli> acp`), with no adapter. */
+const NATIVE_ACP = new Set(["hermes", "opencode"])
 
 /** hermes-agent's ACP server is an optional extra (`agent-client-protocol`). */
 const HERMES_ACP_EXTRA = "hermes-agent[acp]"
 
 /** Whether Lite can front this engine. OpenClaw keeps its own UI. */
 export function liteSupports(runtimeId: string): boolean {
-  return runtimeId === "hermes" || runtimeId in ACP_ADAPTERS
+  return NATIVE_ACP.has(runtimeId) || runtimeId in ACP_ADAPTERS
 }
 
 /** The ACP command Lite starts for an engine. */
 export function acpCommand(engine: Pick<RuntimeEngine, "id" | "cliBinary">): string {
-  if (engine.id === "hermes") return `${engine.cliBinary} acp`
+  if (NATIVE_ACP.has(engine.id)) return `${engine.cliBinary} acp`
   const adapter = ACP_ADAPTERS[engine.id]
   if (!adapter) throw new Error(`AgentWebUI Lite has no ACP command for ${engine.id}`)
   return `${LITE_ACP_DIR}/node_modules/.bin/${adapter.bin}`
 }
 
 /**
+ * The id an engine's ACP server knows an OpenRouter model by, which is what
+ * Lite's model menu sends (checked against each engine's pinned release):
+ *  - Hermes lists `openrouter:<slug>`, and only that prefix keeps a switch on
+ *    OpenRouter (with the patch in hermes.ts; a bare slug can be taken to
+ *    another provider whose catalog also lists it);
+ *  - OpenCode and Pi list `openrouter/<slug>`;
+ *  - Claude Code and Codex use the slug as their engine config names it.
+ */
+export function liteModelId(engineId: string, slug: string): string {
+  if (engineId === "hermes") return `openrouter:${slug}`
+  if (engineId === "opencode" || engineId === "pi") return `openrouter/${slug}`
+  return slug
+}
+
+/**
  * Settings Lite reads (its .env.example). A runtime env file that set one would
  * override Lite's own .env, since Lite lets the environment win.
  */
-export const LITE_SETTING_KEYS = /^(HOST|PORT|PASSWORD|USER_NAME|DATA_DIR|SYSTEM_PROMPT|WORKSPACE_DIR|AGENT_IDLE_MINUTES|UPLOAD_MB|RICH_REPLIES|FILES_ROOTS|TRUST_PROXY|NOTIFY_WEBHOOK|BRAND_[A-Z_]+|EMBED_SECRET|FRAME_ANCESTORS|LOCK_MODEL|LOCK_FOLDER|PROVIDER_[A-Z0-9]+_[A-Z]+|AGENT_[A-Z0-9]+_[A-Z]+)$/
+export const LITE_SETTING_KEYS = /^(HOST|PORT|PASSWORD|LOGIN_EMAIL|USER_NAME|DATA_DIR|SYSTEM_PROMPT|WORKSPACE_DIR|AGENT_IDLE_MINUTES|UPLOAD_MB|RICH_REPLIES|FILES_ROOTS|TRUST_PROXY|NOTIFY_WEBHOOK|BRAND_[A-Z_]+|EMBED_SECRET|FRAME_ANCESTORS|LOCK_MODEL|LOCK_FOLDER|PROVIDER_[A-Z0-9]+_[A-Z]+|AGENT_[A-Z0-9]+_[A-Z]+)$/
 
 /** Lite's env-file prefix for the one agent it serves: AGENT_<ID>_COMMAND, AGENT_<ID>_NAME. */
 function liteAgentKey(engine: Pick<RuntimeEngine, "id">): string {
   return `AGENT_${engine.id.replace(/[^a-z0-9]/gi, "").toUpperCase()}`
-}
-
-/**
- * The per-agent embed secret. Derived from the platform's encryption key and
- * the instance id, so the dashboard can sign `/embed` links without storing
- * anything, and every agent's secret is different.
- */
-export function liteEmbedSecret(instanceId: string): string {
-  const key = process.env.INSTANCE_ENCRYPTION_KEY?.trim()
-  if (!key) throw new Error("INSTANCE_ENCRYPTION_KEY is not set, so no embed secret can be derived")
-  return crypto.createHmac("sha256", key).update(`agentwebui-lite-embed:${instanceId}`).digest("hex")
-}
-
-/**
- * A one-time `/embed` link that signs the browser in to an agent's chat page
- * (Lite's format: base64url JSON {exp, nonce}, a dot, the hex HMAC-SHA256 of
- * that text). Lives 60 seconds; Lite accepts each link once.
- */
-export function buildLiteEmbedUrl(publicUrl: string, secret: string, nowMs = Date.now()): string {
-  const payload = JSON.stringify({
-    exp: Math.floor(nowMs / 1000) + 60,
-    nonce: crypto.randomBytes(16).toString("hex"),
-  })
-  const text = Buffer.from(payload, "utf8").toString("base64url")
-  const signature = crypto.createHmac("sha256", secret).update(text).digest("hex")
-  return `${publicUrl.replace(/\/+$/, "")}/embed?token=${text}.${signature}`
 }
 
 /**
@@ -176,7 +171,8 @@ ${buildPyInstallPrelude()}`
       ? ""
       : `
 step "install_hermes_acp"
-py_install ${bashSingleQuote(hermesVenv)} ${bashSingleQuote(pypiSpec(HERMES_ACP_EXTRA, args.runtimeVersion ?? engine.version()))} /var/tmp/py-cache-hermes`
+py_install ${bashSingleQuote(hermesVenv)} ${bashSingleQuote(pypiSpec(HERMES_ACP_EXTRA, args.runtimeVersion ?? engine.version()))} /var/tmp/py-cache-hermes
+${buildHermesAcpProviderPatch(hermesVenv)}`
     : adapter
       ? `
 step "install_acp_adapter"
@@ -217,37 +213,47 @@ export function makeLiteSidecar(engine: RuntimeEngine): SidecarSpec {
 
     renderEnv(args: SidecarEnvArgs): Record<string, string> {
       const name = args.instance.name || engine.displayName
+      const key = liteAgentKey(engine)
+      const model = args.model.trim()
+      // The default first, then the rest an admin enabled for this engine.
+      const models = [...new Set([model, ...(args.selectableModels ?? [])].map((s) => s.trim()))].filter(Boolean)
       const env: Record<string, string> = {
         HOST: "127.0.0.1",
         PORT: String(LITE_PORT),
         DATA_DIR: dataDir,
-        // Required: the box is reachable through Caddy. The dashboard signs in
-        // with EMBED_SECRET; the password is the fallback for the direct URL.
-        PASSWORD: args.adminPassword || args.secretKey,
-        EMBED_SECRET: args.secretKey,
+        // Required: the box is reachable through Caddy. The same generated
+        // email and password the dashboard shows under Access.
+        LOGIN_EMAIL: args.adminEmail,
+        PASSWORD: args.adminPassword,
         TRUST_PROXY: "true",
         WORKSPACE_DIR: engine.paths.workspaceDir,
         FILES_ROOTS: engine.paths.workspaceDir,
-        LOCK_MODEL: "true",
+        // With no list (a provider other than OpenRouter), the engine keeps the
+        // model it was configured with and the page offers no choice.
+        LOCK_MODEL: args.selectableModels?.length ? "false" : "true",
         LOCK_FOLDER: "true",
-        AGENT_IDLE_MINUTES: "30",
-        [`${liteAgentKey(engine)}_COMMAND`]: acpCommand(engine),
-        [`${liteAgentKey(engine)}_NAME`]: name,
+        // No AGENT_IDLE_MINUTES: Lite 0.1.0 reads any AGENT_<ID>_<FIELD> key
+        // as an agent, so it takes that one for an agent "idle" with no
+        // command and exits at start. Lite's default (10 minutes) applies.
+        [`${key}_COMMAND`]: acpCommand(engine),
+        [`${key}_NAME`]: name,
         BRAND_NAME: name.slice(0, 40),
+      }
+      if (args.selectableModels?.length) {
+        if (model) env[`${key}_MODEL`] = liteModelId(engine.id, model)
+        env[`${key}_MODELS`] = models.map((s) => liteModelId(engine.id, s)).join(",")
       }
       // Read by nothing in Lite; recorded so a reprovision can tell whether the
       // model moved and Lite (whose agents inherit the engine's config at
       // start) needs a restart.
-      if (args.model.trim()) env.ATLAS_PINNED_MODEL = args.model.trim()
-      const ancestors = (args.frameAncestors ?? []).filter((o) => /^https?:\/\//.test(o))
-      if (ancestors.length > 0) env.FRAME_ANCESTORS = ancestors.join(" ")
+      if (model) env.ATLAS_PINNED_MODEL = model
       return env
     },
 
     renderSystemdUnit(): string {
       // Only the runtime's env goes into the process environment: the agents
-      // Lite starts inherit it and need those keys. Lite's settings (password,
-      // embed secret) stay in its .env, read through AWL_ENV_FILE, so no agent
+      // Lite starts inherit it and need those keys. Lite's settings (sign-in
+      // email and password) stay in its .env, read through AWL_ENV_FILE, so no agent
       // sees them. The environment wins over Lite's .env, so the runtime's
       // files must not set a key Lite reads (see LITE_SETTING_KEYS).
       return `[Unit]
