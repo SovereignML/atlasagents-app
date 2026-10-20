@@ -10,6 +10,11 @@ import { cn } from "@/lib/utils"
 // Every file listed here is a white glyph (public/runtimes/*.svg).
 const MONOCHROME_RUNTIMES = new Set(["hermes", "opencode", "pi", "grok"])
 
+// Bumped whenever a file in public/runtimes/ is replaced. The CDN caches those
+// files for hours under their old content, so a changed icon needs a new URL
+// (2: OpenCode and Pi's real marks replaced the placeholders).
+const LOGO_VERSION = 2
+
 export function RuntimeLogo({
   runtime,
   size,
@@ -27,7 +32,7 @@ export function RuntimeLogo({
   const img = (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={`/runtimes/${runtimeId}.svg`}
+      src={`/runtimes/${runtimeId}.svg?v=${LOGO_VERSION}`}
       alt={alt}
       width={size}
       height={size}

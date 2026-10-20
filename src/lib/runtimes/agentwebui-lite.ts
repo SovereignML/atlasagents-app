@@ -1,3 +1,4 @@
+import { BRANDING } from "@/configs/branding"
 import { isPinned, npmSpec, pypiSpec } from "@/lib/runtime-versions"
 import { APT_OPTS_LITERAL } from "./bootstrap"
 import { bashSingleQuote, buildPyInstallPrelude, buildVerifyPythonStep } from "./python-install"
@@ -250,8 +251,13 @@ export function makeLiteSidecar(engine: RuntimeEngine): SidecarSpec {
         // command and exits at start. Lite's default (10 minutes) applies.
         [`${key}_COMMAND`]: acpCommand(engine),
         [`${key}_NAME`]: name,
-        BRAND_NAME: name.slice(0, 40),
+        // The page keeps its own name, carries our logo, and calls the one
+        // signed-in user Admin (Lite's sidebar says "You" without a name).
+        BRAND_NAME: LITE_BRAND_NAME,
+        USER_NAME: LITE_USER_NAME,
       }
+      const logo = liteBrandLogo()
+      if (logo) env.BRAND_LOGO = logo
       if (args.selectableModels?.length) {
         if (model) env[`${key}_MODEL`] = liteModelId(engine.id, model)
         env[`${key}_MODELS`] = models.map((s) => liteModelId(engine.id, s)).join(",")
@@ -292,6 +298,22 @@ WantedBy=multi-user.target
 `
     },
   }
+}
+
+/** The chat page's name, as Lite ships it. */
+export const LITE_BRAND_NAME = "AgentWebUI"
+/** What the chat page calls its one signed-in user. */
+export const LITE_USER_NAME = "Admin"
+
+/**
+ * The Atlas Agents mark for the chat page's header, served by the dashboard
+ * (the white mark: Lite opens in its dark theme). Lite fetches it in the
+ * browser, so it must be a public https URL; absent otherwise (dev), and Lite
+ * shows its built-in logo.
+ */
+export function liteBrandLogo(appUrl: string = BRANDING.appUrl): string | undefined {
+  if (!/^https:\/\//.test(appUrl)) return undefined
+  return `${appUrl.replace(/\/+$/, "")}/assets/icons/SovereignML-logo-white.svg`
 }
 
 /**
