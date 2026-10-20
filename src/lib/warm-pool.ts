@@ -122,8 +122,8 @@ const DEFAULT_POOL_REGION = process.env.POOL_REGION_CODE ?? "fra1"
 
 /**
  * Policy: 2 universal + 1 OpenClaw ready in the primary region. A universal VM
- * has every chat-UI engine installed (Hermes, Claude Code, Codex, OpenCode, Pi;
- * see runtimes/universal.ts), so a deploy of any of them claims one; it
+ * has every chat-UI engine installed (every engine but OpenClaw: Hermes, Claude
+ * Code, Codex, OpenCode, Pi, Gemini CLI, Grok; see runtimes/universal.ts), so a deploy of any of them claims one; it
  * replaced the Hermes-only target, whose 2 VMs served Hermes alone. A claim
  * fires an immediate replacement, so after one claim of each kind the
  * transient floor is 1 universal + 0 OpenClaw until the replacements reach

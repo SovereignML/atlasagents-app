@@ -86,16 +86,15 @@ Atlas Agents is a production-ready SaaS platform that lets businesses deploy AI 
 - Empty state with deploy CTA
 
 ### Deploy Agent (`/dashboard/deploy`)
-A 5-step guided deployment wizard (`project → interface → plan → advanced → billing`):
+A 3-step guided deployment wizard (`agent → plan → billing`):
 
 | Step | Description |
 |------|-------------|
-| **1. Project** | Agent name (auto-generated slug) + use case (one of the 8 agent categories) |
-| **2. Interface** | Interface kind (**Web** and **API** live today; Telegram/Discord are coming soon), deployment target (**Dedicated VPS** today; Shared Cluster / Serverless coming soon), region, and **runtime engine** ([OpenClaw or Hermes](RUNTIMES.md)) |
-| **3. Plan** | Choose a self-serve plan (Free / Builder / Operator / Scale — Enterprise and [BYOS](BYOS.md) have their own flows) |
-| **4. Advanced** | Optional: root password, SSH public key |
-| **5. Billing** | Monthly vs yearly interval, full config + price review, then deploy |
+| **1. Agent** | The engine ([any of eight runtimes](RUNTIMES.md); beta engines behind `CLI_RUNTIMES_ENABLED`). `?runtime=<id>` preselects one. |
+| **2. Plan** | Choose a self-serve plan (Free / Builder / Operator / Scale — Enterprise and [BYOS](BYOS.md) have their own flows). Plans below the engine's RAM floor, and Free for engines not offered on it, are disabled. |
+| **3. Billing** | Monthly vs yearly interval, price review, then deploy |
 
+- No name or use-case step: the server names the agent (`generateProjectName`) and every agent starts from its engine's default template. The name is changed later from the agent's page (pencil next to the name → `PATCH /api/instances/[id]`, display name only; the slug and URL stay).
 - The provider for a managed-VPS deploy is chosen automatically — see [VPS Provider Router](PROVIDERS.md).
 - Integrates with Stripe Checkout in production; dev mode auto-activates without payment.
 - Already own a server? Use [Bring Your Own Server](BYOS.md) instead of this wizard.

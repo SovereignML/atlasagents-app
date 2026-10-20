@@ -3,19 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import {
-  Check,
-  MessageSquare,
-  PenTool,
-  Search,
-  Settings,
-  Share2,
-  Shuffle,
-  Terminal,
-  TrendingUp,
-  Zap,
-  type LucideIcon,
-} from "lucide-react"
+import { Check } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -25,21 +13,17 @@ import {
   CardDescription,
   CardHeader,
 } from "@/components/ui/card"
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
 import { RuntimeLogo } from "@/components/dashboard/runtime-logo"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { AGENT_CATEGORIES, categoryDisplayName } from "@/configs/agent-categories"
 import { BRANDING } from "@/configs/branding"
 import { DEPLOYABLE_PLANS, PLANS, type PlanConfig } from "@/configs/plans"
 import { SERVER_TYPES, type ServerTypeConfig } from "@/configs/server-types"
 import { calcPlanPrice, formatUsd } from "@/lib/pricing"
 import type { BillingInterval } from "@/lib/pricing"
-import { generateProjectName } from "@/lib/project-name"
 import { cn } from "@/lib/utils"
 import { RUNTIME_IDS } from "@/lib/runtimes/ids"
-import { RUNTIME_CAPS } from "@/lib/runtimes/labels"
+import { RUNTIME_CAPS, isRuntimeId } from "@/lib/runtimes/labels"
 import type { RuntimeId } from "@/lib/runtimes/types"
 
 type Interface = "web" | "telegram" | "discord" | "api"
@@ -65,54 +49,28 @@ type AgentConfig = {
 const FIXED_INTERFACE: Interface = "web"
 const FIXED_DEPLOYMENT_TARGET: DeploymentTarget = "vps"
 
-const RUNTIME_HINTS: Record<Runtime, string> = {
-  openclaw: "Default agent runtime",
-  hermes: "Nous Research Hermes (Python)",
-  "claude-code": "Anthropic's coding agent, with a browser terminal",
-  codex: "OpenAI's coding agent, with a browser terminal",
-  opencode: "The open-source coding agent, any model, with a browser terminal",
-  pi: "A minimal coding agent, any model, with a browser terminal",
-}
+// Every agent starts from the engine's default template. The name is assigned
+// on the server (renamed later from the agent's page), so a deploy is the
+// engine, a plan and billing, nothing else.
+const DEFAULT_USE_CASE = "default"
 
 const RUNTIME_OPTIONS: { value: Runtime; label: string; hint: string; enabled: boolean }[] =
   RUNTIME_IDS.map((id) => ({
     value: id,
     label: RUNTIME_CAPS[id].label,
-    hint: RUNTIME_HINTS[id],
+    hint: RUNTIME_CAPS[id].hint,
     enabled: true,
   }))
 
-// Map the lucide icon names referenced in agent-categories.ts to their
-// components so the use-case cards can render an icon per category.
-const CATEGORY_ICONS: Record<string, LucideIcon> = {
-  Zap,
-  Terminal,
-  MessageSquare,
-  Search,
-  PenTool,
-  TrendingUp,
-  Share2,
-  Settings,
-}
-
-type Step = "agent" | "project" | "plan" | "billing"
-const ALL_STEPS: Step[] = ["agent", "project", "plan", "billing"]
+type Step = "agent" | "plan" | "billing"
+const ALL_STEPS: Step[] = ["agent", "plan", "billing"]
 
 const SELECTED_GLOW =
   "aria-pressed:border-ring aria-pressed:ring-1 aria-pressed:ring-ring aria-pressed:bg-ring/15 aria-pressed:hover:bg-ring/20 aria-pressed:text-foreground " +
   "data-[state=on]:border-ring data-[state=on]:ring-1 data-[state=on]:ring-ring data-[state=on]:bg-ring/15 data-[state=on]:hover:bg-ring/20 data-[state=on]:text-foreground"
 
-function deploymentSlug(raw: string) {
-  return raw
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-}
-
 const STEP_LABELS: Record<Step, string> = {
   agent: "Agent",
-  project: "Project",
   plan: "Plan",
   billing: "Billing",
 }
@@ -127,8 +85,6 @@ export default function DeployPage() {
   const [step, setStep] = useState<Step>("agent")
   const [deploying, setDeploying] = useState(false)
 
-  const [projectName, setProjectName] = useState(() => generateProjectName())
-  const [useCase, setUseCase] = useState<string>("")
   const [runtime, setRuntime] = useState<Runtime>("openclaw")
   // Engines this account may deploy. Beta engines stay hidden until the server
   // says otherwise (CLI_RUNTIMES_ENABLED, or a platform admin).
@@ -136,9 +92,16 @@ export default function DeployPage() {
     RUNTIME_IDS.filter((id) => !RUNTIME_CAPS[id].beta),
   )
   useEffect(() => {
+    // A link can name the engine (`/dashboard/deploy?runtime=grok`): start with
+    // it selected once the server confirms this account may deploy it.
+    const wanted = new URLSearchParams(window.location.search).get("runtime")
     fetch("/api/runtimes")
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => Array.isArray(d?.available) && setAvailableRuntimes(d.available))
+      .then((d) => {
+        if (!Array.isArray(d?.available)) return
+        setAvailableRuntimes(d.available)
+        if (isRuntimeId(wanted) && d.available.includes(wanted)) setRuntime(wanted)
+      })
       .catch(() => {})
   }, [])
 
@@ -160,9 +123,6 @@ export default function DeployPage() {
 
   const STEPS = ALL_STEPS
   const stepIdx = STEPS.indexOf(step)
-  const selectedCategoryObj = AGENT_CATEGORIES.find((c) => c.slug === useCase)
-
-  const coreActions = selectedCategoryObj?.examples ? [...selectedCategoryObj.examples] : []
 
   // Each engine has a RAM floor (`minRamGb`). Hermes (a Python agent plus its
   // chat UI) needs ≥2GB RAM. The Free demo runs on a 4GB machine, so
@@ -191,8 +151,6 @@ export default function DeployPage() {
     switch (step) {
       case "agent":
         return !!runtime
-      case "project":
-        return projectName.trim().length >= 2 && !!useCase
       case "plan":
         return !!selectedPlan
       case "billing":
@@ -211,21 +169,18 @@ export default function DeployPage() {
 
   async function handleDeploy() {
     if (!selectedPlan) return
-    // A manually-cleared field still deploys with a valid auto-generated name.
-    const deployName = projectName.trim() || generateProjectName()
     setDeploying(true)
     try {
       const res = await fetch("/api/deploy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: deployName,
           planSlug: selectedPlan.slug,
           billingInterval,
           agentConfig: {
-            use_case: useCase,
+            use_case: DEFAULT_USE_CASE,
             target_user: "",
-            core_actions: coreActions,
+            core_actions: [],
             tone: "friendly",
             interface: FIXED_INTERFACE,
             deployment_target: FIXED_DEPLOYMENT_TARGET,
@@ -254,15 +209,13 @@ export default function DeployPage() {
     }
   }
 
-  const slugPreview = deploymentSlug(projectName)
-
   const enterprisePlan = PLANS.find((p) => p.tier === "enterprise")
 
   return (
     <PageContainer>
       <PageHeader
         title="Deploy a new agent"
-        description="No code, no DevOps. Three steps to launch into your own private instance."
+        description="Pick an agent, a plan and billing. We name it for you; rename it any time."
       />
 
       <div className="flex items-center gap-1 overflow-x-auto px-0.5 pb-2 pt-1">
@@ -308,7 +261,7 @@ export default function DeployPage() {
               <div>
                 <h2 className="text-lg font-semibold text-foreground">Choose Your Agent</h2>
                 <p className="text-sm text-muted-foreground">
-                  Pick the runtime that powers your bot.
+                  Pick the agent you want. It starts on its own private server.
                 </p>
               </div>
 
@@ -380,88 +333,6 @@ export default function DeployPage() {
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground">{r.hint}</p>
-                      </ToggleGroupItem>
-                    )
-                  })}
-                </ToggleGroup>
-              </div>
-            </div>
-          )}
-
-          {step === "project" && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-lg font-semibold text-foreground">Project</h2>
-                <p className="text-sm text-muted-foreground">Name your agent and pick a use case.</p>
-              </div>
-
-              <FieldGroup>
-                <Field>
-                  <FieldLabel htmlFor="project-name">Project Name</FieldLabel>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      id="project-name"
-                      value={projectName}
-                      onChange={(e) => setProjectName(e.target.value)}
-                      placeholder="my-ai-agent"
-                      className={cn(
-                        "flex-1",
-                        projectName.trim().length >= 2 && "border-ring ring-1 ring-ring"
-                      )}
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={() => setProjectName(generateProjectName())}
-                      aria-label="Generate a new project name"
-                      title="Generate a new name"
-                    >
-                      <Shuffle className="size-4" />
-                    </Button>
-                  </div>
-                  {projectName.trim().length > 0 && projectName.trim().length < 2 && (
-                    <FieldDescription className="text-amber-500">
-                      Enter at least 2 characters to continue.
-                    </FieldDescription>
-                  )}
-                </Field>
-              </FieldGroup>
-
-              <div className="space-y-2">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Use Case</p>
-                <ToggleGroup
-                  value={useCase ? [useCase] : []}
-                  onValueChange={(v) => v[0] && setUseCase(v[0])}
-                  className="grid w-full grid-cols-2 gap-2 md:grid-cols-4"
-                  spacing={1}
-                >
-                  {AGENT_CATEGORIES.map((cat) => {
-                    const Icon = CATEGORY_ICONS[cat.icon] ?? Settings
-                    return (
-                      <ToggleGroupItem
-                        key={cat.slug}
-                        value={cat.slug}
-                        variant="outline"
-                        className={cn(
-                          "h-auto flex-col items-start gap-2 whitespace-normal p-3 text-left",
-                          SELECTED_GLOW
-                        )}
-                      >
-                        <span className="grid size-9 place-items-center rounded-lg border border-border bg-muted text-foreground">
-                          <Icon className="size-4" />
-                        </span>
-                        <div>
-                          <p className="text-sm font-medium text-foreground">
-                            {categoryDisplayName(cat.slug, runtime)}
-                          </p>
-                          <p className="mt-0.5 text-[11px] text-muted-foreground">
-                            Runs on {RUNTIME_OPTIONS.find((r) => r.value === runtime)?.label ?? runtime}
-                          </p>
-                        </div>
-                        <p className="line-clamp-2 text-xs text-muted-foreground">
-                          {cat.description}
-                        </p>
                       </ToggleGroupItem>
                     )
                   })}
@@ -664,49 +535,17 @@ export default function DeployPage() {
                         Agent
                       </CardDescription>
                       <p className="truncate text-base font-semibold text-foreground">
-                        {projectName || selectedCategoryObj?.name || "-"}
+                        {RUNTIME_CAPS[runtime].label}
                       </p>
-                      <p className="truncate font-mono text-xs text-muted-foreground">
-                        slug: {slugPreview || "-"}
+                      <p className="truncate text-xs text-muted-foreground">
+                        Named for you when it deploys. Rename it from its page.
                       </p>
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent>
-                  <p className="text-xs text-muted-foreground">
-                    Use case:{" "}
-                    <span className="text-foreground">{selectedCategoryObj?.name ?? "-"}</span>
-                    {"  ·  Runtime: "}
-                    <span className="text-foreground">
-                      {RUNTIME_OPTIONS.find((r) => r.value === runtime)?.label ?? runtime}
-                    </span>
-                  </p>
-                  {coreActions.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {coreActions.map((a) => (
-                        <Badge key={a} variant="outline" className="text-[10px]">
-                          {a}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
               </Card>
 
               <div className="grid grid-cols-2 gap-4 text-sm">
-                <Card size="sm">
-                  <CardHeader>
-                    <CardDescription className="text-xs uppercase tracking-wide">
-                      Project
-                    </CardDescription>
-                    <p className="font-medium text-foreground">{projectName}</p>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="font-mono text-xs text-muted-foreground">
-                      slug: {slugPreview || "-"}
-                    </p>
-                  </CardContent>
-                </Card>
                 <Card size="sm">
                   <CardHeader>
                     <CardDescription className="text-xs uppercase tracking-wide">

@@ -12,10 +12,9 @@ import {
   CardDescription,
   CardHeader,
 } from "@/components/ui/card"
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { AGENT_CATEGORIES, categoryDisplayName } from "@/configs/agent-categories"
 import { capacityByRuntime, footprintKey, getFootprint } from "@/configs/agent-footprint"
 import {
   BYO_LLM_PROVIDERS,
@@ -55,41 +54,25 @@ type Runtime = RuntimeId
 // billing decision, and burying it under an SSH form hid it. There is no
 // billing step: the agent's BYOS plan is an available plan the customer already has,
 // or is bought at Checkout from the review step's button (see planContext).
-type Step = "agent" | "model" | "project" | "review"
+// There is no project step either: the agent is named on the server and starts
+// from its engine's default template (rename it later from its page).
+type Step = "agent" | "model" | "review"
 
-const STEPS: Step[] = ["agent", "model", "project", "review"]
+const STEPS: Step[] = ["agent", "model", "review"]
 const STEP_LABELS: Record<Step, string> = {
   agent: "Agent",
   model: "Model",
-  project: "Project",
   review: "Review",
 }
 
-const RUNTIME_HINTS: Record<Runtime, string> = {
-  openclaw: "Default agent runtime",
-  hermes: "Nous Research Hermes (Python)",
-  "claude-code": "Anthropic's coding agent, with a browser terminal",
-  codex: "OpenAI's coding agent, with a browser terminal",
-  opencode: "The open-source coding agent, any model, with a browser terminal",
-  pi: "A minimal coding agent, any model, with a browser terminal",
-}
-
 const RUNTIME_OPTIONS: { value: Runtime; label: string; hint: string }[] = RUNTIME_IDS.map(
-  (id) => ({ value: id, label: RUNTIME_CAPS[id].label, hint: RUNTIME_HINTS[id] }),
+  (id) => ({ value: id, label: RUNTIME_CAPS[id].label, hint: RUNTIME_CAPS[id].hint }),
 )
 
 
 const SELECTED_GLOW =
   "aria-pressed:border-ring aria-pressed:ring-1 aria-pressed:ring-ring aria-pressed:bg-ring/15 aria-pressed:hover:bg-ring/20 aria-pressed:text-foreground " +
   "data-[state=on]:border-ring data-[state=on]:ring-1 data-[state=on]:ring-ring data-[state=on]:bg-ring/15 data-[state=on]:hover:bg-ring/20 data-[state=on]:text-foreground"
-
-function deploymentSlug(raw: string) {
-  return raw
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-}
 
 function gb(mb: number | null): string {
   return mb == null ? "—" : `${Math.round((mb / 1024) * 10) / 10} GB`
@@ -149,15 +132,8 @@ export function ByosInstallForm({
   const [fallbackApiKey, setFallbackApiKey] = useState("")
   const [fallbackBaseUrl, setFallbackBaseUrl] = useState("")
 
-  // Project step
-  const [name, setName] = useState("")
-  const [useCase, setUseCase] = useState<string>("")
-
   const stepIdx = STEPS.indexOf(step)
   const runtimeLabel = RUNTIME_OPTIONS.find((r) => r.value === runtime)?.label ?? runtime
-  const selectedCategory = AGENT_CATEGORIES.find((c) => c.slug === useCase)
-  const coreActions = selectedCategory?.examples ? [...selectedCategory.examples] : []
-  const slugPreview = deploymentSlug(name)
 
   // What we measured on this box, against what each runtime needs. Hermes on
   // BYOS always ships a chat UI (agent-create sets webuiEnabled from the
@@ -201,8 +177,6 @@ export function ByosInstallForm({
         return true
       case "model":
         return ownKeyReady
-      case "project":
-        return name.trim().length >= 2 && !!useCase
       case "review":
         return true
     }
@@ -217,8 +191,6 @@ export function ByosInstallForm({
   }
 
   async function submit() {
-    if (!name.trim()) return toast.error("Give your agent a name")
-    if (!useCase) return toast.error("Pick a use case")
     if (llmMode === "own_key") {
       if (!ownApiKey.trim())
         return toast.error("Enter your API key, or switch to our credits")
@@ -240,7 +212,6 @@ export function ByosInstallForm({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: name.trim(),
           // The server, not a host: the API reads the connection off the
           // connected row so the agent is linked to the machine it lands on.
           byosServerId: server.id,
@@ -266,9 +237,9 @@ export function ByosInstallForm({
               ? fallbackBaseUrl.trim()
               : undefined,
           agentConfig: {
-            use_case: useCase,
+            use_case: "default",
             target_user: "",
-            core_actions: coreActions,
+            core_actions: [],
             tone: "friendly",
             interface: "web",
             deployment_target: "byos",
@@ -686,65 +657,6 @@ export function ByosInstallForm({
             </div>
           )}
 
-          {step === "project" && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-lg font-semibold text-foreground">Project</h2>
-                <p className="text-sm text-muted-foreground">Name your agent and pick a use case.</p>
-              </div>
-
-              <FieldGroup>
-                <Field>
-                  <FieldLabel htmlFor="byos-name">Agent name</FieldLabel>
-                  <Input
-                    id="byos-name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="my-ai-agent"
-                    className={cn(name.trim().length >= 2 && "border-ring ring-1 ring-ring")}
-                  />
-                  {name.trim().length > 0 && (
-                    <FieldDescription className="font-mono">slug: {slugPreview || "-"}</FieldDescription>
-                  )}
-                  {name.trim().length > 0 && name.trim().length < 2 && (
-                    <FieldDescription className="text-amber-500">
-                      Enter at least 2 characters to continue.
-                    </FieldDescription>
-                  )}
-                </Field>
-              </FieldGroup>
-
-              <div className="space-y-2">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Use Case</p>
-                <ToggleGroup
-                  value={useCase ? [useCase] : []}
-                  onValueChange={(v) => v[0] && setUseCase(v[0])}
-                  className="grid w-full grid-cols-2 gap-2 md:grid-cols-4"
-                  spacing={1}
-                >
-                  {AGENT_CATEGORIES.map((cat) => (
-                    <ToggleGroupItem
-                      key={cat.slug}
-                      value={cat.slug}
-                      variant="outline"
-                      className={cn(
-                        "h-auto flex-col items-start whitespace-normal p-3 text-left",
-                        SELECTED_GLOW
-                      )}
-                    >
-                      <p className="text-sm font-medium text-foreground">
-                        {categoryDisplayName(cat.slug, runtime)}
-                      </p>
-                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                        {cat.description}
-                      </p>
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </div>
-            </div>
-          )}
-
           {step === "review" && (
             <div className="space-y-6">
               <div>
@@ -776,12 +688,10 @@ export function ByosInstallForm({
                     <CardDescription className="text-xs uppercase tracking-wide">
                       Agent
                     </CardDescription>
-                    <p className="font-medium text-foreground">
-                      {useCase ? categoryDisplayName(useCase, runtime) : "-"}
-                    </p>
+                    <p className="font-medium text-foreground">{runtimeLabel}</p>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-xs text-muted-foreground">Runtime: {runtimeLabel}</p>
+                    <p className="text-xs text-muted-foreground">Named for you; rename it from its page.</p>
                   </CardContent>
                 </Card>
                 <Card size="sm">
@@ -807,19 +717,6 @@ export function ByosInstallForm({
                           <Wallet className="size-3.5" /> Metered from your wallet
                         </>
                       )}
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card size="sm">
-                  <CardHeader>
-                    <CardDescription className="text-xs uppercase tracking-wide">
-                      Project
-                    </CardDescription>
-                    <p className="font-medium text-foreground">{name || "-"}</p>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="font-mono text-xs text-muted-foreground">
-                      slug: {slugPreview || "-"}
                     </p>
                   </CardContent>
                 </Card>

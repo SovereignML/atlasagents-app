@@ -45,6 +45,7 @@ import {
   requiresHermes,
   type ByoProviderId,
 } from "@/configs/llm-providers"
+import { generateProjectName } from "@/lib/project-name"
 
 const BYOS_SERVER_CONFIG_SLUG = "byos-managed"
 const BYOS_REGION_SLUG = "self-hosted"
@@ -131,7 +132,7 @@ async function handleByosDeploy(req: NextRequest) {
   const parsedBody = await readJsonBody(req, byosDeploySchema)
   if (!parsedBody.ok) return parsedBody.res
   const {
-    name,
+    name: requestedName,
     byosServerId,
     llmMode,
     ownApiKey,
@@ -146,9 +147,11 @@ async function handleByosDeploy(req: NextRequest) {
   } = parsedBody.data
 
   // ── Validate ──────────────────────────────────────────────────────
-  if (!name || !byosServerId) {
+  // The wizard leaves naming to us; the agent is renamed later from its page.
+  const name = requestedName?.trim() || generateProjectName()
+  if (!byosServerId) {
     return NextResponse.json(
-      { error: "Missing required fields (name, byosServerId)" },
+      { error: "Missing required field: byosServerId" },
       { status: 400 },
     )
   }
@@ -249,7 +252,7 @@ async function handleByosDeploy(req: NextRequest) {
   const rawCfg =
     agentConfigInput && typeof agentConfigInput === "object"
       ? { ...(agentConfigInput as Record<string, unknown>), deployment_target: "byos" }
-      : { use_case: name, deployment_target: "byos", runtime: "openclaw" }
+      : { use_case: "default", deployment_target: "byos", runtime: "openclaw" }
 
   const parsedAgentConfig = parseAgentConfig(rawCfg)
   if (!parsedAgentConfig.ok) {

@@ -35,6 +35,10 @@ export const AGENT_FOOTPRINTS: RuntimeFootprint[] = [
   // local server; Pi is a small Node process plus its ACP adapter.
   { key: "opencode-lite", label: "OpenCode + AgentWebUI Lite", vcpu: 1, ramMb: 1792, diskGb: 8 },
   { key: "pi-lite", label: "Pi + AgentWebUI Lite", vcpu: 1, ramMb: 1536, diskGb: 6 },
+  // Estimates too: Gemini CLI is one bundled Node process; Grok is a native
+  // binary of ~190MB on disk.
+  { key: "gemini-cli-lite", label: "Gemini CLI + AgentWebUI Lite", vcpu: 1, ramMb: 1792, diskGb: 8 },
+  { key: "grok-lite", label: "Grok + AgentWebUI Lite", vcpu: 1, ramMb: 1792, diskGb: 8 },
 ]
 
 /**

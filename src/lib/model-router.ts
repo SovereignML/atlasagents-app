@@ -39,24 +39,28 @@ export type NvidiaFallbackModel = {
   keySlot: NvidiaKeySlot
 }
 
-/** The curated NVIDIA fallback models surfaced in the admin Models panel. */
+/**
+ * The curated NVIDIA fallback models. Checked against
+ * https://integrate.api.nvidia.com/v1/models on 2026-10-20, which no longer
+ * lists the earlier Mistral Medium 3.5 and GLM 5.1.
+ */
 export const NVIDIA_FALLBACK_MODELS: NvidiaFallbackModel[] = [
   {
-    id: "mistral-medium-3.5",
-    label: "Mistral Medium 3.5 (128B)",
-    model: "mistralai/mistral-medium-3.5-128b",
+    id: "glm-5.3",
+    label: "GLM 5.3",
+    model: "z-ai/glm-5.3",
     keySlot: "primary",
   },
   {
-    id: "glm-5.1",
-    label: "GLM 5.1",
-    model: "z-ai/glm-5.1",
+    id: "nemotron-3.5-super-vl",
+    label: "Nemotron 3.5 Super VL",
+    model: "nvidia/nemotron-3.5-super-vl-120b-a12b",
     keySlot: "secondary",
   },
 ]
 
-const NVIDIA_PRIMARY_MODEL = NVIDIA_FALLBACK_MODELS[0].model // mistral → primary key
-const NVIDIA_SECONDARY_MODEL = NVIDIA_FALLBACK_MODELS[1].model // glm → secondary key
+const NVIDIA_PRIMARY_MODEL = NVIDIA_FALLBACK_MODELS[0].model // glm → primary key
+const NVIDIA_SECONDARY_MODEL = NVIDIA_FALLBACK_MODELS[1].model // nemotron → secondary key
 
 /**
  * Resolve the NVIDIA API key for a slot. Falls back to the legacy single
@@ -103,7 +107,7 @@ export function resolveLlmProvider(
  * diverge later without touching callers.
  *
  * Slugs verified live against https://openrouter.ai/api/v1/models on
- * 2026-06-12 (the previous `moonshotai/kimi-k2.6:free` variant was delisted).
+ * 2026-10-20.
  */
 export function routeModel(
   tier: BudgetTier,
@@ -120,8 +124,8 @@ export function routeModel(
   }
   return {
     provider: "openrouter",
-    model: "minimax/minimax-m2.5",
-    fallback: "moonshotai/kimi-k2.6",
+    model: "minimax/minimax-m3",
+    fallback: "z-ai/glm-5.3",
     baseUrl: OPENROUTER_BASE_URL,
     apiKeyEnv: "OPENROUTER_API_KEY",
   }
@@ -161,30 +165,35 @@ export type AllowedOpenRouterModel = {
  * the OpenRouter account settings whenever the allowlist changes there.
  */
 export const ALLOWED_OPENROUTER_MODELS: AllowedOpenRouterModel[] = [
-  { slug: "anthropic/claude-haiku-5.5", label: "Claude Haiku 5.5", kind: "chat", tag: "cheap" },
+  // The newest generation from each provider, verified live against
+  // https://openrouter.ai/api/v1/models on 2026-10-20. Every chat model has at
+  // least Hermes' 64k context.
+  { slug: "anthropic/claude-fable-5.1", label: "Claude Fable 5.1", kind: "chat", tag: "quality" },
   { slug: "anthropic/claude-opus-5.5", label: "Claude Opus 5.5", kind: "chat", tag: "quality" },
-  { slug: "anthropic/claude-sonnet-4.6", label: "Claude Sonnet 4.6", kind: "chat", tag: "quality" },
   { slug: "anthropic/claude-sonnet-5.5", label: "Claude Sonnet 5.5", kind: "chat", tag: "allrounder" },
-  { slug: "deepseek/deepseek-v4-flash", label: "DeepSeek V4 Flash", kind: "chat", tag: "cheap" },
-  { slug: "deepseek/deepseek-v4-pro", label: "DeepSeek V4 Pro", kind: "chat", tag: "allrounder" },
-  { slug: "google/gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite", kind: "chat", tag: "cheap" },
-  { slug: "google/gemini-3.5-flash", label: "Gemini 3.5 Flash", kind: "chat", tag: "allrounder" },
-  { slug: "google/gemma-4-26b-a4b-it:free", label: "Gemma 4 26B A4B (free)", kind: "chat", tag: "cheap" },
+  { slug: "anthropic/claude-haiku-5.5", label: "Claude Haiku 5.5", kind: "chat", tag: "cheap" },
+  { slug: "openai/gpt-6-astra", label: "GPT-6 Astra", kind: "chat", tag: "quality" },
+  { slug: "openai/gpt-6.1-sol", label: "GPT-6.1 Sol", kind: "chat", tag: "allrounder" },
+  { slug: "openai/gpt-6-luna", label: "GPT-6 Luna", kind: "chat", tag: "cheap" },
+  { slug: "google/gemini-4-argon", label: "Gemini 4 Argon", kind: "chat", tag: "quality" },
+  { slug: "google/gemini-3.8-flash", label: "Gemini 3.8 Flash", kind: "chat", tag: "allrounder" },
+  { slug: "google/gemini-3.5-flash-lite", label: "Gemini 3.5 Flash Lite", kind: "chat", tag: "cheap" },
   { slug: "google/gemma-4-31b-it:free", label: "Gemma 4 31B (free)", kind: "chat", tag: "cheap" },
-  { slug: "minimax/minimax-m2.5", label: "MiniMax M2.5", kind: "chat", tag: "allrounder" },
-  { slug: "mistralai/mistral-medium-3-5", label: "Mistral Medium 3.5", kind: "chat", tag: "allrounder" },
+  { slug: "x-ai/grok-4.7", label: "Grok 4.7", kind: "chat", tag: "quality" },
+  { slug: "x-ai/grok-build-0.1", label: "Grok Build 0.1", kind: "chat", tag: "allrounder" },
+  { slug: "deepseek/deepseek-v4-pro-0813", label: "DeepSeek V4 Pro", kind: "chat", tag: "allrounder" },
+  { slug: "deepseek/deepseek-v4.1-flash-1017", label: "DeepSeek V4.1 Flash", kind: "chat", tag: "cheap" },
+  { slug: "moonshotai/kimi-k3", label: "Kimi K3", kind: "chat", tag: "quality" },
+  { slug: "z-ai/glm-5.3", label: "GLM 5.3", kind: "chat", tag: "allrounder" },
+  { slug: "qwen/qwen3.8-max-prime", label: "Qwen3.8 Max Prime", kind: "chat", tag: "quality" },
+  { slug: "qwen/qwen3.8-flash", label: "Qwen3.8 Flash", kind: "chat", tag: "cheap" },
+  { slug: "minimax/minimax-m3", label: "MiniMax M3", kind: "chat", tag: "allrounder" },
+  { slug: "minimax/minimax-m3.1-flash:free", label: "MiniMax M3.1 Flash (free)", kind: "chat", tag: "cheap" },
+  { slug: "mistralai/mistral-large-4-0", label: "Mistral Large 4", kind: "chat", tag: "allrounder" },
   { slug: "mistralai/mistral-small-2603", label: "Mistral Small 4", kind: "chat", tag: "cheap" },
-  { slug: "moonshotai/kimi-k2.6", label: "Kimi K2.6", kind: "chat", tag: "quality" },
-  { slug: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", label: "Nemotron 3 Nano Omni (free)", kind: "chat", tag: "cheap" },
-  { slug: "nvidia/nemotron-3-ultra-550b-a55b:free", label: "Nemotron 3 Ultra (free)", kind: "chat", tag: "quality" },
-  { slug: "openai/gpt-5.1-codex-mini", label: "GPT-5.1 Codex Mini", kind: "chat", tag: "cheap" },
-  { slug: "openai/gpt-5.3-codex", label: "GPT-5.3 Codex", kind: "chat", tag: "allrounder" },
-  { slug: "openai/gpt-5.4-mini", label: "GPT-5.4 Mini", kind: "chat", tag: "allrounder" },
-  { slug: "openai/gpt-5.4-nano", label: "GPT-5.4 Nano", kind: "chat", tag: "cheap" },
-  { slug: "openai/gpt-5.5", label: "GPT-5.5", kind: "chat", tag: "quality" },
-  { slug: "qwen/qwen3.6-flash", label: "Qwen3.6 Flash", kind: "chat", tag: "cheap" },
-  { slug: "z-ai/glm-5.1", label: "GLM 5.1", kind: "chat", tag: "allrounder" },
-  { slug: "google/gemini-3.1-flash-image-preview", label: "Nano Banana 2 (Gemini 3.1 Flash Image)", kind: "image" },
+  { slug: "nvidia/nemotron-3.5-super-vl:free", label: "Nemotron 3.5 Super VL (free)", kind: "chat", tag: "cheap" },
+  { slug: "nvidia/nemotron-3.5-lightning:free", label: "Nemotron 3.5 Lightning (free)", kind: "chat", tag: "cheap" },
+  { slug: "google/gemini-nano-banana-2.1", label: "Nano Banana 2.1", kind: "image" },
   { slug: "openai/gpt-5.4-image-2", label: "GPT-5.4 Image 2", kind: "image" },
   { slug: "nvidia/nemotron-3.5-content-safety:free", label: "Nemotron 3.5 Content Safety (free)", kind: "moderation" },
 ]
@@ -216,15 +225,15 @@ export function isAllowedOpenRouterModel(slug: string): boolean {
  * with ≥64k context.
  *
  * Cost-efficient ladder (slugs + pricing verified live against
- * https://openrouter.ai/api/v1/models on 2026-06-12). `low` matches the
+ * https://openrouter.ai/api/v1/models on 2026-10-20). `low` matches the
  * `routeModel` OpenRouter primary so platform behavior stays consistent.
  * Every tier model must be in ALLOWED_OPENROUTER_MODELS — the account-level
  * allowlist rejects anything else at request time.
  */
 const HERMES_MODELS: Record<BudgetTier, string> = {
-  low: "minimax/minimax-m2.5", // 204k ctx — $0.15/$0.90 per M
-  mid: "deepseek/deepseek-v4-pro", // 1048k ctx — $0.43/$0.87 per M
-  high: "moonshotai/kimi-k2.6", // 262k ctx — $0.68/$3.41 per M
+  low: "minimax/minimax-m3", // 1048k ctx — $0.30/$1.20 per M
+  mid: "deepseek/deepseek-v4-pro-0813", // 1048k ctx — $0.66/$1.98 per M
+  high: "moonshotai/kimi-k3", // 1048k ctx — $0.24/$11.94 per M
 }
 
 /**
@@ -252,18 +261,47 @@ export function claudeCodeModel(tier: BudgetTier): string {
 }
 
 /**
- * Codex is built around OpenAI's models; the ladder is the codex-tuned line
- * plus the current flagship. Verified live on 2026-10-11. `CODEX_MODEL` env
- * overrides every tier.
+ * Codex is built around OpenAI's models; the ladder is the GPT-6 line, from
+ * Luna to Astra. Verified live on 2026-10-20. `CODEX_MODEL` env overrides
+ * every tier.
  */
 export const CODEX_MODELS: Record<BudgetTier, string> = {
-  low: "openai/gpt-5.1-codex-mini", // 400k ctx — $0.25/$2 per M
-  mid: "openai/gpt-5.3-codex", // 400k ctx — $1.75/$14 per M
-  high: "openai/gpt-5.5", // 1M ctx — $5/$30 per M
+  low: "openai/gpt-6-luna", // 1M ctx — $0.10/$0.50 per M
+  mid: "openai/gpt-6.1-sol", // 1M ctx — $2/$10 per M
+  high: "openai/gpt-6-astra", // 1M ctx — $10/$50 per M
 }
 
 export function codexModel(tier: BudgetTier): string {
   return process.env.CODEX_MODEL?.trim() || CODEX_MODELS[tier]
+}
+
+/**
+ * Gemini CLI drives Google's models only (the gateway translates its Gemini
+ * API calls to OpenRouter). Verified live on 2026-10-20. `GEMINI_CLI_MODEL`
+ * env overrides every tier.
+ */
+export const GEMINI_CLI_MODELS: Record<BudgetTier, string> = {
+  low: "google/gemini-3.5-flash-lite", // 1M ctx — $0.30/$2.50 per M
+  mid: "google/gemini-3.8-flash", // 1M ctx — $0.83/$4.13 per M
+  high: "google/gemini-4-argon", // 1M ctx — $2/$10 per M
+}
+
+export function geminiCliModel(tier: BudgetTier): string {
+  return process.env.GEMINI_CLI_MODEL?.trim() || GEMINI_CLI_MODELS[tier]
+}
+
+/**
+ * Grok drives xAI's models only. Verified live on 2026-10-20. `GROK_MODEL`
+ * env overrides every tier.
+ */
+export const GROK_MODELS: Record<BudgetTier, string> = {
+  low: "x-ai/grok-build-0.1", // 256k ctx — $1/$2 per M
+  mid: "x-ai/grok-4.7", // 500k ctx — $2/$6 per M
+  high: "x-ai/grok-4.7",
+}
+
+export function grokModel(tier: BudgetTier): string {
+  return process.env.GROK_MODEL?.trim() || GROK_MODELS[tier]
 }
 
 /**
@@ -279,6 +317,8 @@ const RUNTIME_MODEL_LADDERS: Partial<Record<RuntimeId, (tier: BudgetTier) => str
   // need (paid, tool-capable, long context), without HERMES_MODEL's override.
   opencode: (tier) => HERMES_MODELS[tier],
   pi: (tier) => HERMES_MODELS[tier],
+  "gemini-cli": geminiCliModel,
+  grok: grokModel,
 }
 
 /**

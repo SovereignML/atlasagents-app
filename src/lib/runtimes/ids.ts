@@ -5,4 +5,4 @@
  *
  * No imports on purpose: safe in client components and in `agent-config.ts`.
  */
-export const RUNTIME_IDS = ["openclaw", "hermes", "claude-code", "codex", "opencode", "pi"] as const
+export const RUNTIME_IDS = ["openclaw", "hermes", "claude-code", "codex", "opencode", "pi", "gemini-cli", "grok"] as const

@@ -361,7 +361,16 @@ describe("beta access", () => {
     expect(runtimeDeployDenial("pi", customer)).toMatch(/not available/)
     expect(runtimeDeployDenial("hermes", customer)).toBeNull()
     process.env.CLI_RUNTIMES_ENABLED = "true"
-    expect(availableRuntimesFor(customer)).toEqual(["openclaw", "hermes", "claude-code", "codex", "opencode", "pi"])
+    expect(availableRuntimesFor(customer)).toEqual([
+      "openclaw",
+      "hermes",
+      "claude-code",
+      "codex",
+      "opencode",
+      "pi",
+      "gemini-cli",
+      "grok",
+    ])
     expect(runtimeDeployDenial("codex", customer)).toBeNull()
   })
 
