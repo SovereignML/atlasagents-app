@@ -589,9 +589,10 @@ const PROVISION_INSTALL_START_SSH_TIMEOUT_MS = 300_000
  * gateway port. Runs in a single SSH session to eliminate connect/auth
  * overhead (~6-9s saved).
  *
- * Phase C+D are wrapped in a retry loop (up to MAX_CD_RETRIES). If the
- * service crashes during the health check, the script restarts the service
- * and re-runs health checks before giving up.
+ * Phase C+D are wrapped in a retry loop (up to MAX_CD_RETRIES), for a service
+ * that is slow to answer. A service that crashes or crash-loops fails at once
+ * with its journal: it would crash the same way again, and retrying it is what
+ * turned AgentWebUI Lite 0.1.0's crash at start into minutes of waiting.
  */
 type PhaseService = {
   serviceName: string
@@ -724,12 +725,12 @@ try_start_and_health() {
     if [ "\${CUR_RESTARTS}" -gt "\${INITIAL_RESTARTS}" ]; then
       echo "service is crash-looping (\${CUR_RESTARTS} restarts since start)" >&2
       journalctl -u "\${SERVICE}" --no-pager -n 50
-      return 1
+      return 2
     fi
     if ! systemctl is-active --quiet "\${SERVICE}"; then
       echo "service crashed during port wait" >&2
       journalctl -u "\${SERVICE}" --no-pager -n 50
-      return 1
+      return 2
     fi
     sleep 1
   done
@@ -751,12 +752,12 @@ try_start_and_health() {
     if [ "\${CUR_RESTARTS}" -gt "\${INITIAL_RESTARTS}" ]; then
       echo "service is crash-looping during health check (\${CUR_RESTARTS} restarts)" >&2
       journalctl -u "\${SERVICE}" --no-pager -n 50
-      return 1
+      return 2
     fi
     if ! systemctl is-active --quiet "\${SERVICE}"; then
       echo "service crashed during HTTP health check" >&2
       journalctl -u "\${SERVICE}" --no-pager -n 50
-      return 1
+      return 2
     fi
     sleep 2
   done
@@ -771,11 +772,20 @@ try_start_and_health() {
 
 start_one() {
   local SERVICE="\$1" PORT="\$2" HEALTH_PATH="\$3"
-  local CD_OK=0 ATTEMPT
+  local CD_OK=0 ATTEMPT RC
   for ATTEMPT in \$(seq 1 \${MAX_CD_RETRIES}); do
     echo "=== provision: attempt \${ATTEMPT}/\${MAX_CD_RETRIES} (\${SERVICE}) ==="
-    if try_start_and_health "\${SERVICE}" "\${PORT}" "\${HEALTH_PATH}"; then
+    RC=0
+    try_start_and_health "\${SERVICE}" "\${PORT}" "\${HEALTH_PATH}" || RC=\$?
+    if [ "\${RC}" = "0" ]; then
       CD_OK=1
+      break
+    fi
+    # A process that dies at start (a bad config, a missing dependency) dies
+    # the same way again: report it now instead of spending another attempt.
+    # Only a slow start (a timeout) is worth a second try.
+    if [ "\${RC}" = "2" ]; then
+      echo "=== provision: crashed_at_start (\${SERVICE}), not retrying ==="
       break
     fi
     if [ "\${ATTEMPT}" -lt "\${MAX_CD_RETRIES}" ]; then
@@ -1906,6 +1916,7 @@ async function acquireBootedVm(
 }
 
 async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
+  const startedAt = Date.now()
   const runtime = getRuntime(instance.runtime)
 
   // The Cloudflare origin cert is no longer read here and baked into the
@@ -2073,6 +2084,7 @@ async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
       managedSubdomain: managedSubdomainForProvision,
       vmId,
       fromWarmPool,
+      startedAt,
     })
   } catch (err) {
     if (ipAddress) {
@@ -2146,6 +2158,8 @@ async function configureRuntimeOverSsh(
      * The `/v1/models` check still gates it.
      */
     fromWarmPool?: boolean
+    /** When the deploy began (Date.now()), for the time-to-running in the completion log. */
+    startedAt?: number
   },
 ): Promise<ProvisionResult> {
   const { managedSubdomain, vmId } = opts
@@ -2459,6 +2473,8 @@ async function configureRuntimeOverSsh(
     let failedPhase = "B+C+D"
     if (stdout.includes("caddy validate failed") || !stdout.includes("install_service_done")) {
       failedPhase = "B (caddy/systemd)"
+    } else if (stdout.includes("crashed_at_start")) {
+      failedPhase = "C+D (a service crashed at start; see its journal above)"
     } else if (stdout.includes("all_retries_exhausted")) {
       failedPhase = "C+D (service start/health — all retries exhausted)"
     } else if (!stdout.includes("start_service_done")) {
@@ -2605,9 +2621,13 @@ async function configureRuntimeOverSsh(
     instanceId: instance.id,
     stage: "complete",
     result: "ok",
-    message: `Deployment complete. ${runtime.displayName} gateway at ${ipAddress}:${runtime.gatewayPort}${
+    // The time is what the under-a-minute target is measured by: a warm-pool
+    // claim should land well inside it, a cold install cannot.
+    message: `Deployment complete${
+      opts.startedAt ? ` in ${Math.round((Date.now() - opts.startedAt) / 1000)}s` : ""
+    } (${fromWarmPool ? "warm pool" : "cold install"}). ${runtime.displayName} is at ${publicUrl ?? ipAddress}${
       instance.domain ? ` (domain ${instance.domain})` : ""
-    }. Direct access: http://${ipAddress}:${runtime.gatewayPort}`,
+    }.`,
   })
 
   // Warm-pool fast path: the gateway is healthy and committed; set up the

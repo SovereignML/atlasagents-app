@@ -43,9 +43,12 @@ function tomlString(s: string): string {
   return JSON.stringify(s)
 }
 
-export function renderCodexConfigToml(args: { model: string; workspaceDir: string }): string {
+/** The model catalog the init script writes from the chat UI's models (see renderCodexCatalogScript). */
+export const CODEX_MODEL_CATALOG = `${CODEX_HOME}/atlas-models.json`
+
+export function renderCodexConfigToml(args: { model: string; workspaceDir: string; modelCatalog?: string }): string {
   return `# Written by Atlas Agents on every (re)provision — edits here are overwritten.
-model = ${tomlString(args.model)}
+${args.modelCatalog ? `model_catalog_json = ${tomlString(args.modelCatalog)}\n` : ""}model = ${tomlString(args.model)}
 model_provider = "openrouter"
 # The agent runs as an unprivileged system user on its own box; that user is
 # the fence. Nobody is attached to answer approval prompts.
@@ -61,6 +64,31 @@ wire_api = ${tomlString(codexWireApi())}
 [projects.${tomlString(args.workspaceDir)}]
 trust_level = "trusted"
 `
+}
+
+/**
+ * Codex's ACP adapter offers, and accepts, only the models in Codex's catalog:
+ * OpenAI's own, named without the `openai/` OpenRouter needs. `model_catalog_json`
+ * replaces that catalog, so write one with the chat UI's models (OpenRouter
+ * slugs). Each entry copies a listed built-in entry for the fields Codex needs
+ * (reasoning levels, shell type), read from the installed Codex itself so the
+ * shape always matches the pinned release; the empty CODEX_HOME makes sure it
+ * is the built-in catalog and not the one written last time.
+ */
+export function renderCodexCatalogScript(args: { models: string[]; systemUser: string }): string {
+  const user = bashSingleQuote(args.systemUser)
+  const build = [
+    'const fs = require("fs")',
+    "const base = JSON.parse(fs.readFileSync(0, \"utf8\")).models",
+    'const t = base.find((m) => m.visibility === "list") || base[0]',
+    "const models = JSON.parse(process.env.ATLAS_MODELS).map((slug, i) => ({ ...t, slug, display_name: slug, description: \"\", priority: i, upgrade: null, availability_nux: null }))",
+    "fs.writeFileSync(process.env.ATLAS_OUT, JSON.stringify({ models }), { mode: 0o600 })",
+  ].join("; ")
+  return `CODEX_EMPTY_HOME=$(mktemp -d)
+chown ${user}:${user} "$CODEX_EMPTY_HOME"
+sudo -u ${user} env HOME=${bashSingleQuote(CODEX_INSTALL_DIR)} CODEX_HOME="$CODEX_EMPTY_HOME" ${bashSingleQuote(CODEX_BIN)} debug models \\
+  | sudo -u ${user} env ATLAS_MODELS=${bashSingleQuote(JSON.stringify(args.models))} ATLAS_OUT=${bashSingleQuote(CODEX_MODEL_CATALOG)} node -e ${bashSingleQuote(build)}
+rm -rf "$CODEX_EMPTY_HOME"`
 }
 
 export const codexRuntime = createCliRuntime({
@@ -89,10 +117,12 @@ export const codexRuntime = createCliRuntime({
     return {}
   },
 
-  renderEngineConfig({ model, workspaceDir, systemUser }) {
+  renderEngineConfig({ model, models, workspaceDir, systemUser }) {
     const user = bashSingleQuote(systemUser)
-    const toml = Buffer.from(renderCodexConfigToml({ model, workspaceDir }), "utf8").toString("base64")
+    const modelCatalog = models.length ? CODEX_MODEL_CATALOG : undefined
+    const toml = Buffer.from(renderCodexConfigToml({ model, workspaceDir, modelCatalog }), "utf8").toString("base64")
     return `install -d -m 0700 -o ${user} -g ${user} ${bashSingleQuote(CODEX_HOME)}
+${models.length ? renderCodexCatalogScript({ models, systemUser }) : `rm -f ${bashSingleQuote(CODEX_MODEL_CATALOG)}`}
 echo ${bashSingleQuote(toml)} | base64 -d > ${bashSingleQuote(`${CODEX_HOME}/config.toml`)}
 chmod 0600 ${bashSingleQuote(`${CODEX_HOME}/config.toml`)}
 chown ${user}:${user} ${bashSingleQuote(`${CODEX_HOME}/config.toml`)}`

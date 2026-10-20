@@ -1,6 +1,7 @@
 import { isPinned, npmSpec, pypiSpec } from "@/lib/runtime-versions"
 import { APT_OPTS_LITERAL } from "./bootstrap"
 import { bashSingleQuote, buildPyInstallPrelude, buildVerifyPythonStep } from "./python-install"
+import { buildHermesAcpProviderPatch } from "./hermes-acp-patch"
 import type { BootstrapRenderArgs, RuntimeEngine, SidecarEnvArgs, SidecarSpec } from "./types"
 
 /* --- AgentWebUI Lite: the chat UI ------------------------------------------ */
@@ -170,7 +171,8 @@ ${buildPyInstallPrelude()}`
       ? ""
       : `
 step "install_hermes_acp"
-py_install ${bashSingleQuote(hermesVenv)} ${bashSingleQuote(pypiSpec(HERMES_ACP_EXTRA, args.runtimeVersion ?? engine.version()))} /var/tmp/py-cache-hermes`
+py_install ${bashSingleQuote(hermesVenv)} ${bashSingleQuote(pypiSpec(HERMES_ACP_EXTRA, args.runtimeVersion ?? engine.version()))} /var/tmp/py-cache-hermes
+${buildHermesAcpProviderPatch(hermesVenv)}`
     : adapter
       ? `
 step "install_acp_adapter"

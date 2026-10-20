@@ -79,7 +79,18 @@ export type CliRuntimeSpec = {
    * files under the user's HOME. Must be idempotent and must not put secrets on
    * a command line.
    */
-  renderEngineConfig(args: { model: string; installDir: string; workspaceDir: string; systemUser: string }): string
+  renderEngineConfig(args: {
+    model: string
+    /**
+     * The models the chat UI may switch to (the default first): the engine is
+     * told about them so its ACP server accepts them. Empty when the agent's
+     * models do not go through OpenRouter.
+     */
+    models: string[]
+    installDir: string
+    workspaceDir: string
+    systemUser: string
+  }): string
 }
 
 /**
@@ -124,6 +135,12 @@ export function renderTerminalCaddyHandle(gatewayPort: number): string {
       header_up X-Real-IP {remote_host}
     }
   }`
+}
+
+/** The models the chat UI offers an engine: the default first, OpenRouter slugs only. */
+export function chatModels(args: Pick<RenderInitScriptArgs, "provider" | "model" | "selectableModels">): string[] {
+  if (args.provider !== "openrouter") return []
+  return [...new Set([args.model, ...(args.selectableModels ?? [])].map((s) => s.trim()))].filter(Boolean)
 }
 
 export function createCliRuntime(spec: CliRuntimeSpec): RuntimeEngine {
@@ -362,7 +379,7 @@ chmod 0600 ${bashSingleQuote(modelEnvPath)}
 chown ${user}:${user} ${bashSingleQuote(modelEnvPath)}
 
 echo "=== provision: ${spec.id}_config ==="
-${spec.renderEngineConfig({ model: args.model, installDir: spec.installDir, workspaceDir, systemUser: spec.systemUser })}
+${spec.renderEngineConfig({ model: args.model, models: chatModels(args), installDir: spec.installDir, workspaceDir, systemUser: spec.systemUser })}
 
 echo "=== provision: ${spec.id}_cli_check ==="
 sudo -u ${user} env HOME=${bashSingleQuote(spec.installDir)} ${bashSingleQuote(spec.cliBinary)} --version

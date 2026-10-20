@@ -11,6 +11,7 @@ import { buildGatewayAllowedOrigins } from "@/lib/instance-gateway-access"
 import { pypiSpec } from "@/lib/runtime-versions"
 import { bashSingleQuote, buildPyInstallPrelude, buildVerifyPythonStep } from "./python-install"
 import { buildLiteInstallSteps, makeLiteSidecar } from "./agentwebui-lite"
+import { buildHermesAcpProviderPatch } from "./hermes-acp-patch"
 import { resolveLlmProvider, nvidiaKeyForSlot } from "@/lib/model-router"
 import { enabledToolsForRuntime } from "@/configs/agent-tools"
 import { renderGatewayCaddyfile } from "./caddy-gateway"
@@ -146,6 +147,8 @@ py_install ${bashSingleQuote(HERMES_VENV)} "$RUNTIME_PKG_SPEC" /var/tmp/py-cache
 
 step "verify_hermes_cli"
 ${bashSingleQuote(HERMES_CLI)} --version
+
+${buildHermesAcpProviderPatch(HERMES_VENV)}
 
 step "hermes_config_dir"
 install -d -m 0750 -o ${bashSingleQuote(HERMES_SYSTEM_USER)} -g ${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(`${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}`)}
