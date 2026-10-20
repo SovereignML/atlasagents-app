@@ -358,9 +358,10 @@ describe("beta access", () => {
     delete process.env.CLI_RUNTIMES_ENABLED
     expect(availableRuntimesFor(customer)).toEqual(["openclaw", "hermes"])
     expect(runtimeDeployDenial("codex", customer)).toMatch(/not available/)
+    expect(runtimeDeployDenial("pi", customer)).toMatch(/not available/)
     expect(runtimeDeployDenial("hermes", customer)).toBeNull()
     process.env.CLI_RUNTIMES_ENABLED = "true"
-    expect(availableRuntimesFor(customer)).toEqual(["openclaw", "hermes", "claude-code", "codex"])
+    expect(availableRuntimesFor(customer)).toEqual(["openclaw", "hermes", "claude-code", "codex", "opencode", "pi"])
     expect(runtimeDeployDenial("codex", customer)).toBeNull()
   })
 

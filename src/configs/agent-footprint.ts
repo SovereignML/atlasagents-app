@@ -31,6 +31,10 @@ export const AGENT_FOOTPRINTS: RuntimeFootprint[] = [
   { key: "hermes-lite", label: "Hermes + AgentWebUI Lite", vcpu: 1, ramMb: 1792, diskGb: 6 },
   { key: "claude-code-lite", label: "Claude Code + AgentWebUI Lite", vcpu: 1, ramMb: 1792, diskGb: 8 },
   { key: "codex-lite", label: "Codex + AgentWebUI Lite", vcpu: 1, ramMb: 2048, diskGb: 8 },
+  // Estimates until measured on a box: OpenCode is one compiled binary with a
+  // local server; Pi is a small Node process plus its ACP adapter.
+  { key: "opencode-lite", label: "OpenCode + AgentWebUI Lite", vcpu: 1, ramMb: 1792, diskGb: 8 },
+  { key: "pi-lite", label: "Pi + AgentWebUI Lite", vcpu: 1, ramMb: 1536, diskGb: 6 },
 ]
 
 /**

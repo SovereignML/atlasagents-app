@@ -112,6 +112,30 @@ export const RUNTIME_CAPS: Record<RuntimeId, RuntimeCaps> = {
     allowedOnFree: false,
     beta: true,
   },
+  // OpenCode and Pi drive any OpenRouter model, so no slug prefix. Beta, like
+  // the other CLI engines; Pi's ACP adapter is a community one (pi-acp).
+  opencode: {
+    label: "OpenCode",
+    minRamGb: 2,
+    exposesOpenAiApi: true,
+    nativeAdminLogin: false,
+    supportsCustomBaseUrl: false,
+    hasSidecar: true,
+    hasTerminal: true,
+    allowedOnFree: false,
+    beta: true,
+  },
+  pi: {
+    label: "Pi",
+    minRamGb: 2,
+    exposesOpenAiApi: true,
+    nativeAdminLogin: false,
+    supportsCustomBaseUrl: false,
+    hasSidecar: true,
+    hasTerminal: true,
+    allowedOnFree: false,
+    beta: true,
+  },
 }
 
 /** Default for NULL / unknown ids — mirrors `getRuntime()`'s fallback. */
