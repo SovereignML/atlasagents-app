@@ -17,7 +17,6 @@
 import type { InferSelectModel } from "drizzle-orm"
 import { db, instances, instanceUptimeSamples, eq, and, isNotNull, isNull, lt, sql } from "@/db"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
-import { getRuntime, type RuntimeEngine } from "@/lib/runtimes"
 import { logInstanceEvent } from "@/lib/instance-state"
 import {
   getKumaEnv,
@@ -32,11 +31,16 @@ import {
 type Instance = InferSelectModel<typeof instances>
 
 /**
- * The URL a Kuma HTTP monitor should probe: the agent's public gateway plus the
- * runtime's health path. Returns null when the agent isn't publicly reachable
- * yet (no domain / subdomain / IP) — caller no-ops.
+ * The URL a Kuma HTTP monitor should probe: the agent's public root, where a
+ * 200 means it is up. Not the runtime's health path: on an agent with a chat
+ * UI, Caddy sends everything but `/v1/*` to the chat page, which answers its
+ * `/health` with 401 (sign-in required), so every such agent read as down.
+ * Returns null when the agent isn't publicly reachable yet (no domain /
+ * subdomain / IP) — caller no-ops.
  */
-function buildMonitorUrl(instance: Instance, runtime: RuntimeEngine): string | null {
+export function buildMonitorUrl(
+  instance: Pick<Instance, "domain" | "managedSubdomain" | "tlsStatus" | "ipAddress" | "containerPort">,
+): string | null {
   const base = buildPublicGatewayUrl({
     domain: instance.domain,
     managedSubdomain: instance.managedSubdomain,
@@ -53,8 +57,7 @@ function buildMonitorUrl(instance: Instance, runtime: RuntimeEngine): string | n
     origin = `http://${instance.ipAddress}:${instance.containerPort}`
   }
 
-  const path = runtime.healthPath || "/"
-  return origin.replace(/\/+$/, "") + (path.startsWith("/") ? path : `/${path}`)
+  return origin.replace(/\/+$/, "") + "/"
 }
 
 /**
@@ -75,8 +78,7 @@ export async function syncUptimeMonitor(instanceId: string): Promise<void> {
   }
   if (!instance) return
 
-  const runtime = getRuntime(instance.runtime)
-  const url = buildMonitorUrl(instance, runtime)
+  const url = buildMonitorUrl(instance)
   if (!url) return // not publicly reachable yet — nothing to monitor
 
   const name = `${instance.name} (${instance.id})`

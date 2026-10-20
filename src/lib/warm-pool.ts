@@ -928,6 +928,19 @@ let refillInFlight: Promise<unknown> | null = null
  * already running (single in-flight promise, process-wide). Cross-process
  * safety comes from the advisory lock in `refillWarmPoolLocked`.
  */
+/**
+ * Print the errors a scheduled refill collected that nothing else logs: a
+ * create that throws (provider API refusal, DNS, a bootstrap that cannot be
+ * rendered), an advance or a reap. Before this they only fed the breaker, so
+ * the logs said "3 bake failure(s)" and never why. Bake failures and breaker
+ * pauses are logged where they happen.
+ */
+function logRefillErrors(report: WarmPoolReport): void {
+  for (const e of report.errors) {
+    if (/^(create|advance|reap) /.test(e)) console.warn(`[warm-pool] ${e}`)
+  }
+}
+
 export async function maybeRefillWarmPool(): Promise<void> {
   if (!isPoolEnabled()) return
   if (refillInFlight) {
@@ -937,7 +950,8 @@ export async function maybeRefillWarmPool(): Promise<void> {
   if (Date.now() - lastRefillAt < REFILL_MIN_INTERVAL_MS) return
   lastRefillAt = Date.now()
   refillInFlight = refillWarmPoolLocked()
-    .catch(() => {})
+    .then(logRefillErrors)
+    .catch((err) => console.error("[warm-pool] refill failed:", err))
     .finally(() => {
       refillInFlight = null
     })

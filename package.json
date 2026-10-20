@@ -32,6 +32,7 @@
     "backfill:personal-teams": "node --env-file=.env --import tsx scripts/backfill-personal-teams.ts",
     "wallets:migrate": "node --env-file=.env --import tsx scripts/migrate-wallets-to-credits.ts",
     "chat-ui:migrate": "node --env-file=.env --import tsx scripts/migrate-chat-ui-to-lite.ts",
+    "uptime:resync": "node --env-file=.env --import tsx scripts/resync-uptime-monitors.ts",
     "whitelabel:backfill-hostnames": "node --env-file=.env --import tsx scripts/backfill-custom-hostnames.ts",
     "byos:sweep-orphans": "node --env-file=.env --import tsx scripts/sweep-orphan-byos-instances.ts",
     "seed:agent-events": "node --env-file=.env --import tsx scripts/seed-agent-events.ts",
