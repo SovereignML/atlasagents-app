@@ -1,6 +1,6 @@
-import { asc, eq } from "drizzle-orm"
+import { and, asc, eq, isNotNull, ne, notInArray } from "drizzle-orm"
 
-import { db, allowedModels } from "@/db"
+import { db, allowedModels, instances } from "@/db"
 import { HERMES_MIN_CONTEXT, runtimeAcceptsModel, runtimeCaps } from "@/lib/runtimes/labels"
 import {
   ALLOWED_OPENROUTER_MODELS,
@@ -117,6 +117,59 @@ export async function syncModelMetadata(): Promise<{ updated: number }> {
     }
   }
   return { updated }
+}
+
+/**
+ * Replace the allowlist with the recommended catalog (`ALLOWED_OPENROUTER_MODELS`):
+ * every other row is deleted, every recommended one is added (or re-enabled,
+ * with its curated label), then context windows are refreshed from the public
+ * catalog so the engines with a context floor can offer them. The OpenRouter
+ * account allowlist is separate and must be changed to match by hand.
+ *
+ * Agents keep any per-agent model they were given; `staleAgents` counts the
+ * live ones whose model is no longer listed, so they can be moved.
+ */
+export async function resetAllowedModelsToRecommended(): Promise<{
+  removed: string[]
+  kept: number
+  contextUpdated: number
+  staleAgents: number
+}> {
+  const slugs = ALLOWED_OPENROUTER_MODELS.map((m) => m.slug)
+  const removed = await db.transaction(async (tx) => {
+    const gone = await tx
+      .delete(allowedModels)
+      .where(notInArray(allowedModels.slug, slugs))
+      .returning({ slug: allowedModels.slug })
+    for (const m of ALLOWED_OPENROUTER_MODELS) {
+      await tx
+        .insert(allowedModels)
+        .values({ slug: m.slug, label: m.label, kind: m.kind })
+        .onConflictDoUpdate({
+          target: allowedModels.slug,
+          set: { label: m.label, kind: m.kind, enabled: true },
+        })
+    }
+    return gone.map((r) => r.slug)
+  })
+  let contextUpdated = 0
+  try {
+    contextUpdated = (await syncModelMetadata()).updated
+  } catch (e) {
+    // The catalog is public but can be down; the admin can press Sync later.
+    console.warn("[allowed-models] context sync after reset failed:", e)
+  }
+  const stale = await db
+    .select({ id: instances.id })
+    .from(instances)
+    .where(
+      and(
+        isNotNull(instances.modelSlug),
+        notInArray(instances.modelSlug, slugs),
+        ne(instances.status, "deleted"),
+      ),
+    )
+  return { removed, kept: slugs.length, contextUpdated, staleAgents: stale.length }
 }
 
 /** True for a chat model that satisfies the runtime's constraints. */

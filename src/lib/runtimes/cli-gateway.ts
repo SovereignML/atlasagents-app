@@ -1,12 +1,14 @@
 /**
  * The Atlas CLI gateway — the small HTTP server that turns a coding-agent CLI
- * (Claude Code, Codex, OpenCode, Pi) into the same shape as Hermes: an OpenAI-compatible
+ * (Claude Code, Codex, OpenCode, Pi, Gemini CLI, Grok) into the same shape as Hermes: an OpenAI-compatible
  * `/v1/chat/completions` + `/v1/models` on loopback behind the gateway token,
  * which external bots and API clients talk to (the chat UI talks to the CLI
  * over ACP instead). None of the CLIs ships a server of its
  * own, so this one drives them: Claude Code and Codex through their official
  * SDKs (`@anthropic-ai/claude-agent-sdk`'s `query()`, `@openai/codex-sdk`'s
- * threads), OpenCode and Pi over ACP, the same protocol the chat UI uses.
+ * threads), OpenCode, Pi, Gemini CLI and Grok over ACP, the same protocol the
+ * chat UI uses. For Gemini CLI it also serves the Gemini API on loopback,
+ * translated to OpenRouter (see handleGemini).
  *
  * It is written to `<installDir>/gateway/gateway.mjs` by the runtime's init
  * script on every provision and reprovision, so a fix here reaches running
@@ -19,7 +21,8 @@
  * `ATLAS_GATEWAY_NO_LISTEN=1` defines everything without binding a port.
  *
  * Contract with the box (all from the runtime's `.env`, via EnvironmentFile):
- *   ATLAS_ENGINE          "claude-code" | "codex" | "opencode" | "pi"
+ *   ATLAS_ENGINE          "claude-code" | "codex" | "opencode" | "pi" |
+ *                         "gemini-cli" | "grok"
  *   API_SERVER_HOST/PORT  loopback bind (PORT = the runtime's gatewayPort)
  *   API_SERVER_KEY        bearer token — same name Hermes uses, so the
  *                         provisioner's `/v1/models` check works unchanged
@@ -30,8 +33,11 @@
  *   TERMINAL_AUTH_SHA256  `forward_auth` (sha256 of a random 24-char password)
  *   ATLAS_CODEX_BIN       Codex only: the globally installed `codex` binary,
  *                         so the API and the terminal run the same build
- *   ATLAS_ACP_COMMAND     OpenCode / Pi: the ACP command line, space-separated
+ *   ATLAS_ACP_COMMAND     the ACP engines: the ACP command line, space-separated
  *                         (paths only, no quoting: systemd strips quotes)
+ *   ATLAS_GEMINI_MODELS_PATH  Gemini CLI only: the agent's models, one per line
+ *   OPENROUTER_API_KEY    Gemini CLI only (here): the key the Gemini API
+ *                         translation calls OpenRouter with
  *
  * Sessions: an OpenAI-style client resends the whole history every turn, and
  * clients have no conversation id. After each turn the gateway records
@@ -441,7 +447,7 @@ async function* runCodex({ prompt, resumeId, signal }) {
 }
 
 /*
- * ACP agents (OpenCode, Pi): one agent process per turn, spoken to over stdio
+ * ACP agents (OpenCode, Pi, Gemini CLI, Grok): one agent process per turn, spoken to over stdio
  * as newline-delimited JSON-RPC. Resuming loads the agent's own session when
  * it can (its replayed history is not streamed again); otherwise the turn
  * fails before any output and completeTurn replays the history into a fresh
@@ -567,7 +573,300 @@ async function* runAcp({ prompt, resumeId, signal }) {
   }
 }
 
-const ENGINES = { "claude-code": runClaude, codex: runCodex, opencode: runAcp, pi: runAcp }
+const ENGINES = {
+  "claude-code": runClaude,
+  codex: runCodex,
+  opencode: runAcp,
+  pi: runAcp,
+  "gemini-cli": runAcp,
+  grok: runAcp,
+}
+
+/*
+ * Gemini API → OpenRouter. Gemini CLI speaks only Gemini's own REST API
+ * (generateContent / streamGenerateContent), which OpenRouter does not serve.
+ * On a Gemini CLI box GOOGLE_GEMINI_BASE_URL points here, so the CLI's calls
+ * (from the chat UI, the gateway's own turns and the terminal alike) are
+ * translated to OpenRouter chat completions on the agent's own key, metered
+ * like every other engine. Loopback only: Caddy routes /v1/*, never /v1beta.
+ *
+ * A model the CLI asks for is google/<name> when that is one of the agent's
+ * models (ATLAS_GEMINI_MODELS_PATH, one slug per line); anything else (the
+ * CLI's own helper calls name models of its choosing) runs on ATLAS_MODEL, so
+ * the account allowlist never sees a model it does not know.
+ */
+const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
+const GEMINI_MODELS_PATH = env.ATLAS_GEMINI_MODELS_PATH || ""
+
+export function geminiSchema(schema) {
+  if (Array.isArray(schema)) return schema.map(geminiSchema)
+  if (!schema || typeof schema !== "object") return schema
+  const out = {}
+  for (const [k, v] of Object.entries(schema)) {
+    if (k === "propertyOrdering") continue
+    if (k === "type" && typeof v === "string") out.type = v.toLowerCase()
+    else if (k === "properties" && v && typeof v === "object") {
+      out.properties = {}
+      for (const [name, sub] of Object.entries(v)) out.properties[name] = geminiSchema(sub)
+    } else out[k] = typeof v === "object" ? geminiSchema(v) : v
+  }
+  return out
+}
+
+function geminiText(parts) {
+  return (Array.isArray(parts) ? parts : [])
+    .filter((p) => p && typeof p.text === "string" && !p.thought)
+    .map((p) => p.text)
+    .join("")
+}
+
+export function resolveGeminiModel(name, allowed, fallback) {
+  const bare = String(name || "").replace(/^models\//, "")
+  if (allowed.includes(bare)) return bare
+  if (allowed.includes("google/" + bare)) return "google/" + bare
+  return fallback || "google/" + bare
+}
+
+export function geminiToOpenAI(body, model, stream) {
+  const messages = []
+  const sys = body.systemInstruction
+  const sysText = typeof sys === "string" ? sys : sys ? geminiText(sys.parts) : ""
+  if (sysText) messages.push({ role: "system", content: sysText })
+  const pending = {}
+  let n = 0
+  for (const c of Array.isArray(body.contents) ? body.contents : []) {
+    const parts = Array.isArray(c && c.parts) ? c.parts : []
+    if (c.role === "model") {
+      const calls = parts
+        .filter((p) => p && p.functionCall)
+        .map((p) => {
+          const id = p.functionCall.id || "call_" + ++n
+          const name = p.functionCall.name
+          ;(pending[name] = pending[name] || []).push(id)
+          return { id, type: "function", function: { name, arguments: JSON.stringify(p.functionCall.args || {}) } }
+        })
+      const text = geminiText(parts)
+      if (calls.length || text) messages.push({ role: "assistant", content: text || null, ...(calls.length ? { tool_calls: calls } : {}) })
+      continue
+    }
+    for (const p of parts) {
+      if (!p || !p.functionResponse) continue
+      const name = p.functionResponse.name
+      const id = p.functionResponse.id || (pending[name] && pending[name].shift()) || "call_" + ++n
+      messages.push({ role: "tool", tool_call_id: id, content: JSON.stringify(p.functionResponse.response || {}) })
+    }
+    const content = []
+    for (const p of parts) {
+      if (!p || p.thought) continue
+      if (typeof p.text === "string" && p.text) content.push({ type: "text", text: p.text })
+      else if (p.inlineData && /^image\//.test(p.inlineData.mimeType || "")) {
+        content.push({ type: "image_url", image_url: { url: "data:" + p.inlineData.mimeType + ";base64," + p.inlineData.data } })
+      }
+    }
+    if (content.length) {
+      messages.push({ role: "user", content: content.every((x) => x.type === "text") ? content.map((x) => x.text).join("") : content })
+    }
+  }
+  const out = { model, messages, stream: !!stream }
+  if (stream) out.stream_options = { include_usage: true }
+  const tools = []
+  for (const t of Array.isArray(body.tools) ? body.tools : []) {
+    for (const f of (t && t.functionDeclarations) || []) {
+      tools.push({
+        type: "function",
+        function: {
+          name: f.name,
+          description: f.description || "",
+          parameters: geminiSchema(f.parametersJsonSchema || f.parameters || { type: "object", properties: {} }),
+        },
+      })
+    }
+  }
+  if (tools.length) out.tools = tools
+  const fc = body.toolConfig && body.toolConfig.functionCallingConfig
+  if (tools.length && fc) {
+    const names = fc.allowedFunctionNames || []
+    if (fc.mode === "NONE") out.tool_choice = "none"
+    else if (fc.mode === "ANY") out.tool_choice = names.length === 1 ? { type: "function", function: { name: names[0] } } : "required"
+  }
+  const g = body.generationConfig || {}
+  if (typeof g.temperature === "number") out.temperature = g.temperature
+  if (typeof g.topP === "number") out.top_p = g.topP
+  if (typeof g.maxOutputTokens === "number") out.max_tokens = g.maxOutputTokens
+  if (Array.isArray(g.stopSequences) && g.stopSequences.length) out.stop = g.stopSequences
+  const schema = g.responseJsonSchema || g.responseSchema
+  if (schema) out.response_format = { type: "json_schema", json_schema: { name: "response", schema: geminiSchema(schema) } }
+  else if (g.responseMimeType === "application/json") out.response_format = { type: "json_object" }
+  const budget = g.thinkingConfig && g.thinkingConfig.thinkingBudget
+  if (typeof budget === "number" && budget > 0) out.reasoning = { max_tokens: budget }
+  return out
+}
+
+const GEMINI_FINISH = { stop: "STOP", length: "MAX_TOKENS", tool_calls: "STOP", content_filter: "SAFETY" }
+
+function geminiUsage(u) {
+  if (!u) return undefined
+  const thoughts = u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens
+  return {
+    promptTokenCount: u.prompt_tokens || 0,
+    candidatesTokenCount: u.completion_tokens || 0,
+    totalTokenCount: u.total_tokens || 0,
+    ...(thoughts ? { thoughtsTokenCount: thoughts } : {}),
+  }
+}
+
+function geminiCalls(calls) {
+  return calls.map((c) => {
+    let args = {}
+    try {
+      args = JSON.parse((c.function && c.function.arguments) || "{}")
+    } catch {
+      args = {}
+    }
+    return { functionCall: { id: c.id, name: c.function && c.function.name, args } }
+  })
+}
+
+export function openAIToGemini(resp, modelName) {
+  const choice = (resp && resp.choices && resp.choices[0]) || {}
+  const msg = choice.message || {}
+  const parts = []
+  if (typeof msg.content === "string" && msg.content) parts.push({ text: msg.content })
+  if (Array.isArray(msg.tool_calls)) parts.push(...geminiCalls(msg.tool_calls))
+  if (parts.length === 0) parts.push({ text: "" })
+  return {
+    candidates: [{ content: { role: "model", parts }, finishReason: GEMINI_FINISH[choice.finish_reason] || "STOP", index: 0 }],
+    usageMetadata: geminiUsage(resp && resp.usage),
+    modelVersion: modelName,
+  }
+}
+
+/** Folds OpenRouter's SSE chunks into Gemini stream chunks; tool calls are sent whole, once complete. */
+export function createGeminiStream(modelName) {
+  const calls = []
+  let finish = null
+  let usage = null
+  const chunk = (parts, extra) => ({
+    candidates: [{ content: { role: "model", parts }, index: 0, ...(extra || {}) }],
+    modelVersion: modelName,
+  })
+  return {
+    push(data) {
+      const out = []
+      if (data && data.usage) usage = data.usage
+      const choice = data && data.choices && data.choices[0]
+      if (!choice) return out
+      const d = choice.delta || {}
+      if (typeof d.content === "string" && d.content) out.push(chunk([{ text: d.content }]))
+      for (const tc of Array.isArray(d.tool_calls) ? d.tool_calls : []) {
+        const i = typeof tc.index === "number" ? tc.index : calls.length
+        const cur = (calls[i] = calls[i] || { id: "", function: { name: "", arguments: "" } })
+        if (tc.id) cur.id = tc.id
+        if (tc.function && tc.function.name) cur.function.name += tc.function.name
+        if (tc.function && tc.function.arguments) cur.function.arguments += tc.function.arguments
+      }
+      if (choice.finish_reason) finish = choice.finish_reason
+      return out
+    },
+    end() {
+      const parts = calls.length ? geminiCalls(calls.filter(Boolean)) : [{ text: "" }]
+      const last = chunk(parts, { finishReason: GEMINI_FINISH[finish] || "STOP" })
+      const meta = geminiUsage(usage)
+      if (meta) last.usageMetadata = meta
+      return last
+    },
+  }
+}
+
+function geminiAllowed() {
+  if (!GEMINI_MODELS_PATH) return []
+  try {
+    return fs.readFileSync(GEMINI_MODELS_PATH, "utf8").split("\n").map((s) => s.trim()).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+function geminiError(res, status, message) {
+  const names = { 400: "INVALID_ARGUMENT", 401: "UNAUTHENTICATED", 403: "PERMISSION_DENIED", 404: "NOT_FOUND", 429: "RESOURCE_EXHAUSTED" }
+  sendJson(res, status, { error: { code: status, message, status: names[status] || "INTERNAL" } })
+}
+
+async function handleGemini(req, res, url) {
+  const key = req.headers["x-goog-api-key"] || url.searchParams.get("key") || ""
+  if (!API_KEY || !safeEqual(key, API_KEY)) return geminiError(res, 401, "invalid API key")
+  if (req.method === "GET") {
+    const data = geminiAllowed().map((s) => ({ name: "models/" + s.replace(/^google\//, ""), supportedGenerationMethods: ["generateContent", "countTokens"] }))
+    return sendJson(res, 200, { models: data })
+  }
+  const m = /^\/v1[a-z0-9]*\/models\/([^:]+):([A-Za-z]+)$/.exec(url.pathname)
+  if (!m || req.method !== "POST") return geminiError(res, 404, "not found")
+  let body
+  try {
+    body = await readJson(req)
+  } catch (e) {
+    return geminiError(res, 400, e.message)
+  }
+  const name = decodeURIComponent(m[1])
+  const method = m[2]
+  if (method === "countTokens") {
+    const contents = (body.generateContentRequest && body.generateContentRequest.contents) || body.contents
+    return sendJson(res, 200, { totalTokens: Math.ceil(JSON.stringify(contents || []).length / 4) })
+  }
+  if (method !== "generateContent" && method !== "streamGenerateContent") {
+    return geminiError(res, 400, method + " is not supported on this agent")
+  }
+  const stream = method === "streamGenerateContent"
+  const model = resolveGeminiModel(name, geminiAllowed(), MODEL)
+  const abort = new AbortController()
+  res.on("close", () => {
+    if (!res.writableEnded) abort.abort()
+  })
+  const upstream = await fetch(OPENROUTER_CHAT_URL, {
+    method: "POST",
+    headers: { Authorization: "Bearer " + (env.OPENROUTER_API_KEY || ""), "Content-Type": "application/json" },
+    body: JSON.stringify(geminiToOpenAI(body, model, stream)),
+    signal: abort.signal,
+  })
+  if (!upstream.ok) {
+    let message = "OpenRouter returned " + upstream.status
+    try {
+      const j = await upstream.json()
+      if (j && j.error && j.error.message) message = j.error.message
+    } catch {}
+    return geminiError(res, upstream.status, message)
+  }
+  if (!stream) return sendJson(res, 200, openAIToGemini(await upstream.json(), name))
+  res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" })
+  const folder = createGeminiStream(name)
+  const write = (obj) => res.write("data: " + JSON.stringify(obj) + "\n\n")
+  const decoder = new TextDecoder()
+  let buf = ""
+  for await (const piece of upstream.body) {
+    buf += decoder.decode(piece, { stream: true })
+    let i
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, i).trim()
+      buf = buf.slice(i + 1)
+      if (!line.startsWith("data:")) continue
+      const payload = line.slice(5).trim()
+      if (payload === "[DONE]") continue
+      let data
+      try {
+        data = JSON.parse(payload)
+      } catch {
+        continue
+      }
+      if (data.error) {
+        write({ error: { code: 500, message: data.error.message || "upstream error", status: "INTERNAL" } })
+        return res.end()
+      }
+      for (const out of folder.push(data)) write(out)
+    }
+  }
+  write(folder.end())
+  res.end()
+}
 
 /* ---------------- HTTP ---------------- */
 
@@ -696,6 +995,7 @@ export function createGatewayServer(sessions) {
         })
         return res.end("Authentication required")
       }
+      if (ENGINE === "gemini-cli" && /^\/v1[a-z0-9]+\//.test(url.pathname)) return await handleGemini(req, res, url)
       if (!url.pathname.startsWith("/v1/")) return apiError(res, 404, "not found")
       if (!bearerOk(req.headers.authorization, API_KEY)) return apiError(res, 401, "invalid API key")
       if (req.method === "GET" && url.pathname === "/v1/models") {

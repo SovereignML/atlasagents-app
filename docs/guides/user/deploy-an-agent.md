@@ -14,19 +14,20 @@ This is the first decision in the wizard. Both run a capable AI agent; they diff
 |---|---|---|
 | Best for | The default choice for most agents | When you want a browser chat UI **and** an OpenAI-compatible API for your own bots |
 | Runs on | Every plan, including the smallest server | Needs **≥ 2 GB RAM** — the wizard blocks it on sub-2 GB plans |
-| How you log in | An admin email + password to its own chat UI | A chat inside your dashboard (also at its own address), plus a `/v1` API endpoint for programmatic access |
-| Switch later? | Yes — you can change an agent's runtime after deploy (it re-provisions the server) | Yes |
+| How you log in | An admin email + password to its own chat UI | A chat page at the agent's own address (sign in with the email and password under **Access → Chat Login**), plus a `/v1` API endpoint for programmatic access |
+| Switch later? | No — an agent's runtime is fixed at deploy; deploy a new agent instead | No |
 
-If you're not sure, pick **OpenClaw**. You can switch later.
+If you're not sure, pick **OpenClaw**. The coding agents (Claude Code, Codex, OpenCode, Pi, Gemini CLI, Grok) work like Hermes and add a browser terminal; Gemini CLI and Grok are also on the Free plan.
 
-## The deploy wizard (4 steps)
+## The deploy wizard (3 steps)
 
-Open **Dashboard → Deploy Agent**. The wizard has four steps:
+Open **Dashboard → Deploy Agent**. The wizard has three steps:
 
-1. **Agent** — pick the runtime (OpenClaw or Hermes).
-2. **Project** — give the agent a name (a URL-friendly slug is generated automatically) and choose a **use case** category: Automation, DevOps, Support, Research, Content, Sales, Social Media Manager, or Custom.
-3. **Plan** — choose a plan. Each plan provisions the same baseline server; plans differ by included **credits**, number of **live agents**, and **team seats**. Hermes-only note: the smallest plans are disabled if they don't meet Hermes' memory requirement.
-4. **Billing** — choose **monthly** or **yearly** (yearly saves roughly two months), review the summary, and deploy.
+1. **Agent** — pick the agent: OpenClaw, Hermes, or (where enabled) a coding agent — Claude Code, Codex, OpenCode, Pi, Gemini CLI or Grok. A link such as `/dashboard/deploy?runtime=grok` opens the wizard with that agent already picked.
+2. **Plan** — choose a plan. Each plan provisions the same baseline server; plans differ by included **credits**, number of **live agents**, and **team seats**. Plans too small for the chosen agent are disabled.
+3. **Billing** — choose **monthly** or **yearly** (yearly saves roughly two months), review the summary, and deploy.
+
+There is no name or use-case step: every agent starts from its engine's default setup and gets a name automatically. To rename it, click the pencil next to its name on the agent's page (only the name changes, never its URL).
 
 > Your agent always ships as an embeddable **Web Chat** widget on a **dedicated server** — these are fixed, so you won't be asked to choose them. You can add other interfaces (like Telegram) afterward.
 

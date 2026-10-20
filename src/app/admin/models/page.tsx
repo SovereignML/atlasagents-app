@@ -3,6 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { PageContainer, PageHeader } from "@/components/layout/page-container"
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -23,6 +31,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import { ALLOWED_OPENROUTER_MODELS } from "@/lib/model-router"
 import { HERMES_MIN_CONTEXT } from "@/lib/runtimes/labels"
 
 type ConfiguredModel = {
@@ -90,6 +99,8 @@ export default function AdminModelsPage() {
   const [allowedOnly, setAllowedOnly] = useState(true)
   const [newSlug, setNewSlug] = useState("")
   const [newKind, setNewKind] = useState<AllowedModel["kind"]>("chat")
+  const [resetOpen, setResetOpen] = useState(false)
+  const [resetNote, setResetNote] = useState<string | null>(null)
 
   const [model, setModel] = useState("")
   const [prompt, setPrompt] = useState("Reply with exactly: PONG")
@@ -202,6 +213,38 @@ export default function AdminModelsPage() {
       })
       const json = (await res.json()) as { updated?: number; error?: string }
       if (!res.ok) throw new Error(json.error ?? `Sync failed: ${res.status}`)
+      await loadAllowed()
+    } catch (e) {
+      setMutateErr(String(e))
+    } finally {
+      setMutating(false)
+    }
+  }
+
+  async function resetToRecommended() {
+    setMutating(true)
+    setMutateErr(null)
+    setResetNote(null)
+    try {
+      const res = await fetch("/api/admin/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reset" }),
+      })
+      const json = (await res.json()) as {
+        removed?: string[]
+        kept?: number
+        staleAgents?: number
+        error?: string
+      }
+      if (!res.ok) throw new Error(json.error ?? `Reset failed: ${res.status}`)
+      setResetNote(
+        `Kept ${json.kept} recommended models, removed ${json.removed?.length ?? 0}.` +
+          (json.staleAgents
+            ? ` ${json.staleAgents} agent(s) still use a removed model until you change theirs.`
+            : ""),
+      )
+      setResetOpen(false)
       await loadAllowed()
     } catch (e) {
       setMutateErr(String(e))
@@ -359,7 +402,42 @@ export default function AdminModelsPage() {
             >
               Sync metadata
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setResetOpen(true)}
+              disabled={mutating}
+              title="Replace this list with the newest models from each provider."
+            >
+              Use recommended models
+            </Button>
           </div>
+          <AlertDialog open={resetOpen} onOpenChange={(o) => !mutating && setResetOpen(o)}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Replace the list with the recommended models?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Keeps only the {ALLOWED_OPENROUTER_MODELS.length} newest models from each
+                  provider and removes every other row. Change the OpenRouter account
+                  allowlist to match afterwards.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <ul className="max-h-60 overflow-y-auto font-mono text-xs text-muted-foreground">
+                {ALLOWED_OPENROUTER_MODELS.map((m) => (
+                  <li key={m.slug}>{m.slug}</li>
+                ))}
+              </ul>
+              <AlertDialogFooter>
+                <Button variant="outline" disabled={mutating} onClick={() => setResetOpen(false)}>
+                  Cancel
+                </Button>
+                <Button disabled={mutating} onClick={resetToRecommended}>
+                  {mutating ? "Replacing…" : "Replace list"}
+                </Button>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+          {resetNote && <p className="text-sm text-muted-foreground">{resetNote}</p>}
           <datalist id="catalog-all-models">
             {(catalog ?? []).map((m) => (
               <option key={m.id} value={m.id} />
@@ -571,7 +649,7 @@ export default function AdminModelsPage() {
               id="model"
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              placeholder="author/slug, e.g. minimax/minimax-m2.5"
+              placeholder="author/slug, e.g. minimax/minimax-m3"
               className="max-w-md"
               list="allowed-models"
             />

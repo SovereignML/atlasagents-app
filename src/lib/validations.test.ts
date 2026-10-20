@@ -24,9 +24,11 @@ describe("deploySchema", () => {
     expect(result.success).toBe(true)
   })
 
-  it("rejects a missing/empty name", () => {
-    expect(deploySchema.safeParse({}).success).toBe(false)
+  it("leaves the name to the server, but rejects an empty one", () => {
+    expect(deploySchema.safeParse({}).success).toBe(true)
+    expect(deploySchema.safeParse({}).data?.name).toBeUndefined()
     expect(deploySchema.safeParse({ name: "" }).success).toBe(false)
+    expect(deploySchema.safeParse({ name: "   " }).success).toBe(false)
   })
 
   it("rejects an invalid billingInterval", () => {

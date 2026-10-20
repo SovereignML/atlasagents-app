@@ -70,8 +70,9 @@ tests, build, and `npm audit --omit=dev --audit-level=critical`.
   - `src/lib/instance-access.ts` — per-agent ACL (viewer/operator/manager)
   - `src/lib/effective-user.ts` — honored impersonation (`getHonoredImpersonatedUserId`)
   - `src/lib/team.ts` — team membership / management
-- **Runtimes**: six agent engines — OpenClaw (default), Hermes, and the beta
-  Claude Code, Codex, OpenCode and Pi (flag `CLI_RUNTIMES_ENABLED`; admins always) — behind
+- **Runtimes**: eight agent engines — OpenClaw (default), Hermes, and the beta
+  Claude Code, Codex, OpenCode, Pi, Gemini CLI and Grok (flag
+  `CLI_RUNTIMES_ENABLED`; admins always) — behind
   `src/lib/runtimes/`. Import `getRuntime` from `@/lib/runtimes`; branch on
   `runtimeCaps(id)` / `engine.caps`, never on `runtime === "hermes"`.
   ([`docs/RUNTIMES.md`](docs/RUNTIMES.md))
@@ -86,7 +87,7 @@ tests, build, and `npm audit --omit=dev --audit-level=critical`.
 - [`docs/FEATURES.md`](docs/FEATURES.md) — product surface / feature map
 - [`docs/TECH-STACK.md`](docs/TECH-STACK.md) — stack + DB conventions (source of truth)
 - [`docs/PROVIDERS.md`](docs/PROVIDERS.md) — VPS provider router
-- [`docs/RUNTIMES.md`](docs/RUNTIMES.md) — OpenClaw / Hermes / Claude Code / Codex runtimes
+- [`docs/RUNTIMES.md`](docs/RUNTIMES.md) — every runtime, the model catalog, the warm pool
 - [`docs/BILLING.md`](docs/BILLING.md), [`docs/BILLING-HARDENING.md`](docs/BILLING-HARDENING.md) — credits, Stripe, idempotency
 - [`docs/BYOS.md`](docs/BYOS.md) — bring-your-own-server
 - [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) — Google Drive / Cloudflare

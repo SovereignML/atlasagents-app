@@ -17,6 +17,8 @@ export const HERMES_MIN_CONTEXT = 64_000
 export type RuntimeCaps = {
   /** Human-facing name, e.g. "OpenClaw". Equal to the adapter's `displayName`. */
   label: string
+  /** One line under the name in the deploy wizards. */
+  hint: string
   /**
    * Smallest plan (GB RAM) this engine is offered on; 0 = no floor. OpenClaw
    * must stay 0: the BYOS plan's server config (`byos-managed`) reports 0 GB.
@@ -69,6 +71,7 @@ export type RuntimeCaps = {
 export const RUNTIME_CAPS: Record<RuntimeId, RuntimeCaps> = {
   openclaw: {
     label: "OpenClaw",
+    hint: "Default agent runtime",
     minRamGb: 0,
     exposesOpenAiApi: false,
     nativeAdminLogin: true,
@@ -79,6 +82,7 @@ export const RUNTIME_CAPS: Record<RuntimeId, RuntimeCaps> = {
   },
   hermes: {
     label: "Hermes",
+    hint: "Nous Research Hermes (Python)",
     minRamGb: 2,
     exposesOpenAiApi: true,
     nativeAdminLogin: false,
@@ -90,6 +94,7 @@ export const RUNTIME_CAPS: Record<RuntimeId, RuntimeCaps> = {
   },
   "claude-code": {
     label: "Claude Code",
+    hint: "Anthropic's coding agent, with a browser terminal",
     minRamGb: 2,
     exposesOpenAiApi: true,
     nativeAdminLogin: false,
@@ -102,6 +107,7 @@ export const RUNTIME_CAPS: Record<RuntimeId, RuntimeCaps> = {
   },
   codex: {
     label: "Codex",
+    hint: "OpenAI's coding agent, with a browser terminal",
     minRamGb: 2,
     exposesOpenAiApi: true,
     nativeAdminLogin: false,
@@ -118,6 +124,7 @@ export const RUNTIME_CAPS: Record<RuntimeId, RuntimeCaps> = {
   // is a community one (pi-acp).
   opencode: {
     label: "OpenCode",
+    hint: "The open-source coding agent, any model, with a browser terminal",
     minRamGb: 2,
     exposesOpenAiApi: true,
     nativeAdminLogin: false,
@@ -130,6 +137,7 @@ export const RUNTIME_CAPS: Record<RuntimeId, RuntimeCaps> = {
   },
   pi: {
     label: "Pi",
+    hint: "A minimal coding agent, any model, with a browser terminal",
     minRamGb: 2,
     exposesOpenAiApi: true,
     nativeAdminLogin: false,
@@ -138,6 +146,37 @@ export const RUNTIME_CAPS: Record<RuntimeId, RuntimeCaps> = {
     minContext: HERMES_MIN_CONTEXT,
     hasTerminal: true,
     allowedOnFree: false,
+    beta: true,
+  },
+  // Google's and xAI's own coding agents, each on its own vendor's models
+  // (through OpenRouter, like every engine), and offered on Free. Gemini CLI
+  // speaks only Gemini's API, which the Atlas gateway translates on the box.
+  "gemini-cli": {
+    label: "Gemini CLI",
+    hint: "Google's coding agent on Gemini models, with a browser terminal",
+    minRamGb: 2,
+    exposesOpenAiApi: true,
+    nativeAdminLogin: false,
+    supportsCustomBaseUrl: false,
+    hasSidecar: true,
+    minContext: HERMES_MIN_CONTEXT,
+    modelSlugPrefixes: ["google/"],
+    hasTerminal: true,
+    allowedOnFree: true,
+    beta: true,
+  },
+  grok: {
+    label: "Grok",
+    hint: "xAI's coding agent on Grok models, with a browser terminal",
+    minRamGb: 2,
+    exposesOpenAiApi: true,
+    nativeAdminLogin: false,
+    supportsCustomBaseUrl: false,
+    hasSidecar: true,
+    minContext: HERMES_MIN_CONTEXT,
+    modelSlugPrefixes: ["x-ai/"],
+    hasTerminal: true,
+    allowedOnFree: true,
     beta: true,
   },
 }
@@ -186,5 +225,5 @@ export function runtimeLabel(id: string | null | undefined): string {
 
 /** A warm-pool slot's label: an engine's own pool, or the universal image every chat-UI engine shares. */
 export function poolRuntimeLabel(id: string | null | undefined): string {
-  return id === "universal" ? "Universal (Hermes, Claude Code, Codex, OpenCode, Pi)" : runtimeLabel(id)
+  return id === "universal" ? "Universal (every engine but OpenClaw)" : runtimeLabel(id)
 }

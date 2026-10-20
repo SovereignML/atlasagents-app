@@ -5,9 +5,11 @@ import {
   addAllowedModel,
   listAllowedModels,
   removeAllowedModel,
+  resetAllowedModelsToRecommended,
   syncModelMetadata,
   updateAllowedModel,
 } from "@/lib/allowed-models"
+import { logAuditEvent } from "@/lib/audit"
 import { readJsonBody } from "@/lib/request-body"
 import { adminModelAddSchema, adminModelEditSchema, adminModelRemoveSchema } from "@/lib/validations"
 
@@ -18,6 +20,7 @@ import { adminModelAddSchema, adminModelEditSchema, adminModelRemoveSchema } fro
  *
  *   GET             — list all rows
  *   POST   {action: "sync"}                                — refresh contextLength from catalog
+ *   POST   {action: "reset"}                               — replace the list with the recommended catalog
  *   POST   {slug, label?, kind?, contextLength?}           — add (or re-enable) a model
  *   PATCH  {slug, label?, kind?, enabled?}                 — edit a model
  *   DELETE {slug}                                          — remove a model
@@ -45,6 +48,18 @@ export async function POST(req: Request) {
     } catch (e) {
       return NextResponse.json({ error: String(e) }, { status: 502 })
     }
+  }
+
+  if (body.action === "reset") {
+    const result = await resetAllowedModelsToRecommended()
+    await logAuditEvent({
+      userId: guard.userId,
+      action: "admin.models.reset",
+      targetType: "allowed_models",
+      targetId: "all",
+      meta: { removed: result.removed, kept: result.kept },
+    })
+    return NextResponse.json(result)
   }
 
   const slug = body.slug

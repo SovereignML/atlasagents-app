@@ -7,7 +7,8 @@ import { cn } from "@/lib/utils"
 // a featureless white blob. So we always invert it to dark ink and, in dark
 // mode, sit it on a light plaque so it keeps its (correct) light-mode look.
 // Colored marks must never be inverted, so they opt out of this entirely.
-const MONOCHROME_RUNTIMES = new Set(["hermes"])
+// Every file listed here is a white glyph (public/runtimes/*.svg).
+const MONOCHROME_RUNTIMES = new Set(["hermes", "opencode", "pi", "grok"])
 
 export function RuntimeLogo({
   runtime,

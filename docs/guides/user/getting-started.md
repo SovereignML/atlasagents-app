@@ -36,10 +36,11 @@ After logging in you land on your **Overview**. The sidebar is grouped into thre
 ## 3. Deploy your first agent
 
 1. Click **Deploy Agent**.
-2. **Agent** — pick a runtime. **OpenClaw** is the default and works on every plan; **Hermes** adds a browser chat UI and an OpenAI-compatible API but needs a slightly larger server. (More in [Deploy an agent](deploy-an-agent.md).)
-3. **Project** — name your agent and pick a use case (Automation, Support, Research, Content, Sales, DevOps, Social Media, or Custom).
-4. **Plan** — choose the plan that fits; each includes a pool of credits and a number of live agents.
-5. **Billing** — pick monthly or yearly, review, and deploy.
+2. **Agent** — pick the agent you want. **OpenClaw** is the default and works on every plan; **Hermes** and the coding agents (Claude Code, Codex, OpenCode, Pi, Gemini CLI, Grok) add a browser chat UI and an OpenAI-compatible API but need a slightly larger server. (More in [Deploy an agent](deploy-an-agent.md).)
+3. **Plan** — choose the plan that fits; each includes a pool of credits and a number of live agents.
+4. **Billing** — pick monthly or yearly, review, and deploy.
+
+Your agent gets a name automatically. Rename it any time with the pencil next to its name on its page.
 
 Your agent provisions on a dedicated server (typically seconds, thanks to a warm server pool). When it's **running**, open its page to reveal login credentials and its URL.
 

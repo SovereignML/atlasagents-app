@@ -1,13 +1,14 @@
 /**
  * The universal warm-pool image: one pooled VM with every engine the chat UI
- * fronts installed in advance (Hermes, Claude Code, Codex, OpenCode, Pi) plus
+ * fronts installed in advance (Hermes, Claude Code, Codex, OpenCode, Pi,
+ * Gemini CLI, Grok — every engine but OpenClaw, which keeps its own pool) plus
  * AgentWebUI Lite and every engine's ACP side. A deploy of any of them claims
  * the same VM, and only the chosen engine is then configured and started: its
  * env, config and units are written at claim (Phase A / B), exactly as on a
  * single-engine pool VM. The other engines stay installed, with no units, no
  * env and no keys.
  *
- * One pool for five engines means fewer idle VMs than one pool each, and no
+ * One pool for seven engines means fewer idle VMs than one pool each, and no
  * engine waits on a cold install because its own pool happened to be empty.
  *
  * Pure (no DB): the warm pool and the pool key import it, and the tests do too.
@@ -21,7 +22,15 @@ import type { RuntimeEngine } from "./types"
 export const UNIVERSAL_POOL_RUNTIME = "universal"
 
 /** Every engine a universal VM carries, in install order (Hermes sets up Python first). */
-export const LITE_ENGINES = ["hermes", "claude-code", "codex", "opencode", "pi"] as const satisfies readonly RuntimeId[]
+export const LITE_ENGINES = [
+  "hermes",
+  "claude-code",
+  "codex",
+  "opencode",
+  "pi",
+  "gemini-cli",
+  "grok",
+] as const satisfies readonly RuntimeId[]
 
 /** Whether a deploy of this engine (with its chat UI) is served by the universal pool. */
 export function usesUniversalPool(runtimeId: string, webuiEnabled: boolean): boolean {
