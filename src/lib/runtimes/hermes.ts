@@ -288,16 +288,21 @@ WantedBy=multi-user.target
 `
   },
 
-  renderBootstrap(args: BootstrapRenderArgs): string {
+  renderInstallSteps(args: BootstrapRenderArgs): string {
     // Hermes, then its chat UI (AgentWebUI Lite) when the sidecar is on.
     // Chrome is ~142MB and `agent-browser` needs a global npm install; both
     // are browser-tool-only. Default true preserves the old always-bake
     // behaviour for callers that have no instance to read tools from (the
     // warm pool, where bake time is ours and free).
     const browserDeps = args.browserDeps !== false
-    const installSteps =
+    return (
       buildHermesInstallSteps(browserDeps, args.runtimeVersion) +
       (args.webuiEnabled ? buildLiteInstallSteps(hermesRuntime, args) : "")
+    )
+  },
+
+  renderBootstrap(args: BootstrapRenderArgs): string {
+    const installSteps = hermesRuntime.renderInstallSteps!(args)
     return buildBootstrapFraming(
       {
         installDir: HERMES_INSTALL_DIR,

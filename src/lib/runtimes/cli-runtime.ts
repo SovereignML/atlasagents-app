@@ -281,7 +281,7 @@ WantedBy=multi-user.target
 `
     },
 
-    renderBootstrap(args: BootstrapRenderArgs): string {
+    renderInstallSteps(args: BootstrapRenderArgs): string {
       const cliSpec = npmSpec(spec.cliPackage, args.runtimeVersion ?? spec.cliVersion())
       const sdk = spec.sdkPackage && spec.sdkVersion ? { pkg: spec.sdkPackage, version: spec.sdkVersion() } : null
       const pkgJson = cliGatewayPackageJson(sdk ? { [sdk.pkg]: sdk.version } : {})
@@ -331,6 +331,11 @@ step "terminal_deps"
 # its API and the chat UI are unaffected.
 apt-get $APT_OPTS install -y tmux ttyd || echo "WARNING: could not install ttyd/tmux — the browser terminal will be unavailable" >&2
 ${args.webuiEnabled ? buildLiteInstallSteps(engine, args) : ""}`
+      return installSteps
+    },
+
+    renderBootstrap(args: BootstrapRenderArgs): string {
+      const installSteps = engine.renderInstallSteps!(args)
       return buildBootstrapFraming(
         {
           installDir: spec.installDir,

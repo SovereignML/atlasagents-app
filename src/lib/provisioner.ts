@@ -52,7 +52,7 @@ import {
 import { runtimeAcceptsModel } from "@/lib/runtimes/labels"
 import { selectableModelsForRuntime } from "@/lib/allowed-models"
 import { FREE_DEMO_TTL_MS } from "@/configs/plans"
-import { isSafeVersion, resolveForRegistry } from "@/lib/runtime-versions"
+import { isPinned, isSafeVersion, resolveForRegistry } from "@/lib/runtime-versions"
 import {
   APT_OPTS_LITERAL,
   DISABLE_DEAD_APT_SOURCES,
@@ -1791,6 +1791,14 @@ async function acquireBootedVm(
     }
     if (claimed.rootPasswordEnc) set.rootPasswordEnc = claimed.rootPasswordEnc
     if (claimed.sshHostFingerprint) set.sshHostFingerprint = claimed.sshHostFingerprint
+    // The pool key names the versions the VM was baked with (bakeIdentity), so
+    // record them as the cold path does: a later reprovision then knows the
+    // box already runs the pinned chat UI and does not reinstall it.
+    const bakedRuntime = runtime.version()
+    if (isPinned(bakedRuntime)) set.runtimeVersion = bakedRuntime
+    if (webuiEnabled && runtime.sidecar && isPinned(runtime.sidecar.version())) {
+      set.sidecarVersion = runtime.sidecar.version()
+    }
     // Inherit the pool VM's pre-assigned generic URL: the Cloudflare record is
     // already created + propagated, so the instance reuses it (no DNS call on the
     // hot path — see provisionVpsBot step 2b, which skips createAgentSubdomain).

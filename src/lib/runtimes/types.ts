@@ -424,6 +424,12 @@ export interface RuntimeEngine {
   /** Full cloud-init bootstrap script — runtime-specific install steps inside the shared framing. */
   renderBootstrap(args: BootstrapRenderArgs): string
   /**
+   * The same install steps without the framing, so several engines can share
+   * one bootstrap (the universal warm-pool image, see universal.ts). The
+   * engines the chat UI fronts have it; OpenClaw does not.
+   */
+  renderInstallSteps?(args: BootstrapRenderArgs): string
+  /**
    * Optional sidecar fronting the gateway: the chat UI (AgentWebUI Lite).
    * Undefined for runtimes that ship their own UI (OpenClaw). Only provisioned
    * when the instance has `webuiEnabled`.

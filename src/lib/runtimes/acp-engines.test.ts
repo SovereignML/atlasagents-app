@@ -135,3 +135,27 @@ describe("the chat UI's models reach each engine", () => {
     expect(buildLiteMigrationScript(hermes, { envB64: "" })).toContain('step "patch_hermes_acp_provider"')
   })
 })
+
+describe("the universal warm-pool image", () => {
+  it("installs every chat-UI engine and Lite inside one framing, with each engine's account", async () => {
+    const { LITE_ENGINES, renderUniversalBootstrap } = await import("./universal")
+    const boot = renderUniversalBootstrap()
+    expect(boot.match(/^#!\/bin\/bash/gm)).toHaveLength(1)
+    for (const id of LITE_ENGINES) {
+      const rt = getRuntime(id)
+      expect(boot).toContain(`=== universal: ${id} ===`)
+      expect(boot).toContain(`useradd --system --home-dir '${rt.paths.installDir}'`)
+    }
+    expect(boot).toContain('step "install_agentwebui_lite"')
+    expect(boot).toContain('step "patch_hermes_acp_provider"')
+    // DigitalOcean caps user-data at 64KB.
+    expect(Buffer.byteLength(boot)).toBeLessThan(64 * 1024)
+  })
+
+  it("finalizes with Hermes' warm-up and enables no engine: the claim picks one", async () => {
+    const { buildBakeFinalizeScript } = await import("./finalize")
+    const script = buildBakeFinalizeScript("universal")
+    expect(script).toContain("setup --non-interactive --quick")
+    expect(script).not.toContain("systemctl enable")
+  })
+})

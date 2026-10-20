@@ -13,6 +13,7 @@
  */
 
 import { getRuntime, type RuntimeId } from "@/lib/runtimes"
+import { UNIVERSAL_POOL_RUNTIME } from "./universal"
 
 /**
  * Bake-finalize: the slow-once, per-instance-INDEPENDENT work, run once the box
@@ -26,7 +27,8 @@ import { getRuntime, type RuntimeId } from "@/lib/runtimes"
  * Everything is best-effort (`|| true`): the authoritative config + start still
  * happens at claim, so a warmup miss only costs a little latency, never breaks.
  */
-export function buildBakeFinalizeScript(runtimeId: RuntimeId): string {
+export function buildBakeFinalizeScript(runtimeId: RuntimeId | typeof UNIVERSAL_POOL_RUNTIME): string {
+  if (runtimeId === UNIVERSAL_POOL_RUNTIME) return buildUniversalFinalizeScript()
   const runtime = getRuntime(runtimeId)
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
   const unitB64 = Buffer.from(runtime.renderSystemdUnit(), "utf8").toString("base64")
@@ -50,6 +52,27 @@ echo "=== bake: install gateway unit ==="
 echo ${q(unitB64)} | base64 -d > "/etc/systemd/system/${runtime.serviceName}.service"
 systemctl daemon-reload
 systemctl enable ${q(runtime.serviceName)} || true
+echo "=== bake: finalize done ==="
+`
+}
+
+/**
+ * Bake-finalize for a universal VM (runtimes/universal.ts): Hermes' warm-up,
+ * the slow part, as for a Hermes VM. No unit is installed or enabled: which
+ * engine runs is decided at claim, which writes and enables only that one's
+ * units (Phase B), so the others never start, even after a reboot.
+ */
+function buildUniversalFinalizeScript(): string {
+  const hermes = getRuntime("hermes")
+  const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
+  const runAs = (sub: string) =>
+    `sudo -u ${q(hermes.paths.systemUser)} env HOME=${q(hermes.paths.installDir)} ${q(hermes.cliBinary)} ${sub} || true`
+  return `#!/bin/bash
+set -uo pipefail
+export SYSTEMD_PAGER=cat
+echo "=== bake: hermes warmup ==="
+${runAs("setup --non-interactive --quick")}
+${runAs("doctor --fix")}
 echo "=== bake: finalize done ==="
 `
 }

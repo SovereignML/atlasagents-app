@@ -5,6 +5,7 @@
 
 import { getRuntime } from "@/lib/runtimes"
 import { primaryAgentZone } from "@/lib/agent-zones"
+import { UNIVERSAL_POOL_RUNTIME, universalBakeVersions, usesUniversalPool } from "@/lib/runtimes/universal"
 
 /**
  * What a pooled VM is baked WITH: the runtime (and sidecar) versions its
@@ -21,10 +22,21 @@ import { primaryAgentZone } from "@/lib/agent-zones"
  * so upstream releases do not churn the pool; only our own changes do.
  */
 export function bakeIdentity(runtimeId: string, webuiEnabled: boolean): string {
+  // A universal VM carries every chat-UI engine, so any of their pins retires it.
+  if (runtimeId === UNIVERSAL_POOL_RUNTIME) return `${universalBakeVersions().join("+")}@${primaryAgentZone().domain}`
   const runtime = getRuntime(runtimeId)
   const versions = [runtime.version()]
   if (webuiEnabled && runtime.sidecar) versions.push(runtime.sidecar.version())
   return `${versions.join("+")}@${primaryAgentZone().domain}`
+}
+
+/**
+ * The pool slot a deploy draws from: an engine the chat UI fronts (with its
+ * chat UI on) is served by the universal pool; anything else (OpenClaw, or a
+ * chat-UI engine deployed without one) by its own runtime's pool.
+ */
+export function poolRuntimeFor(runtime: string, webuiEnabled: boolean): string {
+  return usesUniversalPool(runtime, webuiEnabled) ? UNIVERSAL_POOL_RUNTIME : runtime
 }
 
 export function poolKeyFor(t: {
@@ -34,5 +46,6 @@ export function poolKeyFor(t: {
   runtime: string
   webuiEnabled: boolean
 }): string {
-  return `${t.providerSlug}|${t.planCode}|${t.regionCode}|${t.runtime}|${t.webuiEnabled ? 1 : 0}|${bakeIdentity(t.runtime, t.webuiEnabled)}`
+  const runtime = poolRuntimeFor(t.runtime, t.webuiEnabled)
+  return `${t.providerSlug}|${t.planCode}|${t.regionCode}|${runtime}|${t.webuiEnabled ? 1 : 0}|${bakeIdentity(runtime, t.webuiEnabled)}`
 }

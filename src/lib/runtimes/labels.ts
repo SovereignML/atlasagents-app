@@ -179,3 +179,8 @@ export const RUNTIME_LABELS = Object.fromEntries(
 export function runtimeLabel(id: string | null | undefined): string {
   return runtimeCaps(id).label
 }
+
+/** A warm-pool slot's label: an engine's own pool, or the universal image every chat-UI engine shares. */
+export function poolRuntimeLabel(id: string | null | undefined): string {
+  return id === "universal" ? "Universal (Hermes, Claude Code, Codex, OpenCode, Pi)" : runtimeLabel(id)
+}
