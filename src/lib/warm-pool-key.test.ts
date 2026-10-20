@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect } from "vitest"
-import { bakeIdentity, poolKeyFor, poolRuntimeFor } from "./warm-pool-key"
+import { BAKE_REVISION, bakeIdentity, poolKeyFor, poolRuntimeFor } from "./warm-pool-key"
 import { OPENCLAW_PINNED_VERSION } from "./runtimes/openclaw"
 import { HERMES_PINNED_VERSION } from "./runtimes/hermes"
 import { liteVersion } from "./runtimes/agentwebui-lite"
@@ -37,7 +37,8 @@ describe("poolKeyFor()", () => {
     const universal = poolKeyFor({ ...target, runtime: "hermes", webuiEnabled: true })
     expect(universal.startsWith("digitalocean|s-2vcpu-4gb|fra1|universal|1|")).toBe(true)
     expect(universal).toContain(`hermes@${HERMES_PINNED_VERSION}+`)
-    expect(universal).toContain(`+lite@${liteVersion()}@sovereignclaw.xyz`)
+    // The bake revision retires VMs whose install changed without a pin moving.
+    expect(universal).toContain(`+lite@${liteVersion()}+bake${BAKE_REVISION}@sovereignclaw.xyz`)
   })
 
   it("serves every chat-UI engine from the one universal pool, and OpenClaw from its own", () => {

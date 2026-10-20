@@ -108,7 +108,7 @@ describe("buildPrebakeScript()", () => {
   })
 
   it("installs Hermes outright, and leaves the chat UI to the deploy", () => {
-    expect(script).toContain("hermes-agent[acp]==0.19.0")
+    expect(script).toContain("hermes-agent[acp,messaging]==0.19.0")
     expect(script).not.toContain("open-webui")
     expect(script).not.toContain("agentwebui-lite")
   })
@@ -177,7 +177,7 @@ describe("buildPrebakeScript()", () => {
       hermesVersion: null,
     })
     expect(unpinned).toContain(`'openclaw@${OPENCLAW_PINNED_VERSION}'`)
-    expect(unpinned).toContain(`RUNTIME_PKG_SPEC='hermes-agent[acp]==${HERMES_PINNED_VERSION}'`)
+    expect(unpinned).toContain(`RUNTIME_PKG_SPEC='hermes-agent[acp,messaging]==${HERMES_PINNED_VERSION}'`)
     expect(unpinned).not.toContain("openclaw@latest")
   })
 
