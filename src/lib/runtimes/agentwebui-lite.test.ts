@@ -154,7 +154,7 @@ describe("installing Lite", () => {
       webuiEnabled: true,
       runtimeVersion: "0.19.0",
     })
-    expect(script).toContain("RUNTIME_PKG_SPEC='hermes-agent[acp]==0.19.0'")
+    expect(script).toContain("RUNTIME_PKG_SPEC='hermes-agent[acp,messaging]==0.19.0'")
     expect(script).toContain('step "install_agentwebui_lite"')
     expect(script).toContain(`'agentwebui-lite==${LITE_PINNED_VERSION}'`)
     expect(script).not.toContain("git+") // a PyPI release: no clone, no git on the box

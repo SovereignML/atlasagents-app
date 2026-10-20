@@ -8,6 +8,14 @@ import { primaryAgentZone } from "@/lib/agent-zones"
 import { UNIVERSAL_POOL_RUNTIME, universalBakeVersions, usesUniversalPool } from "@/lib/runtimes/universal"
 
 /**
+ * Bumped when what a universal VM installs changes without any version pin
+ * moving (2: Hermes gained its `messaging` extra, so VMs baked without aiohttp,
+ * whose Hermes never serves its API, are retired). OpenClaw's pool is not
+ * affected.
+ */
+export const BAKE_REVISION = 2
+
+/**
  * What a pooled VM is baked WITH: the runtime (and sidecar) versions its
  * bootstrap installs, and the agent zone its pre-assigned URL is created in.
  *
@@ -23,7 +31,9 @@ import { UNIVERSAL_POOL_RUNTIME, universalBakeVersions, usesUniversalPool } from
  */
 export function bakeIdentity(runtimeId: string, webuiEnabled: boolean): string {
   // A universal VM carries every chat-UI engine, so any of their pins retires it.
-  if (runtimeId === UNIVERSAL_POOL_RUNTIME) return `${universalBakeVersions().join("+")}@${primaryAgentZone().domain}`
+  if (runtimeId === UNIVERSAL_POOL_RUNTIME) {
+    return `${universalBakeVersions().join("+")}+bake${BAKE_REVISION}@${primaryAgentZone().domain}`
+  }
   const runtime = getRuntime(runtimeId)
   const versions = [runtime.version()]
   if (webuiEnabled && runtime.sidecar) versions.push(runtime.sidecar.version())
