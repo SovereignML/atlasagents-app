@@ -112,8 +112,10 @@ export const RUNTIME_CAPS: Record<RuntimeId, RuntimeCaps> = {
     allowedOnFree: false,
     beta: true,
   },
-  // OpenCode and Pi drive any OpenRouter model, so no slug prefix. Beta, like
-  // the other CLI engines; Pi's ACP adapter is a community one (pi-acp).
+  // OpenCode and Pi drive any OpenRouter model, so no slug prefix, but with
+  // Hermes' context floor: a coding agent's system prompt and tool schemas do
+  // not fit a short window. Beta, like the other CLI engines; Pi's ACP adapter
+  // is a community one (pi-acp).
   opencode: {
     label: "OpenCode",
     minRamGb: 2,
@@ -121,6 +123,7 @@ export const RUNTIME_CAPS: Record<RuntimeId, RuntimeCaps> = {
     nativeAdminLogin: false,
     supportsCustomBaseUrl: false,
     hasSidecar: true,
+    minContext: HERMES_MIN_CONTEXT,
     hasTerminal: true,
     allowedOnFree: false,
     beta: true,
@@ -132,6 +135,7 @@ export const RUNTIME_CAPS: Record<RuntimeId, RuntimeCaps> = {
     nativeAdminLogin: false,
     supportsCustomBaseUrl: false,
     hasSidecar: true,
+    minContext: HERMES_MIN_CONTEXT,
     hasTerminal: true,
     allowedOnFree: false,
     beta: true,
