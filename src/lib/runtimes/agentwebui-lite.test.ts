@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest"
 import {
+  LITE_BRAND_NAME,
+  LITE_USER_NAME,
+  liteBrandLogo,
   ACP_ADAPTERS,
   LEGACY_OPEN_WEBUI_SERVICE,
   LITE_MIGRATED,
@@ -144,6 +147,21 @@ describe("Lite as the sidecar", () => {
       } as never)
       expect(Object.keys(env).filter((k) => LITE_SETTING_KEYS.test(k))).toEqual([])
     }
+  })
+})
+
+describe("Lite's branding", () => {
+  it("keeps the AgentWebUI name, calls the signed-in user Admin, and shows our logo", () => {
+    const env = getRuntime("grok").sidecar!.renderEnv(envArgs())
+    expect(env.BRAND_NAME).toBe(LITE_BRAND_NAME)
+    expect(LITE_BRAND_NAME).toBe("AgentWebUI")
+    expect(env.USER_NAME).toBe(LITE_USER_NAME)
+    expect(LITE_USER_NAME).toBe("Admin")
+  })
+
+  it("points the logo at the dashboard's public mark, and only over https", () => {
+    expect(liteBrandLogo("https://app.atlasagents.dev/")).toBe("https://app.atlasagents.dev/assets/icons/SovereignML-logo-white.svg")
+    expect(liteBrandLogo("http://localhost:3000")).toBeUndefined()
   })
 })
 
