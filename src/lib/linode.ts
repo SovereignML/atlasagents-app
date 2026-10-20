@@ -12,6 +12,7 @@ import {
   setToken,
 } from "@linode/api-v4"
 import type { Linode, CreateLinodeRequest } from "@linode/api-v4/lib/linodes"
+import { linodeUserData } from "@/lib/linode-user-data"
 import type { Image } from "@linode/api-v4/lib/images"
 import type {
   VpsProvider,
@@ -98,12 +99,17 @@ export class LinodeProvider implements VpsProvider {
       image: opts.image ?? "linode/ubuntu24.04",
       authorized_keys: opts.authorizedKeys,
       tags: opts.tags,
-      ...(opts.userData
-        ? { metadata: { user_data: Buffer.from(opts.userData, "utf8").toString("base64") } }
-        : {}),
+      ...(opts.userData ? { metadata: { user_data: linodeUserData(opts.userData) } } : {}),
     } as CreateLinodeRequest
-    const vm = await createLinode(payload)
-    return linodeToVmInfo(vm)
+    try {
+      const vm = await createLinode(payload)
+      return linodeToVmInfo(vm)
+    } catch (err) {
+      // Linode's own reason (e.g. "metadata.user_data: decoded user_data must
+      // not exceed 16384 bytes"), not axios' "Request failed with status code
+      // 400" — and never the request config, which carries our token.
+      throw new Error(describeLinodeError(err))
+    }
   }
 
   async deleteVM(id: string): Promise<boolean> {
