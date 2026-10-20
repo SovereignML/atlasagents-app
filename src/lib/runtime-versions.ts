@@ -2,8 +2,7 @@
  * Resolving a runtime's `latest` into a concrete, pinned version.
  *
  * Every runtime now defaults to a version pinned in code
- * (`OPENCLAW_PINNED_VERSION`, `HERMES_PINNED_VERSION`,
- * `OPEN_WEBUI_PINNED_VERSION`), so `resolveVersion` normally returns that pin
+ * (`OPENCLAW_PINNED_VERSION`, `HERMES_PINNED_VERSION`), so `resolveVersion` normally returns that pin
  * without touching the network. The registry lookup below only runs when an
  * operator opts back into tracking upstream with `*_VERSION=latest`.
  *
@@ -48,7 +47,7 @@ export function isPinned(version: string | null | undefined): boolean {
  * Accepts what the two registries actually publish: dotted numeric releases,
  * optionally with a pre-release/build suffix. Deliberately loose about the
  * shape beyond the first segment — `openclaw` uses CalVer (`2026.9.5`), Hermes
- * and Open WebUI use SemVer — but strict about the character set, because this
+ * uses SemVer — but strict about the character set, because this
  * string is interpolated into a shell command inside the bootstrap.
  */
 const VERSION_RE = /^[0-9]+(\.[0-9]+)*([A-Za-z0-9._+-]*)$/
@@ -88,7 +87,7 @@ export function npmSpec(pkg: string, version: string | null | undefined): string
 
 /**
  * `<dist>==<version>` for pip, or a bare `<dist>` when unpinned — matching the
- * existing `pipPackageSpec` / `openWebUiPipSpec` contract, where "latest" means
+ * existing `pipPackageSpec` contract, where "latest" means
  * "say nothing and let the resolver pick".
  */
 export function pypiSpec(dist: string, version: string | null | undefined): string {

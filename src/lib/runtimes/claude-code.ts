@@ -1,6 +1,6 @@
 import { CLAUDE_CODE_MODELS } from "@/lib/model-router"
 import { createCliRuntime, pinOverride } from "./cli-runtime"
-import { bashSingleQuote } from "./open-webui"
+import { bashSingleQuote } from "./python-install"
 
 /**
  * Claude Code as an agent runtime: Anthropic's coding agent, driven through

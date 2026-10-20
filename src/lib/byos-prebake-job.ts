@@ -77,24 +77,22 @@ export async function runPrebake(serverId: string, facts: PreflightFacts): Promi
 
     const hermes = getRuntime("hermes")
     const openclaw = getRuntime("openclaw")
-    const [openclawVersion, hermesVersion, webuiVersion] = await Promise.all([
+    const [openclawVersion, hermesVersion] = await Promise.all([
       resolveForRegistry(openclaw.registry, openclaw.npmPackage, openclaw.version()),
       resolveForRegistry(hermes.registry, hermes.npmPackage, hermes.version()),
-      hermes.sidecar
-        ? resolveForRegistry(hermes.sidecar.registry, hermes.sidecar.packageName, hermes.sidecar.version())
-        : Promise.resolve(null),
     ])
     await db
       .update(byosServers)
       .set({
         prebakedOpenclawVersion: openclawVersion,
         prebakedHermesVersion: hermesVersion,
-        prebakedWebuiVersion: webuiVersion,
+        // The chat UI is no longer prebaked (AgentWebUI Lite installs at deploy).
+        prebakedWebuiVersion: null,
       })
       .where(eq(byosServers.id, serverId))
 
     const script = withInstallLock(
-      buildPrebakeScript({ openclawVersion, hermesVersion, webuiVersion, sshPort: server.port }),
+      buildPrebakeScript({ openclawVersion, hermesVersion, sshPort: server.port }),
       0,
     )
     let res: Awaited<ReturnType<typeof sshRunScript>>
@@ -160,9 +158,6 @@ export async function checkPrebakedServer(
   const pins: PrebakeDeployCheck["pins"] = {}
   const prebakedRuntime = runtimeId === "hermes" ? server.prebakedHermesVersion : server.prebakedOpenclawVersion
   if (prebakedRuntime && !isPinned(runtime.version())) pins.runtimeVersion = prebakedRuntime
-  if (runtimeId === "hermes" && server.prebakedWebuiVersion && runtime.sidecar && !isPinned(runtime.sidecar.version())) {
-    pins.sidecarVersion = server.prebakedWebuiVersion
-  }
 
   let facts
   try {

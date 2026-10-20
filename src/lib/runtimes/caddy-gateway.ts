@@ -4,7 +4,7 @@ import { renderToolServiceHandles, renderToolServiceSiteBody } from "./shared"
 
 /**
  * The Caddyfile for engines that expose an OpenAI-compatible gateway, optionally
- * fronted by the Open WebUI sidecar (Hermes, Claude Code, Codex). Lifted out of
+ * fronted by the chat UI sidecar (Hermes, Claude Code, Codex). Lifted out of
  * hermes.ts with the gateway port and extra `handle` blocks as parameters;
  * Hermes' rendered output is byte-identical.
  */
@@ -63,14 +63,14 @@ function buildSingleUpstreamBody(
 /**
  * Site-block body that path-routes inside a single host:
  *   `/v1/*` → the gateway (loopback, bearer-token auth)
- *   everything else → Open WebUI sidecar (its own session auth)
+ *   everything else → the chat UI sidecar (its own session auth)
  *
  * Uses Caddy's `handle` directive — NOT `handle_path` — so `/v1/chat/completions`
  * arrives at the gateway verbatim, not stripped to `/chat/completions`. `handle`
  * blocks are first-match, so order matters: the `/v1/*` block sits above the
  * catch-all.
  *
- * CORS rules live inside the `/v1/*` handler only — Open WebUI manages its
+ * CORS rules live inside the `/v1/*` handler only — the chat UI manages its
  * own headers and runs same-origin from the browser, so adding cross-origin
  * headers to its handler would break it.
  */
@@ -129,7 +129,7 @@ export type GatewayCaddyOpts = {
  *
  * Two body shapes:
  *  - **Dual-route** (`upstreamPort` set, i.e. webuiEnabled=true): path-routes
- *    `/v1/*` to the gateway and everything else to Open WebUI on
+ *    `/v1/*` to the gateway and everything else to the chat UI on
  *    `upstreamPort`. One public host serves both the chat UI and the
  *    OpenAI-compatible API for external bots.
  *  - **Single-upstream** (`upstreamPort` undefined, i.e. legacy

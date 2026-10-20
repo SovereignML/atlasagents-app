@@ -186,7 +186,7 @@ Ed25519 keypair used to SSH into provisioned VMs.
 | `BOT_RUNTIME_IMAGE` | Optional | Docker image for the bot runtime (built by `.github/workflows/bot-runtime.yml`). | Default `ghcr.io/sovereignml/sovereign-bot-runtime:latest`. |
 | `OPENCLAW_VERSION` | Optional | Override the OpenClaw version new boxes install. Unset = the code pin (`OPENCLAW_PINNED_VERSION`, one behind upstream). `latest` tracks upstream. | A tested version — or leave unset. |
 | `HERMES_VERSION` | Optional | Override the hermes-agent version. Unset = `HERMES_PINNED_VERSION`. | Same. |
-| `OPEN_WEBUI_VERSION` | Optional | Override the Open WebUI (Hermes chat UI) version. Unset = `OPEN_WEBUI_PINNED_VERSION`. | Same. |
+| `AGENTWEBUI_LITE_PIP_SPEC` | Optional | pip requirement for AgentWebUI Lite, the agents' chat UI. Unset = `agentwebui-lite @ git+…@LITE_PINNED_COMMIT`. | The default needs the Lite repo readable from agent boxes. |
 | `CADDY_VERSION` | Optional | Override the Caddy release installed from GitHub (not an apt repo). Unset = `CADDY_DEFAULT_VERSION`. A plain release number, e.g. `2.11.7`. | Same. |
 | `RUNTIME_MIN_NODE` | Optional | Minimum Node version enforced on runtime images. | Code default. |
 

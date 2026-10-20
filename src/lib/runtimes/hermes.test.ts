@@ -4,14 +4,13 @@ import {
   HERMES_GATEWAY_PORT,
   HERMES_PINNED_VERSION,
   HERMES_VPS_MIN_NODE,
-  OPEN_WEBUI_PINNED_VERSION,
 } from "./hermes"
 import { OPENCLAW_VPS_MIN_NODE } from "./openclaw"
 
 /**
  * Regression guards for the Caddyfile renderer. All three cases below were live
  * bugs: the two domain routes drove this renderer without `upstreamPort` (which
- * silently dropped the Open WebUI route off the public host) and Hermes ignored
+ * silently dropped the chat UI route off the public host) and Hermes ignored
  * `domainUseInternalTls` entirely (which made the Bring-Your-Own-Cloudflare path
  * request a Let's Encrypt cert it could never get behind the CF proxy).
  */
@@ -21,7 +20,7 @@ describe("hermesRuntime.renderCaddyfile()", () => {
   const SIDECAR_PORT = 8080
   const GATEWAY_PORT = 8642
 
-  describe("custom domain + Open WebUI sidecar", () => {
+  describe("custom domain + chat UI sidecar", () => {
     const out = hermesRuntime.renderCaddyfile({
       domain: DOMAIN,
       upstreamPort: SIDECAR_PORT,
@@ -36,7 +35,7 @@ describe("hermesRuntime.renderCaddyfile()", () => {
       expect(out).toContain(`reverse_proxy localhost:${GATEWAY_PORT}`)
     })
 
-    it("routes everything else to the Open WebUI sidecar", () => {
+    it("routes everything else to the chat UI sidecar", () => {
       // Without this the whole public host proxies to the bearer-token-only
       // gateway and the chat UI disappears the moment a domain is set.
       expect(out).toContain(`reverse_proxy localhost:${SIDECAR_PORT}`)
@@ -119,54 +118,33 @@ describe("hermesRuntime.renderCaddyfile()", () => {
   })
 })
 
-/**
- * Regression guard for a live bug: the Open WebUI sidecar shipped without
- * `DEFAULT_MODELS`, so the freshly seeded admin account opened a chat with no
- * model selected and the FIRST message went out with no model attached — which
- * read to users as "Hermes ignores my OpenRouter model", even though the gateway
- * itself was correctly pinned.
- */
+/** The chat UI (AgentWebUI Lite) drives Hermes over ACP, with the model locked to the dashboard's. */
 describe("hermesRuntime.sidecar.renderEnv()", () => {
   const baseArgs = {
-    instance: { id: "inst_1", domain: null } as never,
+    instance: { id: "inst_1", domain: null, name: "Helper" } as never,
     gatewayToken: "gw-token",
     gatewayPort: HERMES_GATEWAY_PORT,
     secretKey: "sekrit",
     publicUrl: null,
     enableSignup: true,
+    adminPassword: "pw",
     model: "deepseek/deepseek-v4-pro",
   }
 
-  it("pre-selects the pinned model for new chats", () => {
+  it("starts `hermes acp` in the agent's workspace, with the model and folder locked", () => {
     const env = hermesRuntime.sidecar!.renderEnv(baseArgs)
-    expect(env.DEFAULT_MODELS).toBe("deepseek/deepseek-v4-pro")
+    expect(env.AGENT_HERMES_COMMAND).toBe("/opt/hermes/venv/bin/hermes acp")
+    expect(env.WORKSPACE_DIR).toBe(hermesRuntime.paths.workspaceDir)
+    expect(env.LOCK_MODEL).toBe("true")
+    expect(env.LOCK_FOLDER).toBe("true")
+    expect(env.PASSWORD).toBe("pw")
+    expect(env.EMBED_SECRET).toBe("sekrit")
   })
 
-  it("forces env to win over Open WebUI's persisted config", () => {
-    // Without this, DEFAULT_MODELS is read once on first launch, stored in the
-    // sidecar's DB, and every later env change is ignored — which is exactly how
-    // a warm-pool VM (sidecar booted at bake with no model) ends up permanently
-    // without a default.
-    const env = hermesRuntime.sidecar!.renderEnv(baseArgs)
-    expect(env.ENABLE_PERSISTENT_CONFIG).toBe("false")
-  })
-
-  it("points the chat UI at the gateway with the bearer token as its key", () => {
-    const env = hermesRuntime.sidecar!.renderEnv(baseArgs)
-    expect(env.OPENAI_API_BASE_URL).toBe(`http://127.0.0.1:${HERMES_GATEWAY_PORT}/v1`)
-    expect(env.OPENAI_API_KEY).toBe("gw-token")
-  })
-
-  it("omits DEFAULT_MODELS rather than writing it empty when no model is known", () => {
-    // The warm-pool bake renders a placeholder env before any instance exists. An
-    // empty value would leave Open WebUI parsing a blank model id.
-    const env = hermesRuntime.sidecar!.renderEnv({ ...baseArgs, model: "" })
-    expect(env.DEFAULT_MODELS).toBeUndefined()
-  })
-
-  it("trims whitespace so the id matches what /v1/models reports", () => {
+  it("records the pinned model, trimmed, so a reprovision can tell it moved", () => {
     const env = hermesRuntime.sidecar!.renderEnv({ ...baseArgs, model: "  minimax/minimax-m2.5  " })
-    expect(env.DEFAULT_MODELS).toBe("minimax/minimax-m2.5")
+    expect(env.ATLAS_PINNED_MODEL).toBe("minimax/minimax-m2.5")
+    expect(hermesRuntime.sidecar!.renderEnv({ ...baseArgs, model: "" }).ATLAS_PINNED_MODEL).toBeUndefined()
   })
 })
 
@@ -212,25 +190,23 @@ describe("Hermes bootstrap — Node floor and browser dependencies", () => {
   })
 
   // Whatever happens to the browser deps, the runtime install must not move.
-  it("still installs hermes and open-webui either way", () => {
+  it("still installs hermes and the chat UI either way", () => {
     for (const script of [render({ browserDeps: false }), render({ browserDeps: true })]) {
-      expect(script).toContain("install_pkgs_parallel")
       expect(script).toContain("verify_hermes_cli")
-      expect(script).toContain("verify_open_webui_cli")
+      expect(script).toContain("verify_agentwebui_lite")
+      expect(script).not.toContain("open-webui")
     }
   })
 })
 
 describe("Hermes bootstrap — version pinning", () => {
-  it("pins both the runtime and the sidecar when resolved", () => {
+  it("pins the runtime, with its ACP extra, when resolved", () => {
     const script = hermesRuntime.renderBootstrap({
       gatewayPort: hermesRuntime.gatewayPort,
       webuiEnabled: true,
       runtimeVersion: "0.19.0",
-      sidecarVersion: "0.11.3",
     })
-    expect(script).toContain("hermes-agent==0.19.0")
-    expect(script).toContain("open-webui==0.11.3")
+    expect(script).toContain("RUNTIME_PKG_SPEC='hermes-agent[acp]==0.19.0'")
   })
 
   // No resolved pin means the code pins, not a bare dist name (which is how
@@ -240,8 +216,7 @@ describe("Hermes bootstrap — version pinning", () => {
       gatewayPort: hermesRuntime.gatewayPort,
       webuiEnabled: true,
     })
-    expect(script).toContain(`RUNTIME_PKG_SPEC='hermes-agent==${HERMES_PINNED_VERSION}'`)
-    expect(script).toContain(`OPEN_WEBUI_PKG_SPEC='open-webui==${OPEN_WEBUI_PINNED_VERSION}'`)
+    expect(script).toContain(`RUNTIME_PKG_SPEC='hermes-agent[acp]==${HERMES_PINNED_VERSION}'`)
   })
 })
 
@@ -264,25 +239,19 @@ describe("Hermes bootstrap — Python install strategy", () => {
     expect(script).toContain('"$venv/bin/pip" install --upgrade "$spec"')
   })
 
-  it("keeps the two heavy installs overlapped", () => {
+  it("installs Hermes and the chat UI into separate venvs with separate caches", () => {
     const script = render(true)
-    expect(script).toContain("install_pkgs_parallel")
-    expect(script).toContain('wait "$HPID"')
-    expect(script).toContain('wait "$OPID"')
-    // Separate caches so the parallel installs never contend on one.
     expect(script).toContain("/var/tmp/py-cache-hermes")
-    expect(script).toContain("/var/tmp/py-cache-owui")
+    expect(script).toContain("/var/tmp/py-cache-awl")
+    expect(script).toContain("venv_create '/opt/agentwebui-lite/venv'")
   })
 
-  // open-webui's requires_python is >=3.11,<3.13.0a1. BYOS admits any amd64
-  // Ubuntu/Debian, and Debian 13 / Ubuntu 25.x ship Python 3.13 — which used
-  // to pass the floor-only check and then fail minutes later, mid-install.
-  it("enforces the sidecar's Python ceiling when Open WebUI is installed", () => {
-    expect(render(true)).toContain("sys.version_info[:2] < (3, 13)")
-  })
-
-  it("uses the looser ceiling when only Hermes is installed", () => {
-    expect(render(false)).toContain("sys.version_info[:2] < (3, 14)")
+  // hermes-agent's requires_python is >=3.11,<3.14; the chat UI has no lower
+  // ceiling, so Hermes' is the one that applies, with or without it.
+  it("enforces Hermes' Python ceiling", () => {
+    for (const script of [render(true), render(false)]) {
+      expect(script).toContain("sys.version_info[:2] < (3, 14)")
+    }
   })
 
   it("still enforces the floor", () => {
@@ -293,9 +262,8 @@ describe("Hermes bootstrap — Python install strategy", () => {
 })
 
 /**
- * `/v1/models` is the only list Open WebUI's picker sees. Unconfigured, Hermes
- * advertises just `hermes-agent`, which never matched the sidecar's
- * DEFAULT_MODELS (the slug) — so the picker had no valid default and offered
+ * `/v1/models` is what API clients see of the model list. Unconfigured, Hermes
+ * advertises just `hermes-agent` instead of the model's real slug, and offers
  * nothing else to switch to.
  */
 describe("hermesRuntime.renderInitScript() api_server models", () => {

@@ -78,7 +78,8 @@ The defining difference from the managed-VPS path: **no provider VM is allocated
 
 A BYOS box gets no warm pool and no golden image, so historically every deploy
 built from scratch inside the window the customer sat watching — an estimated
-6–10 minutes for OpenClaw and 10–15 for Hermes + Open WebUI.
+6–10 minutes for OpenClaw and 10–15 for Hermes with its old chat UI (Open
+WebUI, since replaced by the much smaller AgentWebUI Lite).
 
 Work that does **not** depend on which engine they eventually pick now runs in
 the background as soon as the server is connected:
@@ -86,15 +87,15 @@ the background as soon as the server is connected:
 | | at connect | at deploy |
 |---|---|---|
 | apt, Caddy, Node, swap, both runtimes' accounts | installed | no-ops |
-| `hermes-agent` + Open WebUI | installed, Open WebUI pre-booted | restart only |
+| `hermes-agent` | installed, its CLI warmed | restart only |
+| chat UI (AgentWebUI Lite) | — | installed (one small package, seconds) |
 | `openclaw` | **downloaded into the npm cache only** | installed from cache |
 | config, secrets, systemd, health checks, DNS | — | per-instance, always |
 
 OpenClaw is the genuine either/or, and its 225MB / 11,428-file *extract* is what
-makes it expensive, so only the download moves. Open WebUI is not part of that
-choice — it is Hermes' sidecar and ships everywhere — so installing it early is
-what removes the heaviest item from the slow path. The consequence is that a
-Hermes deploy ends up faster than an OpenClaw one.
+makes it expensive, so only the download moves. Hermes is installed outright,
+which is what makes a Hermes deploy faster than an OpenClaw one. The chat UI is
+small enough to install at deploy.
 
 **Consent is required and is not implied by connecting.** The preflight is
 read-only and unprivileged by design; prebake is the moment that stops being

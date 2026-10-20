@@ -1,0 +1,341 @@
+import crypto from "node:crypto"
+import { isPinned, npmSpec, pypiSpec } from "@/lib/runtime-versions"
+import { APT_OPTS_LITERAL } from "./bootstrap"
+import { bashSingleQuote, buildPyInstallPrelude, buildVerifyPythonStep } from "./python-install"
+import type { BootstrapRenderArgs, RuntimeEngine, SidecarEnvArgs, SidecarSpec } from "./types"
+
+/* --- AgentWebUI Lite: the chat UI ------------------------------------------ */
+/**
+ * AgentWebUI Lite (github.com/HackersHostel/AgentWebUI-Lite) is the chat page
+ * every Hermes, Claude Code and Codex agent ships. It talks to the agent over
+ * the Agent Client Protocol (ACP): it starts the engine's own ACP command
+ * (`hermes acp`, Claude Code / Codex through their ACP adapters) and streams
+ * its replies, plans, tool calls and permission questions.
+ *
+ * It replaced Open WebUI to make installs fast: Open WebUI was most of a cold
+ * install (a 146MB wheel, ~116 dependencies and torch) and of an agent's memory.
+ * Lite is one dependency (`aiohttp`), starts in about a second, and has no
+ * accounts to seed: its password and embed secret are in its .env from Phase A.
+ *
+ * How it sits on the box:
+ *  - one Python venv under /opt/agentwebui-lite, plus the ACP adapter for the
+ *    CLI engines under /opt/agentwebui-lite/acp;
+ *  - a systemd unit that runs AS THE RUNTIME'S USER with the runtime's own env
+ *    files, because the agent processes Lite starts are the engine itself and
+ *    need its sign-in, keys and workspace. Lite's own settings are NOT in the
+ *    unit: Lite reads them from its .env (AWL_ENV_FILE), so they never reach
+ *    the environment the agent processes inherit;
+ *  - loopback :8080, where Caddy sends everything but `/v1/*` (the gateway).
+ *
+ * The dashboard frames it: Lite only lets the dashboard's origins frame it
+ * (FRAME_ANCESTORS), and the dashboard signs the browser in with a one-time
+ * `/embed` link signed with EMBED_SECRET (see buildLiteEmbedUrl). The model is
+ * the dashboard's choice (LOCK_MODEL) and the agent works only in its
+ * workspace (LOCK_FOLDER).
+ *
+ * Agents made before Lite run Open WebUI until their box is migrated
+ * (buildLiteMigrationScript); `Instance.chatUi` says which a box has.
+ */
+
+/** `Instance.chatUi` of an agent whose box runs Lite. NULL: still Open WebUI. */
+export const CHAT_UI_LITE = "agentwebui-lite"
+
+/** Whether this agent's box already runs Lite (else it still runs Open WebUI). */
+export function runsLite(instance: { chatUi?: string | null }): boolean {
+  return instance.chatUi === CHAT_UI_LITE
+}
+
+/** The unit an agent made before Lite still runs, until it is migrated. */
+export const LEGACY_OPEN_WEBUI_SERVICE = "open-webui"
+
+export const LITE_SERVICE_NAME = "agentwebui-lite"
+/** The chat UI's loopback port: Caddy sends everything but `/v1/*` here. */
+export const LITE_PORT = 8080
+export const LITE_INSTALL_DIR = "/opt/agentwebui-lite"
+export const LITE_VENV = `${LITE_INSTALL_DIR}/venv`
+export const LITE_BIN = `${LITE_VENV}/bin/agentwebui-lite`
+/** Where the CLI engines' ACP adapters are installed (npm prefix). */
+export const LITE_ACP_DIR = `${LITE_INSTALL_DIR}/acp`
+/** Lite's Python floor is 3.11 and it has no ceiling; this bound only fails loudly on a future 3.x. */
+const LITE_PYTHON_MAX_EXCLUSIVE = "3.15"
+
+/**
+ * The Lite commit new boxes install. Lite is not on PyPI, so this is a git
+ * install, and the repository must be readable from the box (public, or
+ * published to PyPI and named in AGENTWEBUI_LITE_PIP_SPEC).
+ */
+export const LITE_PINNED_COMMIT = "49d65df07c503388f8d308073ae0e644a350d82e"
+export const LITE_REPO = "https://github.com/HackersHostel/AgentWebUI-Lite"
+
+/** pip requirement for Lite. `AGENTWEBUI_LITE_PIP_SPEC` overrides it (e.g. `agentwebui-lite==1.2.0`). */
+export function litePipSpec(): string {
+  return (
+    process.env.AGENTWEBUI_LITE_PIP_SPEC?.trim() ||
+    `agentwebui-lite @ git+${LITE_REPO}@${LITE_PINNED_COMMIT}`
+  )
+}
+
+/** What a box's Lite is, for the pool key and Instance.sidecarVersion. */
+export function liteVersion(): string {
+  const override = process.env.AGENTWEBUI_LITE_PIP_SPEC?.trim()
+  if (!override) return `git-${LITE_PINNED_COMMIT.slice(0, 12)}`
+  const pinned = override.match(/==\s*([A-Za-z0-9._+-]+)$/)?.[1]
+  return pinned && isPinned(pinned) ? pinned : "custom"
+}
+
+/**
+ * ACP adapters for the CLI engines, one release behind latest (the same rule
+ * as the runtimes). Each brings the official SDK of its engine.
+ */
+export const ACP_ADAPTERS: Record<string, { pkg: string; version: string; bin: string }> = {
+  "claude-code": {
+    pkg: "@agentclientprotocol/claude-agent-acp",
+    version: "0.93.0",
+    bin: "claude-agent-acp",
+  },
+  codex: { pkg: "@agentclientprotocol/codex-acp", version: "2.2.1", bin: "codex-acp" },
+}
+
+/** hermes-agent's ACP server is an optional extra (`agent-client-protocol`). */
+const HERMES_ACP_EXTRA = "hermes-agent[acp]"
+
+/** Whether Lite can front this engine. OpenClaw keeps its own UI. */
+export function liteSupports(runtimeId: string): boolean {
+  return runtimeId === "hermes" || runtimeId in ACP_ADAPTERS
+}
+
+/** The ACP command Lite starts for an engine. */
+export function acpCommand(engine: Pick<RuntimeEngine, "id" | "cliBinary">): string {
+  if (engine.id === "hermes") return `${engine.cliBinary} acp`
+  const adapter = ACP_ADAPTERS[engine.id]
+  if (!adapter) throw new Error(`AgentWebUI Lite has no ACP command for ${engine.id}`)
+  return `${LITE_ACP_DIR}/node_modules/.bin/${adapter.bin}`
+}
+
+/**
+ * Settings Lite reads (its .env.example). A runtime env file that set one would
+ * override Lite's own .env, since Lite lets the environment win.
+ */
+export const LITE_SETTING_KEYS = /^(HOST|PORT|PASSWORD|USER_NAME|DATA_DIR|SYSTEM_PROMPT|WORKSPACE_DIR|AGENT_IDLE_MINUTES|UPLOAD_MB|RICH_REPLIES|FILES_ROOTS|TRUST_PROXY|NOTIFY_WEBHOOK|BRAND_[A-Z_]+|EMBED_SECRET|FRAME_ANCESTORS|LOCK_MODEL|LOCK_FOLDER|PROVIDER_[A-Z0-9]+_[A-Z]+|AGENT_[A-Z0-9]+_[A-Z]+)$/
+
+/** Lite's env-file prefix for the one agent it serves: AGENT_<ID>_COMMAND, AGENT_<ID>_NAME. */
+function liteAgentKey(engine: Pick<RuntimeEngine, "id">): string {
+  return `AGENT_${engine.id.replace(/[^a-z0-9]/gi, "").toUpperCase()}`
+}
+
+/**
+ * The per-agent embed secret. Derived from the platform's encryption key and
+ * the instance id, so the dashboard can sign `/embed` links without storing
+ * anything, and every agent's secret is different.
+ */
+export function liteEmbedSecret(instanceId: string): string {
+  const key = process.env.INSTANCE_ENCRYPTION_KEY?.trim()
+  if (!key) throw new Error("INSTANCE_ENCRYPTION_KEY is not set, so no embed secret can be derived")
+  return crypto.createHmac("sha256", key).update(`agentwebui-lite-embed:${instanceId}`).digest("hex")
+}
+
+/**
+ * A one-time `/embed` link that signs the browser in to an agent's chat page
+ * (Lite's format: base64url JSON {exp, nonce}, a dot, the hex HMAC-SHA256 of
+ * that text). Lives 60 seconds; Lite accepts each link once.
+ */
+export function buildLiteEmbedUrl(publicUrl: string, secret: string, nowMs = Date.now()): string {
+  const payload = JSON.stringify({
+    exp: Math.floor(nowMs / 1000) + 60,
+    nonce: crypto.randomBytes(16).toString("hex"),
+  })
+  const text = Buffer.from(payload, "utf8").toString("base64url")
+  const signature = crypto.createHmac("sha256", secret).update(text).digest("hex")
+  return `${publicUrl.replace(/\/+$/, "")}/embed?token=${text}.${signature}`
+}
+
+/**
+ * Install steps for Lite and the engine's ACP side, appended to the runtime's
+ * own bootstrap. `standalone` adds the Python setup (apt Python, uv, the
+ * `py_install` helpers), which Hermes' bootstrap already has but a migration
+ * script or a CLI engine's bootstrap does not.
+ */
+export function buildLiteInstallSteps(
+  engine: RuntimeEngine,
+  args: Pick<BootstrapRenderArgs, "runtimeVersion"> = {},
+  opts: { standalone?: boolean } = {},
+): string {
+  const isHermes = engine.id === "hermes"
+  const hermesVenv = engine.cliBinary.replace(/\/bin\/[^/]+$/, "")
+  const pythonSetup =
+    isHermes && !opts.standalone
+      ? ""
+      : `
+step "python_deps"
+apt-get $APT_OPTS install -y python3 python3-venv python3-pip git
+
+${buildVerifyPythonStep(LITE_PYTHON_MAX_EXCLUSIVE)}
+
+${buildPyInstallPrelude()}`
+  const adapter = ACP_ADAPTERS[engine.id]
+  // A fresh Hermes install already has the `acp` extra (hermes.ts); a box
+  // being migrated may predate it.
+  const acpSteps = isHermes
+    ? !opts.standalone
+      ? ""
+      : `
+step "install_hermes_acp"
+py_install ${bashSingleQuote(hermesVenv)} ${bashSingleQuote(pypiSpec(HERMES_ACP_EXTRA, args.runtimeVersion ?? engine.version()))} /var/tmp/py-cache-hermes`
+    : adapter
+      ? `
+step "install_acp_adapter"
+install -d -m 0755 ${bashSingleQuote(LITE_ACP_DIR)}
+npm install --prefix ${bashSingleQuote(LITE_ACP_DIR)} --omit=dev --no-audit --no-fund --loglevel=warn ${bashSingleQuote(npmSpec(adapter.pkg, adapter.version))}
+chmod -R a+rX ${bashSingleQuote(LITE_ACP_DIR)}`
+      : ""
+  return `${pythonSetup}
+step "install_agentwebui_lite"
+command -v git >/dev/null 2>&1 || apt-get $APT_OPTS install -y git
+install -d -m 0755 ${bashSingleQuote(LITE_INSTALL_DIR)}
+venv_create ${bashSingleQuote(LITE_VENV)}
+py_install ${bashSingleQuote(LITE_VENV)} ${bashSingleQuote(litePipSpec())} /var/tmp/py-cache-awl
+chmod -R a+rX ${bashSingleQuote(LITE_INSTALL_DIR)}
+${acpSteps}
+
+step "verify_agentwebui_lite"
+${bashSingleQuote(`${LITE_VENV}/bin/python`)} -c 'import agentwebui_lite'
+`
+}
+
+/** Lite as a runtime's sidecar: env, unit, health. No admin to seed. */
+export function makeLiteSidecar(engine: RuntimeEngine): SidecarSpec {
+  const home = engine.paths.installDir
+  const atlasDir = engine.paths.envPath.replace(/\/[^/]+$/, "")
+  const envPath = `${atlasDir}/agentwebui-lite.env`
+  const dataDir = `${atlasDir}/agentwebui-lite`
+  // The CLI engines keep their per-provision model pins in a second env file.
+  const modelEnvPath = engine.paths.configFileName === "model.env" ? engine.paths.configPath : null
+  return {
+    serviceName: LITE_SERVICE_NAME,
+    port: LITE_PORT,
+    healthPath: "/api/health",
+    dataDir,
+    envPath,
+    packageName: "agentwebui-lite",
+    registry: "pypi",
+    version: liteVersion,
+
+    renderEnv(args: SidecarEnvArgs): Record<string, string> {
+      const name = args.instance.name || engine.displayName
+      const env: Record<string, string> = {
+        HOST: "127.0.0.1",
+        PORT: String(LITE_PORT),
+        DATA_DIR: dataDir,
+        // Required: the box is reachable through Caddy. The dashboard signs in
+        // with EMBED_SECRET; the password is the fallback for the direct URL.
+        PASSWORD: args.adminPassword || args.secretKey,
+        EMBED_SECRET: args.secretKey,
+        TRUST_PROXY: "true",
+        WORKSPACE_DIR: engine.paths.workspaceDir,
+        FILES_ROOTS: engine.paths.workspaceDir,
+        LOCK_MODEL: "true",
+        LOCK_FOLDER: "true",
+        AGENT_IDLE_MINUTES: "30",
+        [`${liteAgentKey(engine)}_COMMAND`]: acpCommand(engine),
+        [`${liteAgentKey(engine)}_NAME`]: name,
+        BRAND_NAME: name.slice(0, 40),
+      }
+      // Read by nothing in Lite; recorded so a reprovision can tell whether the
+      // model moved and Lite (whose agents inherit the engine's config at
+      // start) needs a restart.
+      if (args.model.trim()) env.ATLAS_PINNED_MODEL = args.model.trim()
+      const ancestors = (args.frameAncestors ?? []).filter((o) => /^https?:\/\//.test(o))
+      if (ancestors.length > 0) env.FRAME_ANCESTORS = ancestors.join(" ")
+      return env
+    },
+
+    renderSystemdUnit(): string {
+      // Only the runtime's env goes into the process environment: the agents
+      // Lite starts inherit it and need those keys. Lite's settings (password,
+      // embed secret) stay in its .env, read through AWL_ENV_FILE, so no agent
+      // sees them. The environment wins over Lite's .env, so the runtime's
+      // files must not set a key Lite reads (see LITE_SETTING_KEYS).
+      return `[Unit]
+Description=AgentWebUI Lite (${engine.displayName} chat UI)
+After=network-online.target ${engine.serviceName}.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${engine.paths.systemUser}
+Group=${engine.paths.systemUser}
+WorkingDirectory=${home}
+Environment=HOME=${home}
+EnvironmentFile=${engine.paths.envPath}
+${modelEnvPath ? `EnvironmentFile=-${modelEnvPath}\n` : ""}Environment=AWL_ENV_FILE=${envPath}
+ExecStart=${LITE_BIN}
+Restart=always
+RestartSec=3
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target
+`
+    },
+  }
+}
+
+/** Printed by the migration script once Lite answers on the box. */
+export const LITE_MIGRATED = "LITE_MIGRATED"
+
+/**
+ * Move a box made before Lite from Open WebUI to Lite: install Lite, write its
+ * env and unit, then stop and delete Open WebUI (its chats go with it) and
+ * start Lite on the port Open WebUI had. Lite is installed BEFORE Open WebUI is
+ * touched, so a failed install leaves the old chat UI working. Exits non-zero
+ * on failure; prints LITE_MIGRATED once Lite answers.
+ */
+export function buildLiteMigrationScript(
+  engine: RuntimeEngine,
+  opts: { envB64: string },
+): string {
+  const sidecar = engine.sidecar
+  if (!sidecar) throw new Error(`${engine.id} has no chat UI to migrate`)
+  // Open WebUI's env sat next to the runtime's own (.hermes/ or .atlas/).
+  const legacyEnvPath = `${engine.paths.envPath.replace(/\/[^/]+$/, "")}/open-webui.env`
+  const user = bashSingleQuote(engine.paths.systemUser)
+  const unitB64 = Buffer.from(sidecar.renderSystemdUnit(), "utf8").toString("base64")
+  return `#!/bin/bash
+set -euo pipefail
+export SYSTEMD_PAGER=cat
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+APT_OPTS="${APT_OPTS_LITERAL}"
+step() { echo "=== migrate: $1 ==="; }
+${buildLiteInstallSteps(engine, {}, { standalone: true })}
+step "write_lite_env"
+echo ${bashSingleQuote(opts.envB64)} | base64 -d > ${bashSingleQuote(sidecar.envPath)}
+chmod 600 ${bashSingleQuote(sidecar.envPath)}
+chown ${user}:${user} ${bashSingleQuote(sidecar.envPath)}
+
+step "write_lite_unit"
+echo ${bashSingleQuote(unitB64)} | base64 -d > "/etc/systemd/system/${sidecar.serviceName}.service"
+
+step "remove_open_webui"
+systemctl disable --now ${LEGACY_OPEN_WEBUI_SERVICE} 2>/dev/null || true
+rm -f /etc/systemd/system/${LEGACY_OPEN_WEBUI_SERVICE}.service
+rm -rf /opt/open-webui
+rm -f ${bashSingleQuote(legacyEnvPath)}
+if id ${LEGACY_OPEN_WEBUI_SERVICE} >/dev/null 2>&1; then userdel ${LEGACY_OPEN_WEBUI_SERVICE} || true; fi
+
+step "start_lite"
+systemctl daemon-reload
+systemctl enable ${sidecar.serviceName}
+systemctl restart ${sidecar.serviceName}
+for _ in $(seq 1 30); do
+  if curl -fsS -o /dev/null "http://127.0.0.1:${sidecar.port}${sidecar.healthPath}"; then
+    echo ${LITE_MIGRATED}
+    exit 0
+  fi
+  sleep 1
+done
+echo "AgentWebUI Lite did not answer on :${sidecar.port} after 30s" >&2
+journalctl -u ${sidecar.serviceName} --no-pager -n 50 >&2 || true
+exit 1
+`
+}

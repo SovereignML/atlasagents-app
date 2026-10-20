@@ -20,19 +20,17 @@ export type RuntimeFootprint = {
 
 /**
  * Per-variant footprints. Hermes needs more than OpenClaw (a Python venv and a
- * heavier process), and Hermes + Open WebUI is far larger again because the
- * sidecar's dependency tree pulls chromadb/sentence-transformers/torch — the
- * bootstrap itself calls that out as dominating a cold install.
+ * heavier process); the "-lite" variants add the chat UI (AgentWebUI Lite).
  */
 export const AGENT_FOOTPRINTS: RuntimeFootprint[] = [
   { key: "openclaw", label: "OpenClaw", vcpu: 1, ramMb: 1024, diskGb: 3 },
   { key: "hermes", label: "Hermes", vcpu: 1, ramMb: 1536, diskGb: 5 },
-  { key: "hermes-webui", label: "Hermes + Open WebUI", vcpu: 2, ramMb: 3072, diskGb: 10 },
-  // Node CLI + its SDK (a second copy of the agent binary) + Open WebUI + ttyd.
-  // Open WebUI dominates, as it does for Hermes; the coding agents also run
-  // tool-heavy turns (builds, tests) in the workspace, hence the extra disk.
-  { key: "claude-code-webui", label: "Claude Code + Open WebUI", vcpu: 2, ramMb: 3072, diskGb: 12 },
-  { key: "codex-webui", label: "Codex + Open WebUI", vcpu: 2, ramMb: 3072, diskGb: 12 },
+  // The chat page itself is ~40MB, so the engine dominates: Codex's process is
+  // the largest (~580MB, Claude Code ~370MB), and the coding agents run builds
+  // and tests in the workspace, hence the extra disk.
+  { key: "hermes-lite", label: "Hermes + AgentWebUI Lite", vcpu: 1, ramMb: 1792, diskGb: 6 },
+  { key: "claude-code-lite", label: "Claude Code + AgentWebUI Lite", vcpu: 1, ramMb: 1792, diskGb: 8 },
+  { key: "codex-lite", label: "Codex + AgentWebUI Lite", vcpu: 1, ramMb: 2048, diskGb: 8 },
 ]
 
 /**
@@ -45,7 +43,7 @@ export const HOST_RESERVE = { vcpu: 1, ramMb: 1024, diskGb: 5 }
 export const DEFAULT_FOOTPRINT_KEY = "openclaw"
 
 export function footprintKey(runtime: string, webuiEnabled = false): string {
-  return runtimeCaps(runtime).hasSidecar && webuiEnabled ? `${runtime}-webui` : runtime
+  return runtimeCaps(runtime).hasSidecar && webuiEnabled ? `${runtime}-lite` : runtime
 }
 
 export function getFootprint(key: string): RuntimeFootprint | undefined {

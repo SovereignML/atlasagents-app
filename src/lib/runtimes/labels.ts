@@ -39,7 +39,7 @@ export type RuntimeCaps = {
    */
   supportsCustomBaseUrl: boolean
   /**
-   * New instances get the chat UI sidecar (Open WebUI). Engines without a
+   * New instances get the chat UI sidecar (AgentWebUI Lite). Engines without a
    * sidecar always store `webuiEnabled=false`.
    */
   hasSidecar: boolean

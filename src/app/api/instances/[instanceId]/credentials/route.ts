@@ -35,9 +35,10 @@ export async function GET(
   }
 
   // Hermes authenticates with a single bearer token (API_SERVER_KEY), not an
-  // admin email/password. The exception is when the Open WebUI sidecar is
-  // enabled: then the openclawAdmin* columns hold the Open WebUI login, which
-  // we surface below like any other admin login. Without the sidecar there is
+  // admin email/password. The exception is when the chat UI sidecar is
+  // enabled: then the openclawAdmin* columns hold the chat page's password
+  // (and the browser terminal's login), which we surface below like any other
+  // admin login. Without the sidecar there is
   // no admin login at all, so tell the dashboard to hide the card.
   if (!runtimeCaps(instance.runtime).nativeAdminLogin && !instance.webuiEnabled) {
     return NextResponse.json(

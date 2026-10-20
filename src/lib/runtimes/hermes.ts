@@ -6,21 +6,11 @@ import type {
   RenderConfigArgs,
   RenderInitScriptArgs,
   RuntimeEngine,
-  SidecarSpec,
 } from "./types"
 import { buildGatewayAllowedOrigins } from "@/lib/instance-gateway-access"
 import { pypiSpec } from "@/lib/runtime-versions"
-import {
-  OPEN_WEBUI_BIN,
-  OPEN_WEBUI_PYTHON_MAX_EXCLUSIVE,
-  OPEN_WEBUI_VENV,
-  bashSingleQuote,
-  buildOpenWebUiPrepSteps,
-  buildPyInstallPrelude,
-  buildVerifyPythonStep,
-  makeOpenWebUiSidecar,
-  openWebUiPipSpec,
-} from "./open-webui"
+import { bashSingleQuote, buildPyInstallPrelude, buildVerifyPythonStep } from "./python-install"
+import { buildLiteInstallSteps, makeLiteSidecar } from "./agentwebui-lite"
 import { resolveLlmProvider, nvidiaKeyForSlot } from "@/lib/model-router"
 import { enabledToolsForRuntime } from "@/configs/agent-tools"
 import { renderGatewayCaddyfile } from "./caddy-gateway"
@@ -76,7 +66,7 @@ export const HERMES_VPS_MIN_NODE = "24.16.0"
 export const HERMES_PYTHON_MIN = "3.11"
 /**
  * Exclusive Python ceilings, from the packages' own `requires_python`:
- * `hermes-agent` is `>=3.11,<3.14`, `open-webui` is `>=3.11,<3.13.0a1`.
+ * `hermes-agent` is `>=3.11,<3.14`.
  *
  * The bootstrap only ever checked the FLOOR. That is harmless on a managed VPS
  * (Ubuntu 24.04, Python 3.12) but not on BYOS, where the preflight admits any
@@ -86,16 +76,6 @@ export const HERMES_PYTHON_MIN = "3.11"
  * the venvs and most of a 900s timeout had already been spent.
  */
 export const HERMES_PYTHON_MAX_EXCLUSIVE = "3.14"
-
-// Open WebUI's pins and Python ceiling live with the shared sidecar now.
-export {
-  OPEN_WEBUI_PINNED_VERSION,
-  OPEN_WEBUI_PORT,
-  OPEN_WEBUI_PYTHON_MAX_EXCLUSIVE,
-  OPEN_WEBUI_SERVICE_NAME,
-  OPEN_WEBUI_VERSION,
-  TORCH_CPU_INDEX_URL,
-} from "./open-webui"
 
 /** Hermes' default API server port. */
 export const HERMES_GATEWAY_PORT = 8642
@@ -114,10 +94,12 @@ const HERMES_WORKSPACE_DIR = `${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}/work
 /** Hermes' `~/.hermes/.env` (one level deeper than OpenClaw's `/opt/openclaw/.env`). */
 const HERMES_ENV_PATH = `${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}/.env`
 
-const OPEN_WEBUI_ENV_PATH = `${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}/open-webui.env`
-
+/**
+ * hermes-agent with its `acp` extra (`agent-client-protocol`): `hermes acp` is
+ * how the chat UI (AgentWebUI Lite) talks to it. One install, not two.
+ */
 function pipPackageSpec(pin?: string): string {
-  return pypiSpec(HERMES_PYPI_DIST, pin ?? HERMES_VERSION())
+  return pypiSpec(`${HERMES_PYPI_DIST}[acp]`, pin ?? HERMES_VERSION())
 }
 
 /**
@@ -172,82 +154,17 @@ ${browserDeps ? buildBrowserDepsSteps() : ""}`
 }
 
 /**
- * Combined Hermes + Open WebUI install with the two heavy `pip install`s run **in parallel**.
- * Open WebUI's dependency tree (chromadb / sentence-transformers / …) dominates a cold
- * bootstrap; overlapping it with Hermes' install shaves real wall-clock. Each install keeps
- * its own 3× retry/backoff and its own PIP_CACHE_DIR (so the two never contend on the cache),
- * and the bootstrap fails if either errors. Used whenever the Open WebUI sidecar is enabled
- * (the default for new Hermes instances).
- */
-function buildHermesPlusWebuiInstallSteps(
-  browserDeps: boolean,
-  pin?: string,
-  webuiPin?: string,
-): string {
-  return `
-RUNTIME_PKG_SPEC=${bashSingleQuote(pipPackageSpec(pin))}
-OPEN_WEBUI_PKG_SPEC=${bashSingleQuote(openWebUiPipSpec(webuiPin))}
-
-step "python_deps"
-apt-get $APT_OPTS install -y python3 python3-venv python3-pip ripgrep ffmpeg
-
-${buildVerifyPythonStep(OPEN_WEBUI_PYTHON_MAX_EXCLUSIVE)}
-
-${buildPyInstallPrelude()}
-step "create_hermes_venv"
-mkdir -p ${bashSingleQuote(HERMES_INSTALL_DIR)}
-venv_create ${bashSingleQuote(HERMES_VENV)}
-chown -R ${bashSingleQuote(HERMES_SYSTEM_USER)}:${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(HERMES_INSTALL_DIR)}
-
-${buildOpenWebUiPrepSteps()}
-
-step "install_pkgs_parallel"
-py_install ${bashSingleQuote(HERMES_VENV)} "$RUNTIME_PKG_SPEC" /var/tmp/py-cache-hermes > /var/log/py-hermes.log 2>&1 &
-HPID=$!
-py_install_cpu_torch ${bashSingleQuote(OPEN_WEBUI_VENV)} "$OPEN_WEBUI_PKG_SPEC" /var/tmp/py-cache-owui > /var/log/py-owui.log 2>&1 &
-OPID=$!
-HRC=0; ORC=0
-wait "$HPID" || HRC=$?
-wait "$OPID" || ORC=$?
-echo "--- hermes install log ---"; tail -n 30 /var/log/py-hermes.log 2>/dev/null || true
-echo "--- open-webui install log ---"; tail -n 30 /var/log/py-owui.log 2>/dev/null || true
-if [ "$HRC" -ne 0 ]; then echo "hermes install failed (rc=$HRC)" >&2; exit 1; fi
-if [ "$ORC" -ne 0 ]; then echo "open-webui install failed (rc=$ORC)" >&2; exit 1; fi
-
-step "verify_hermes_cli"
-${bashSingleQuote(HERMES_CLI)} --version
-
-step "verify_open_webui_cli"
-${bashSingleQuote(OPEN_WEBUI_BIN)} --help >/dev/null
-
-step "hermes_config_dir"
-install -d -m 0750 -o ${bashSingleQuote(HERMES_SYSTEM_USER)} -g ${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(`${HERMES_INSTALL_DIR}/${HERMES_CONFIG_SUBDIR}`)}
-install -d -m 0750 -o ${bashSingleQuote(HERMES_SYSTEM_USER)} -g ${bashSingleQuote(HERMES_SYSTEM_USER)} ${bashSingleQuote(HERMES_WORKSPACE_DIR)}
-${browserDeps ? buildBrowserDepsSteps() : ""}`
-}
-
-/**
- * The full Hermes stack (hermes-agent + Open WebUI) as install steps, for the
- * BYOS connect-time prebake.
+ * Hermes as install steps, for the BYOS connect-time prebake. The chat UI
+ * (AgentWebUI Lite) is small and installed by the deploy itself.
  *
  * Exported rather than reimplemented so there is exactly one description of
  * how Hermes gets installed. The prebake runs these before the customer has
  * picked an engine; if they pick OpenClaw instead, the box simply carries an
  * unused Hermes venv.
  */
-export function buildHermesPrebakeSteps(opts: {
-  browserDeps: boolean
-  pin?: string
-  webuiPin?: string
-}): string {
-  return buildHermesPlusWebuiInstallSteps(opts.browserDeps, opts.pin, opts.webuiPin)
+export function buildHermesPrebakeSteps(opts: { browserDeps: boolean; pin?: string }): string {
+  return buildHermesInstallSteps(opts.browserDeps, opts.pin)
 }
-
-const openWebUiSidecar: SidecarSpec = makeOpenWebUiSidecar({
-  envPath: OPEN_WEBUI_ENV_PATH,
-  gatewayServiceName: HERMES_SERVICE_NAME,
-  description: "Open WebUI (Hermes chat UI)",
-})
 
 export const hermesRuntime: RuntimeEngine = {
   id: "hermes",
@@ -334,8 +251,8 @@ model:
 
   /**
    * Caddy reverse-proxy + CORS at the proxy layer (Hermes' YAML has no
-   * allowed-origins field): `/v1/*` to Hermes :8642, everything else to Open
-   * WebUI when the sidecar is on. See renderGatewayCaddyfile.
+   * allowed-origins field): `/v1/*` to Hermes :8642, everything else to the
+   * chat UI when the sidecar is on. See renderGatewayCaddyfile.
    */
   renderCaddyfile(args: RenderCaddyfileArgs): string {
     return renderGatewayCaddyfile(args, { gatewayPort: HERMES_GATEWAY_PORT })
@@ -369,20 +286,15 @@ WantedBy=multi-user.target
   },
 
   renderBootstrap(args: BootstrapRenderArgs): string {
-    // Sidecar enabled → install Hermes and Open WebUI with their pip steps overlapped
-    // (buildHermesPlusWebuiInstallSteps). Legacy API-only Hermes → Hermes alone.
+    // Hermes, then its chat UI (AgentWebUI Lite) when the sidecar is on.
     // Chrome is ~142MB and `agent-browser` needs a global npm install; both
     // are browser-tool-only. Default true preserves the old always-bake
     // behaviour for callers that have no instance to read tools from (the
     // warm pool, where bake time is ours and free).
     const browserDeps = args.browserDeps !== false
-    const installSteps = args.webuiEnabled
-      ? buildHermesPlusWebuiInstallSteps(
-          browserDeps,
-          args.runtimeVersion,
-          args.sidecarVersion,
-        )
-      : buildHermesInstallSteps(browserDeps, args.runtimeVersion)
+    const installSteps =
+      buildHermesInstallSteps(browserDeps, args.runtimeVersion) +
+      (args.webuiEnabled ? buildLiteInstallSteps(hermesRuntime, args) : "")
     return buildBootstrapFraming(
       {
         installDir: HERMES_INSTALL_DIR,
@@ -392,7 +304,7 @@ WantedBy=multi-user.target
         sshPort: args.sshPort,
         manageFirewall: args.manageFirewall,
       },
-      installSteps,
+      `${installSteps}${args.extraInstallSteps ?? ""}`,
     )
   },
 
@@ -435,10 +347,8 @@ WantedBy=multi-user.target
       ? `${run("config set browser.provider local")} || echo "warn: could not set browser.provider" >&2\n`
       : ""
 
-    // What `/v1/models` advertises — the only list the Open WebUI picker sees.
-    // Unset, Hermes lists a single id, `hermes-agent`, which never matches the
-    // sidecar's DEFAULT_MODELS (the slug), so the picker opened with nothing
-    // valid selected. `model_name` advertises the default under its real slug;
+    // What `/v1/models` advertises to API clients. Unset, Hermes lists a
+    // single id, `hermes-agent`, instead of the model's real slug. `model_name` advertises the default under its real slug;
     // each `model_routes` alias maps a slug the UI sends as `model` to that
     // model for that request (any other value falls back to `model.default`).
     // Written with the venv's PyYAML because `config set` splits keys on dots
@@ -517,5 +427,7 @@ echo "=== provision: hermes_init_done ==="
 `
   },
 
-  sidecar: openWebUiSidecar,
 }
+
+// Lite reads the engine's paths, user and ACP command, so it is made from it.
+hermesRuntime.sidecar = makeLiteSidecar(hermesRuntime)

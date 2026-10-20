@@ -14,7 +14,7 @@ At-a-glance status, the agent's **URL** (managed hostname), and quick actions. W
 
 ## Credentials & access
 
-- **Login credentials** — click **reveal** to see the agent's admin email + password (OpenClaw), or the Open WebUI login (Hermes).
+- **Login credentials** — click **reveal** to see the agent's admin email + password (OpenClaw), or the chat page password (Hermes, Claude Code, Codex). Their **Chat** card opens the chat right in the dashboard, already signed in.
 - **Gateway token / API key** — reveal and copy the token bots use to call the agent programmatically (for Hermes, this authenticates the `/v1` API).
 - **Server access** — the SSH command and root password for the underlying server, plus live **server metrics** (CPU, RAM, disk, uptime) with a reachability probe and a **Refresh** button.
 

@@ -14,7 +14,7 @@ This is the first decision in the wizard. Both run a capable AI agent; they diff
 |---|---|---|
 | Best for | The default choice for most agents | When you want a browser chat UI **and** an OpenAI-compatible API for your own bots |
 | Runs on | Every plan, including the smallest server | Needs **≥ 2 GB RAM** — the wizard blocks it on sub-2 GB plans |
-| How you log in | An admin email + password to its own chat UI | An **Open WebUI** browser chat, plus a `/v1` API endpoint for programmatic access |
+| How you log in | An admin email + password to its own chat UI | A chat inside your dashboard (also at its own address), plus a `/v1` API endpoint for programmatic access |
 | Switch later? | Yes — you can change an agent's runtime after deploy (it re-provisions the server) | Yes |
 
 If you're not sure, pick **OpenClaw**. You can switch later.
