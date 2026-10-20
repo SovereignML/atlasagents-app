@@ -2,7 +2,7 @@ import crypto from "node:crypto"
 import { isIP } from "node:net"
 import { lookup } from "node:dns/promises"
 import type { InferSelectModel } from "drizzle-orm"
-import { db, instances, instanceLogs, instanceKnowledge, regions, serverConfigs, providerHealthLogs, sshKeys, eq, and } from "@/db"
+import { db, instances, instanceLogs, instanceKnowledge, regions, serverConfigs, providerHealthLogs, sshKeys, eq, and, ne, isNull } from "@/db"
 import {
   logInstanceEvent,
   transitionInstance,
@@ -47,14 +47,13 @@ import {
   LEGACY_OPEN_WEBUI_SERVICE,
   LITE_MIGRATED,
   buildLiteMigrationScript,
-  liteEmbedSecret,
+  buildOpenWebuiRemovalSteps,
   runsLite,
 } from "@/lib/runtimes/agentwebui-lite"
-import { chatUiFrameAncestors } from "@/lib/chat-ui-origins"
 import { runtimeAcceptsModel } from "@/lib/runtimes/labels"
 import { selectableModelsForRuntime } from "@/lib/allowed-models"
 import { FREE_DEMO_TTL_MS } from "@/configs/plans"
-import { isSafeVersion, resolveForRegistry } from "@/lib/runtime-versions"
+import { isPinned, isSafeVersion, resolveForRegistry } from "@/lib/runtime-versions"
 import {
   APT_OPTS_LITERAL,
   DISABLE_DEAD_APT_SOURCES,
@@ -434,6 +433,28 @@ async function selectableModelSlugs(runtimeId: string | null): Promise<string[]>
 }
 
 /**
+ * The models the chat UI offers: the admin-enabled slugs, which are OpenRouter
+ * slugs, so only when the agent's models go through OpenRouter. Any other
+ * provider (BYOS own key, NVIDIA) keeps its configured model, unswitchable.
+ */
+async function chatUiModelSlugs(runtimeId: string | null, providerToken: string): Promise<string[]> {
+  return providerToken === "openrouter" ? selectableModelSlugs(runtimeId) : []
+}
+
+/** Whether the box runs Lite at the pinned release (else it is moved or upgraded to it). */
+function liteIsCurrent(
+  instance: Pick<Instance, "chatUi" | "sidecarVersion">,
+  sidecar: NonNullable<RuntimeEngine["sidecar"]>,
+): boolean {
+  return runsLite(instance) && instance.sidecarVersion === sidecar.version()
+}
+
+/** The generated sign-in email an agent keeps for life (chat page, OpenClaw admin, terminal). */
+function agentAdminEmail(instance: Pick<Instance, "id" | "openclawAdminEmail">, runtimeId: string): string {
+  return instance.openclawAdminEmail ?? `admin+${instance.id.slice(0, 8)}@${runtimeId}.local`
+}
+
+/**
  * Revoke the per-instance OpenRouter runtime key (if any) and clear the
  * persisted ciphertext. Called from `deleteBot` before the state machine
  * transitions to `deleted`. Failures are logged but do NOT block deletion —
@@ -569,9 +590,10 @@ const PROVISION_INSTALL_START_SSH_TIMEOUT_MS = 300_000
  * gateway port. Runs in a single SSH session to eliminate connect/auth
  * overhead (~6-9s saved).
  *
- * Phase C+D are wrapped in a retry loop (up to MAX_CD_RETRIES). If the
- * service crashes during the health check, the script restarts the service
- * and re-runs health checks before giving up.
+ * Phase C+D are wrapped in a retry loop (up to MAX_CD_RETRIES), for a service
+ * that is slow to answer. A service that crashes or crash-loops fails at once
+ * with its journal: it would crash the same way again, and retrying it is what
+ * turned AgentWebUI Lite 0.1.0's crash at start into minutes of waiting.
  */
 type PhaseService = {
   serviceName: string
@@ -584,6 +606,11 @@ function buildPhaseInstallAndStart(opts: {
   /** Ordered: dependencies first (gateway), public-facing service last (e.g. sidecar). */
   services: PhaseService[]
   caddyB64: string
+  /**
+   * Delete Open WebUI from the box first (see buildOpenWebuiRemovalSteps).
+   * False when another agent on the same BYOS server still uses it.
+   */
+  removeLegacyOpenWebui: boolean
 }): string {
   const writeUnits = opts.services
     .map(
@@ -610,11 +637,16 @@ export SYSTEMD_PAGER=cat
 MAX_CD_RETRIES=2
 
 # --- Phase B: Caddy + systemd ---
-# A box made before AgentWebUI Lite may still run Open WebUI on the chat UI's
-# port. Lite replaces it, so stop and remove its unit first (no-op elsewhere).
-systemctl disable --now ${LEGACY_OPEN_WEBUI_SERVICE} >/dev/null 2>&1 || true
-rm -f /etc/systemd/system/${LEGACY_OPEN_WEBUI_SERVICE}.service
-echo "=== provision: caddyfile_write ==="
+${
+  opts.removeLegacyOpenWebui
+    ? `# A box made before AgentWebUI Lite (or a BYOS server prebaked with it) may
+# still have Open WebUI: its service on the chat UI's port and several GB of
+# packages. No agent here uses it any more, so remove it (no-op elsewhere).
+echo "=== provision: remove_open_webui ==="
+${buildOpenWebuiRemovalSteps()}
+`
+    : ""
+}echo "=== provision: caddyfile_write ==="
 # We replace the Caddyfile wholesale. On a BYOS box that file may be the
 # customer's, serving sites that have nothing to do with us, so keep a
 # timestamped copy before clobbering it — recovering their config should not
@@ -704,12 +736,12 @@ try_start_and_health() {
     if [ "\${CUR_RESTARTS}" -gt "\${INITIAL_RESTARTS}" ]; then
       echo "service is crash-looping (\${CUR_RESTARTS} restarts since start)" >&2
       journalctl -u "\${SERVICE}" --no-pager -n 50
-      return 1
+      return 2
     fi
     if ! systemctl is-active --quiet "\${SERVICE}"; then
       echo "service crashed during port wait" >&2
       journalctl -u "\${SERVICE}" --no-pager -n 50
-      return 1
+      return 2
     fi
     sleep 1
   done
@@ -731,12 +763,12 @@ try_start_and_health() {
     if [ "\${CUR_RESTARTS}" -gt "\${INITIAL_RESTARTS}" ]; then
       echo "service is crash-looping during health check (\${CUR_RESTARTS} restarts)" >&2
       journalctl -u "\${SERVICE}" --no-pager -n 50
-      return 1
+      return 2
     fi
     if ! systemctl is-active --quiet "\${SERVICE}"; then
       echo "service crashed during HTTP health check" >&2
       journalctl -u "\${SERVICE}" --no-pager -n 50
-      return 1
+      return 2
     fi
     sleep 2
   done
@@ -751,11 +783,20 @@ try_start_and_health() {
 
 start_one() {
   local SERVICE="\$1" PORT="\$2" HEALTH_PATH="\$3"
-  local CD_OK=0 ATTEMPT
+  local CD_OK=0 ATTEMPT RC
   for ATTEMPT in \$(seq 1 \${MAX_CD_RETRIES}); do
     echo "=== provision: attempt \${ATTEMPT}/\${MAX_CD_RETRIES} (\${SERVICE}) ==="
-    if try_start_and_health "\${SERVICE}" "\${PORT}" "\${HEALTH_PATH}"; then
+    RC=0
+    try_start_and_health "\${SERVICE}" "\${PORT}" "\${HEALTH_PATH}" || RC=\$?
+    if [ "\${RC}" = "0" ]; then
       CD_OK=1
+      break
+    fi
+    # A process that dies at start (a bad config, a missing dependency) dies
+    # the same way again: report it now instead of spending another attempt.
+    # Only a slow start (a timeout) is worth a second try.
+    if [ "\${RC}" = "2" ]; then
+      echo "=== provision: crashed_at_start (\${SERVICE}), not retrying ==="
       break
     fi
     if [ "\${ATTEMPT}" -lt "\${MAX_CD_RETRIES}" ]; then
@@ -1761,6 +1802,14 @@ async function acquireBootedVm(
     }
     if (claimed.rootPasswordEnc) set.rootPasswordEnc = claimed.rootPasswordEnc
     if (claimed.sshHostFingerprint) set.sshHostFingerprint = claimed.sshHostFingerprint
+    // The pool key names the versions the VM was baked with (bakeIdentity), so
+    // record them as the cold path does: a later reprovision then knows the
+    // box already runs the pinned chat UI and does not reinstall it.
+    const bakedRuntime = runtime.version()
+    if (isPinned(bakedRuntime)) set.runtimeVersion = bakedRuntime
+    if (webuiEnabled && runtime.sidecar && isPinned(runtime.sidecar.version())) {
+      set.sidecarVersion = runtime.sidecar.version()
+    }
     // Inherit the pool VM's pre-assigned generic URL: the Cloudflare record is
     // already created + propagated, so the instance reuses it (no DNS call on the
     // hot path — see provisionVpsBot step 2b, which skips createAgentSubdomain).
@@ -1886,6 +1935,7 @@ async function acquireBootedVm(
 }
 
 async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
+  const startedAt = Date.now()
   const runtime = getRuntime(instance.runtime)
 
   // The Cloudflare origin cert is no longer read here and baked into the
@@ -2053,6 +2103,7 @@ async function provisionVpsBot(instance: Instance): Promise<ProvisionResult> {
       managedSubdomain: managedSubdomainForProvision,
       vmId,
       fromWarmPool,
+      startedAt,
     })
   } catch (err) {
     if (ipAddress) {
@@ -2126,6 +2177,8 @@ async function configureRuntimeOverSsh(
      * The `/v1/models` check still gates it.
      */
     fromWarmPool?: boolean
+    /** When the deploy began (Date.now()), for the time-to-running in the completion log. */
+    startedAt?: number
   },
 ): Promise<ProvisionResult> {
   const { managedSubdomain, vmId } = opts
@@ -2190,10 +2243,7 @@ async function configureRuntimeOverSsh(
   // Every new Hermes row arrives with webuiEnabled=true, so the !webuiEnabled
   // branch only applies to legacy rows.
   const needsAdmin = runtime.caps.nativeAdminLogin || webuiEnabled
-  const adminEmail = needsAdmin
-    ? (instance.openclawAdminEmail ??
-      `admin+${instance.id.slice(0, 8)}@${runtime.id}.local`)
-    : ""
+  const adminEmail = needsAdmin ? agentAdminEmail(instance, runtime.id) : ""
   const adminPassword = needsAdmin
     ? (instance.openclawAdminPasswordEnc
       ? decryptSecret(instance.openclawAdminPasswordEnc)
@@ -2203,9 +2253,6 @@ async function configureRuntimeOverSsh(
   // Per-instance observability ingest token (least-privilege, separate from the
   // gateway token) — injected into the env and persisted encrypted at commit.
   const eventIngestToken = generateGatewayToken()
-  // The chat UI's embed secret, derived from the instance id so the dashboard
-  // can sign /embed links without storing it.
-  const webuiSecretKey = webuiEnabled ? liteEmbedSecret(instance.id) : ""
 
   /* --- 6. Write .env ---------------------------------------------- */
   currentStage = "writing_config"
@@ -2287,14 +2334,13 @@ async function configureRuntimeOverSsh(
       instance,
       gatewayToken,
       gatewayPort: runtime.gatewayPort,
-      secretKey: webuiSecretKey,
       publicUrl,
       enableSignup: true,
+      adminEmail,
       adminPassword,
-      frameAncestors: await chatUiFrameAncestors(instance.teamId),
-      // Same slug the runtime pins as its own default — the chat UI needs it to
-      // pre-select a model for the freshly seeded admin account.
+      // Same slug the runtime pins as its own default: new chats start on it.
       model: llmConfig.model,
+      selectableModels: await chatUiModelSlugs(instance.runtime, llmConfig.providerToken),
     })
     sidecarEnvB64 = Buffer.from(renderEnvFile(sidecarEnv), "utf8").toString("base64")
     sidecarEnvPath = runtime.sidecar.envPath
@@ -2412,9 +2458,24 @@ async function configureRuntimeOverSsh(
   /* Phase B+C+D — install Caddy + systemd, start service, health check (single SSH session) */
   currentStage = "installing_service"
   await setProvisionStage(instance.id, currentStage)
+  // Open WebUI on this box is only ours to delete when no other agent still
+  // uses it. A managed VPS holds one agent; a BYOS server can hold several.
+  const otherOpenWebuiAgent = instance.byosServerId
+    ? await db.query.instances.findFirst({
+        where: and(
+          eq(instances.byosServerId, instance.byosServerId),
+          ne(instances.id, instance.id),
+          ne(instances.status, "deleted"),
+          eq(instances.webuiEnabled, true),
+          isNull(instances.chatUi),
+        ),
+        columns: { id: true },
+      })
+    : undefined
   const installStep = await sshRunScriptLogged(
     target,
     buildPhaseInstallAndStart({
+      removeLegacyOpenWebui: !otherOpenWebuiAgent,
       services: [
         {
           serviceName: runtime.serviceName,
@@ -2446,6 +2507,8 @@ async function configureRuntimeOverSsh(
     let failedPhase = "B+C+D"
     if (stdout.includes("caddy validate failed") || !stdout.includes("install_service_done")) {
       failedPhase = "B (caddy/systemd)"
+    } else if (stdout.includes("crashed_at_start")) {
+      failedPhase = "C+D (a service crashed at start; see its journal above)"
     } else if (stdout.includes("all_retries_exhausted")) {
       failedPhase = "C+D (service start/health — all retries exhausted)"
     } else if (!stdout.includes("start_service_done")) {
@@ -2592,9 +2655,13 @@ async function configureRuntimeOverSsh(
     instanceId: instance.id,
     stage: "complete",
     result: "ok",
-    message: `Deployment complete. ${runtime.displayName} gateway at ${ipAddress}:${runtime.gatewayPort}${
+    // The time is what the under-a-minute target is measured by: a warm-pool
+    // claim should land well inside it, a cold install cannot.
+    message: `Deployment complete${
+      opts.startedAt ? ` in ${Math.round((Date.now() - opts.startedAt) / 1000)}s` : ""
+    } (${fromWarmPool ? "warm pool" : "cold install"}). ${runtime.displayName} is at ${publicUrl ?? ipAddress}${
       instance.domain ? ` (domain ${instance.domain})` : ""
-    }. Direct access: http://${ipAddress}:${runtime.gatewayPort}`,
+    }.`,
   })
 
   // Warm-pool fast path: the gateway is healthy and committed; set up the
@@ -3725,29 +3792,46 @@ async function writeKnowledgeFiles(
  * Move an agent made before AgentWebUI Lite from Open WebUI to Lite, in place:
  * install Lite, then remove Open WebUI (its chats go with it) and start Lite on
  * the same port. Lite is installed before Open WebUI is touched, so a failure
- * leaves the old chat UI working and a later reprovision tries again. Returns
- * whether the box now runs Lite. Never throws.
+ * leaves the old chat UI working and a later reprovision tries again.
+ *
+ * The same script brings a box that already runs Lite up to the pinned
+ * release (its env rewritten whole), which is how boxes stuck on Lite 0.1.0,
+ * which exits at start, are repaired. Returns whether the box now runs the
+ * pinned Lite. Never throws.
  */
 export async function migrateChatUiToLite(
   instance: Instance,
   runtime: RuntimeEngine,
   target: SshTarget,
   model: string,
+  providerToken: string,
 ): Promise<boolean> {
   const sidecar = runtime.sidecar
-  if (!sidecar || runsLite(instance)) return runsLite(instance)
+  if (!sidecar) return false
+  if (liteIsCurrent(instance, sidecar)) return true
+  const upgrading = runsLite(instance)
   try {
+    // Lite signs in with the agent's generated email and password, which an
+    // agent made with Open WebUI already has; mint them for one that doesn't.
+    const adminEmail = agentAdminEmail(instance, runtime.id)
+    const adminPassword = instance.openclawAdminPasswordEnc
+      ? decryptSecret(instance.openclawAdminPasswordEnc)
+      : generateAdminPassword()
+    if (!instance.openclawAdminPasswordEnc || !instance.openclawAdminEmail) {
+      await db
+        .update(instances)
+        .set({ openclawAdminEmail: adminEmail, openclawAdminPasswordEnc: encryptSecret(adminPassword) })
+        .where(eq(instances.id, instance.id))
+    }
     const env = sidecar.renderEnv({
       instance,
       gatewayToken: "",
       gatewayPort: runtime.gatewayPort,
-      secretKey: liteEmbedSecret(instance.id),
       enableSignup: false,
-      adminPassword: instance.openclawAdminPasswordEnc
-        ? decryptSecret(instance.openclawAdminPasswordEnc)
-        : undefined,
-      frameAncestors: await chatUiFrameAncestors(instance.teamId),
+      adminEmail,
+      adminPassword,
       model,
+      selectableModels: await chatUiModelSlugs(instance.runtime, providerToken),
     })
     const step = await sshRunScriptLogged(
       target,
@@ -3755,7 +3839,7 @@ export async function migrateChatUiToLite(
         envB64: Buffer.from(renderEnvFile(env), "utf8").toString("base64"),
       }),
       "writing_config",
-      "migrate:chat ui (Open WebUI → AgentWebUI Lite)",
+      upgrading ? "upgrade:chat ui (AgentWebUI Lite)" : "migrate:chat ui (Open WebUI → AgentWebUI Lite)",
       { timeoutMs: 600_000 },
     )
     await logSshStep(instance.id, step)
@@ -3770,8 +3854,12 @@ export async function migrateChatUiToLite(
       instanceId: instance.id,
       level: ok ? "info" : "warn",
       message: ok
-        ? "Chat UI moved to AgentWebUI Lite; Open WebUI and its chat history were removed."
-        : `Could not move the chat UI to AgentWebUI Lite (exit ${step.exitCode}); Open WebUI keeps running, and the next reprovision tries again.`,
+        ? upgrading
+          ? `Chat UI updated to AgentWebUI Lite ${sidecar.version()}.`
+          : "Chat UI moved to AgentWebUI Lite; Open WebUI and its chat history were removed."
+        : upgrading
+          ? `Could not update the chat UI to AgentWebUI Lite ${sidecar.version()} (exit ${step.exitCode}); the next reprovision tries again.`
+          : `Could not move the chat UI to AgentWebUI Lite (exit ${step.exitCode}); Open WebUI keeps running, and the next reprovision tries again.`,
     })
     return ok
   } catch (err) {
@@ -3835,10 +3923,7 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
     // email/password it minted at first provision. The CLI engines need the
     // chat UI's login in the env too: it is what guards their /terminal.
     const hasAdminLogin = runtime.caps.nativeAdminLogin || runtime.caps.hasTerminal
-    const adminEmail = hasAdminLogin
-      ? (instance.openclawAdminEmail ??
-        `admin+${instance.id.slice(0, 8)}@${runtime.id}.local`)
-      : ""
+    const adminEmail = hasAdminLogin ? agentAdminEmail(instance, runtime.id) : ""
     const adminPassword = hasAdminLogin
       ? (instance.openclawAdminPasswordEnc
         ? decryptSecret(instance.openclawAdminPasswordEnc)
@@ -4009,7 +4094,8 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
     await startRuntimeTerminal(instance.id, target, runtime, "writing_config")
 
     // Keep the chat UI in step with the model. An agent made before AgentWebUI
-    // Lite is moved to it here first (Open WebUI and its chats are removed).
+    // Lite is moved to it here first (Open WebUI and its chats are removed),
+    // and a box on an older Lite release is brought up to the pinned one.
     //
     // reprovisionBotEnv is driven by eight routes (tools, skills, instructions,
     // model, agent-type, token, byos-key, backup-restore), and only some change the
@@ -4019,23 +4105,29 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
     //
     // Best-effort throughout: a stale model is a worse experience, not a broken
     // agent, so nothing here fails the surrounding reprovision.
-    if (webuiEnabled && runtime.sidecar && !runsLite(instance)) {
-      await migrateChatUiToLite(instance, runtime, target, llmConfig.model)
-    } else if (webuiEnabled && runtime.sidecar) {
+    if (webuiEnabled && runtime.sidecar && !liteIsCurrent(instance, runtime.sidecar)) {
+      await migrateChatUiToLite(instance, runtime, target, llmConfig.model, llmConfig.providerToken)
+    } else if (webuiEnabled && runtime.sidecar && instance.openclawAdminPasswordEnc) {
       // AgentWebUI Lite's agent processes inherit its environment and read the
-      // engine's config when they start, so a new model only reaches chats once
-      // Lite restarts. Record the pin (and the framing origins, which follow the
-      // team's white-label domain) and restart only when either moved.
+      // engine's config when they start, so a new model (or a change to the
+      // models an admin enabled) only reaches chats once Lite restarts. Rewrite
+      // every key Lite's env is made of and restart only when one moved.
       const sidecar = runtime.sidecar
-      const ancestors = await chatUiFrameAncestors(instance.teamId)
+      const liteEnv = sidecar.renderEnv({
+        instance,
+        gatewayToken: "",
+        gatewayPort: runtime.gatewayPort,
+        enableSignup: false,
+        adminEmail: agentAdminEmail(instance, runtime.id),
+        adminPassword: decryptSecret(instance.openclawAdminPasswordEnc),
+        model: llmConfig.model,
+        selectableModels: await chatUiModelSlugs(instance.runtime, llmConfig.providerToken),
+      })
       const liteStep = await sshRunScriptLogged(
         target,
         buildEnvKeyUpsertScript({
           envPath: sidecar.envPath,
-          entries: [
-            { key: "ATLAS_PINNED_MODEL", value: llmConfig.model.trim() || "default" },
-            ...(ancestors.length > 0 ? [{ key: "FRAME_ANCESTORS", value: ancestors.join(" ") }] : []),
-          ],
+          entries: Object.entries({ ATLAS_PINNED_MODEL: "default", ...liteEnv }).map(([key, value]) => ({ key, value })),
         }),
         "writing_config",
         "reprovision:chat ui model pin",

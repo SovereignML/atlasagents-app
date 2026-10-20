@@ -70,6 +70,8 @@ const RUNTIME_HINTS: Record<Runtime, string> = {
   hermes: "Nous Research Hermes (Python)",
   "claude-code": "Anthropic's coding agent, with a browser terminal",
   codex: "OpenAI's coding agent, with a browser terminal",
+  opencode: "The open-source coding agent, any model, with a browser terminal",
+  pi: "A minimal coding agent, any model, with a browser terminal",
 }
 
 const RUNTIME_OPTIONS: { value: Runtime; label: string; hint: string; enabled: boolean }[] =

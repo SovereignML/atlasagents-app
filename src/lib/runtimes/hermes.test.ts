@@ -118,27 +118,33 @@ describe("hermesRuntime.renderCaddyfile()", () => {
   })
 })
 
-/** The chat UI (AgentWebUI Lite) drives Hermes over ACP, with the model locked to the dashboard's. */
+/** The chat UI (AgentWebUI Lite) drives Hermes over ACP, offering the models an admin enabled. */
 describe("hermesRuntime.sidecar.renderEnv()", () => {
   const baseArgs = {
     instance: { id: "inst_1", domain: null, name: "Helper" } as never,
     gatewayToken: "gw-token",
     gatewayPort: HERMES_GATEWAY_PORT,
-    secretKey: "sekrit",
     publicUrl: null,
     enableSignup: true,
+    adminEmail: "admin+inst_1@hermes.local",
     adminPassword: "pw",
     model: "deepseek/deepseek-v4-pro",
   }
 
-  it("starts `hermes acp` in the agent's workspace, with the model and folder locked", () => {
+  it("starts `hermes acp` in the agent's workspace, with the folder locked, behind the agent's login", () => {
     const env = hermesRuntime.sidecar!.renderEnv(baseArgs)
     expect(env.AGENT_HERMES_COMMAND).toBe("/opt/hermes/venv/bin/hermes acp")
     expect(env.WORKSPACE_DIR).toBe(hermesRuntime.paths.workspaceDir)
-    expect(env.LOCK_MODEL).toBe("true")
     expect(env.LOCK_FOLDER).toBe("true")
+    expect(env.LOGIN_EMAIL).toBe("admin+inst_1@hermes.local")
     expect(env.PASSWORD).toBe("pw")
-    expect(env.EMBED_SECRET).toBe("sekrit")
+  })
+
+  it("offers the enabled models by their openrouter: ids, and locks the model when there are none", () => {
+    const env = hermesRuntime.sidecar!.renderEnv({ ...baseArgs, selectableModels: ["z-ai/glm-5.1"] })
+    expect(env.LOCK_MODEL).toBe("false")
+    expect(env.AGENT_HERMES_MODELS).toBe("openrouter:deepseek/deepseek-v4-pro,openrouter:z-ai/glm-5.1")
+    expect(hermesRuntime.sidecar!.renderEnv(baseArgs).LOCK_MODEL).toBe("true")
   })
 
   it("records the pinned model, trimmed, so a reprovision can tell it moved", () => {

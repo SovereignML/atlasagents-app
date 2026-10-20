@@ -305,7 +305,8 @@ Pre-booted, pre-URL'd VMs kept ready so a deploy can **claim** one and skip cold
 | Variable | Required? | What it does | How to obtain / generate |
 |----------|-----------|--------------|--------------------------|
 | `POOL_ENABLED` | Optional | Set `false` to disable the pool entirely; blank = auto-on when creds present. | Leave blank, or `false`. |
-| `POOL_SIZE_HERMES` | Optional | Target ready Hermes VMs. | Default `2`. |
+| `POOL_SIZE_UNIVERSAL` | Optional | Target ready universal VMs: every chat-UI engine (Hermes, Claude Code, Codex, OpenCode, Pi) and AgentWebUI Lite installed, so a deploy of any of them claims one. `0` disables it. | Default `2`. `POOL_SIZE_HERMES`, its old name, is still read when this is unset. |
+| `ATLAS_OPENCODE_VERSION` / `ATLAS_PI_VERSION` / `ATLAS_PI_ACP_VERSION` | Optional | Override the OpenCode / Pi / `pi-acp` pins (a version, or `latest`). | Defaults in `opencode.ts` / `pi.ts`. |
 | `POOL_SIZE_OPENCLAW` | Optional | Target ready OpenClaw VMs. `0` disables the OpenClaw pool. | Default `1`. |
 | `POOL_REFILL_INTERVAL_MS` | Optional | In-process refill cadence (ms). | Default `60000`. |
 | `POOL_PROVIDER_SLUG` | Optional | Provider the pool warms — **must match where deploys route** or claims miss. | Align to your primary provider (e.g. `digitalocean`). |
@@ -335,7 +336,7 @@ Pre-booted, pre-URL'd VMs kept ready so a deploy can **claim** one and skip cold
 | Variable | Required? | What it does | Notes |
 |----------|-----------|--------------|-------|
 | `NODE_ENV` | Optional | `development` / `production`. Gates the billing boot check and dev auto-grant. | Usually set by the framework/process manager. |
-| `KEEP_FAILED_VMS` | Optional (debug) | Keep VMs that fail provisioning so you can SSH in and inspect. | Remove/`false` for normal operation (failed VMs are deleted to avoid cost). |
+| `KEEP_FAILED_VMS` | Optional (debug) | Keep VMs that fail provisioning so you can SSH in and inspect. | Remove/`false` for normal operation (failed VMs are deleted to avoid cost). **Never leave it on in production:** a deploy whose start or health check failed is then marked `running`, so the customer sees a healthy agent that does not work (seen 2026-10-20). |
 | `SKIP_OPENCLAW_ONBOARD` | Optional (dev) | Skip OpenClaw onboarding during db seed. | Dev only. |
 | `BYOS_HOST_ALLOWLIST` | Optional | Comma-separated hosts allowed past the SSRF guard for BYOS SSH targets. | Only if BYOS targets are blocked by the guard. |
 | `ADMIN_EMAIL` | Optional | First admin account email (seed + `make-admin`). | Default `admin@sovereignml.com`. |

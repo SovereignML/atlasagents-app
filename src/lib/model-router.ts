@@ -275,6 +275,10 @@ const RUNTIME_MODEL_LADDERS: Partial<Record<RuntimeId, (tier: BudgetTier) => str
   hermes: hermesModel,
   "claude-code": claudeCodeModel,
   codex: codexModel,
+  // OpenCode and Pi drive any OpenRouter model; Hermes' ladder is the same
+  // need (paid, tool-capable, long context), without HERMES_MODEL's override.
+  opencode: (tier) => HERMES_MODELS[tier],
+  pi: (tier) => HERMES_MODELS[tier],
 }
 
 /**

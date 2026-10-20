@@ -1,6 +1,6 @@
-# Agent Runtimes — OpenClaw, Hermes, Claude Code & Codex
+# Agent Runtimes — OpenClaw, Hermes, Claude Code, Codex, OpenCode & Pi
 
-> The **runtime** is the agent engine installed on the box. Atlas Agents ships four: **OpenClaw** (the default), **Hermes** (Nous Research Hermes, Python, with a chat page, AgentWebUI Lite), and — in beta — **Claude Code** and **Codex**, the Anthropic and OpenAI coding agents, each with the same chat UI plus a browser terminal. The runtime is chosen in the deploy wizard and stored per instance.
+> The **runtime** is the agent engine installed on the box. Atlas Agents ships six: **OpenClaw** (the default), **Hermes** (Nous Research Hermes, Python, with a chat page, AgentWebUI Lite), and — in beta — **Claude Code**, **Codex**, **OpenCode** and **Pi**, coding agents each with the same chat UI plus a browser terminal. The runtime is chosen in the deploy wizard and stored per instance.
 
 For connecting bots/scripts to a Hermes instance's API, see the companion doc **[HERMES-API-INTEGRATION.md](HERMES-API-INTEGRATION.md)**. Related: [BILLING.md](BILLING.md) (what the model calls cost), [BYOS.md](BYOS.md).
 
@@ -16,8 +16,10 @@ In the deploy wizard's **Interface** step you pick an engine:
 | **Hermes** | Nous Research Hermes (Python) with a chat page (**AgentWebUI Lite**), also shown inside the dashboard. | Requires a **≥2 GB RAM** plan — the wizard blocks it on `shared-1g` and reverts to OpenClaw if you downsize. |
 | **Claude Code** *(beta)* | Anthropic's coding agent, with the same chat page and a browser terminal running the `claude` TUI. | ≥2 GB RAM, paid plans only, Claude models only. Hidden unless `CLI_RUNTIMES_ENABLED=true` (admins always see it). |
 | **Codex** *(beta)* | OpenAI's coding agent, with the same chat page and a browser terminal running the `codex` TUI. | ≥2 GB RAM, paid plans only, OpenAI models only. Same flag. |
+| **OpenCode** *(beta)* | The open-source coding agent (`opencode-ai`), with the same chat page and a browser terminal running the `opencode` TUI. | ≥2 GB RAM, paid plans only, any OpenRouter model. Same flag. |
+| **Pi** *(beta)* | Earendil's minimal coding agent (`@earendil-works/pi-coding-agent`), with the same chat page and a browser terminal running the `pi` TUI. | ≥2 GB RAM, paid plans only, any OpenRouter model. Same flag. Its ACP adapter is a community one (`pi-acp`). |
 
-A Hermes, Claude Code or Codex instance exposes **two interfaces behind one public URL**: a browser chat UI at `/`, and an OpenAI-compatible API at `/v1/*` for bots. Claude Code and Codex add a **browser terminal at `/terminal/`**, behind the same login as the chat UI. OpenClaw exposes its own admin-login chat UI.
+A Hermes, Claude Code, Codex, OpenCode or Pi instance exposes **two interfaces behind one public URL**: a browser chat UI at `/`, and an OpenAI-compatible API at `/v1/*` for bots. The coding agents add a **browser terminal at `/terminal/`**, behind the same login as the chat UI. OpenClaw exposes its own admin-login chat UI.
 
 An agent's runtime is fixed at deploy time. (Earlier revisions of this doc said it could be switched from the agent's settings; `PATCH /api/instances/[id]/agent-type` keeps the existing runtime, so it cannot. Deploy a new agent instead.)
 
@@ -25,7 +27,7 @@ An agent's runtime is fixed at deploy time. (Earlier revisions of this doc said 
 
 ## How it works (for developers)
 
-The `runtime` column on `instances` is one of `RUNTIME_IDS`: `"openclaw" | "hermes" | "claude-code" | "codex"`. A runtime registry ([`src/lib/runtimes/index.ts`](../src/lib/runtimes/index.ts)) maps each id to a `RuntimeEngine` implementation; `getRuntime()` falls back to the default (`DEFAULT_RUNTIME_ID = "openclaw"`) for legacy rows that predate the column. Each engine implements the same surface — `buildEnv()`, `renderConfig()`, `renderCaddyfile()`, `renderInitScript()`, plus `paths`/`serviceName` — so the provisioner is runtime-agnostic.
+The `runtime` column on `instances` is one of `RUNTIME_IDS`: `"openclaw" | "hermes" | "claude-code" | "codex" | "opencode" | "pi"`. A runtime registry ([`src/lib/runtimes/index.ts`](../src/lib/runtimes/index.ts)) maps each id to a `RuntimeEngine` implementation; `getRuntime()` falls back to the default (`DEFAULT_RUNTIME_ID = "openclaw"`) for legacy rows that predate the column. Each engine implements the same surface — `buildEnv()`, `renderConfig()`, `renderCaddyfile()`, `renderInitScript()`, plus `paths`/`serviceName` — so the provisioner is runtime-agnostic.
 
 ### Capabilities, not ids
 
@@ -62,14 +64,14 @@ Branch on a cap, not on `runtime === "hermes"`. The only remaining id checks are
 - **Chat UI sidecar** (AgentWebUI Lite, service `agentwebui-lite` on `127.0.0.1:8080`) chats with Hermes over ACP (`hermes acp`), which is why Hermes is installed as `hermes-agent[acp]`. See *AgentWebUI Lite* below. Caddy **dual-routes** on the public host: `/v1/*` → Hermes gateway (bearer-token, CORS-enabled), everything else → the chat UI. The `webuiEnabled` column flags this; legacy `webuiEnabled=false` instances serve Hermes directly at every path (single-upstream).
 - The version is pinned in code (`HERMES_PINNED_VERSION`) and env-overridable (`HERMES_VERSION`). See *Version pinning* below.
 
-### Claude Code & Codex ([`cli-runtime.ts`](../src/lib/runtimes/cli-runtime.ts), [`claude-code.ts`](../src/lib/runtimes/claude-code.ts), [`codex.ts`](../src/lib/runtimes/codex.ts))
+### Claude Code, Codex, OpenCode & Pi ([`cli-runtime.ts`](../src/lib/runtimes/cli-runtime.ts), [`claude-code.ts`](../src/lib/runtimes/claude-code.ts), [`codex.ts`](../src/lib/runtimes/codex.ts), [`opencode.ts`](../src/lib/runtimes/opencode.ts), [`pi.ts`](../src/lib/runtimes/pi.ts))
 
-Both are CLIs with no server of their own, so one factory (`createCliRuntime`) gives each box three systemd units:
+All four are CLIs with no server of their own, so one factory (`createCliRuntime`) gives each box three systemd units:
 
 | Unit | What | Port |
 |------|------|------|
-| `<id>-gateway` | The **Atlas CLI gateway** ([`cli-gateway.ts`](../src/lib/runtimes/cli-gateway.ts)): a dependency-free Node server exposing `/v1/chat/completions` + `/v1/models` behind the gateway token, driving the CLI through its SDK (`@anthropic-ai/claude-agent-sdk` `query()`, `@openai/codex-sdk` threads). | Claude Code 8650, Codex 8651 |
-| `agentwebui-lite` | The chat UI Hermes uses ([`agentwebui-lite.ts`](../src/lib/runtimes/agentwebui-lite.ts)). It drives the CLI over ACP through the engine's ACP adapter (`claude-agent-acp`, `codex-acp`), not through the gateway, so chats get real sessions, permission prompts, tool calls and diffs. | 8080 |
+| `<id>-gateway` | The **Atlas CLI gateway** ([`cli-gateway.ts`](../src/lib/runtimes/cli-gateway.ts)): a dependency-free Node server exposing `/v1/chat/completions` + `/v1/models` behind the gateway token, driving the CLI through its SDK (`@anthropic-ai/claude-agent-sdk` `query()`, `@openai/codex-sdk` threads) or, for OpenCode and Pi, over ACP (`opencode acp`; Pi through `pi-acp`, installed next to the gateway), one agent process per turn. | Claude Code 8650, Codex 8651, OpenCode 8652, Pi 8653 |
+| `agentwebui-lite` | The chat UI Hermes uses ([`agentwebui-lite.ts`](../src/lib/runtimes/agentwebui-lite.ts)). It drives the CLI over ACP (`claude-agent-acp`, `codex-acp`, `opencode acp`, `pi-acp`), not through the gateway, so chats get real sessions, permission prompts, tool calls and diffs. | 8080 |
 | `<id>-terminal` | `ttyd` + `tmux` serving the CLI's own TUI at `/terminal/`, one shared session reattached on every visit. Started best-effort after the gateway is healthy; a box without ttyd still deploys. | 7681 |
 
 - **Layout** (HOME = `/opt/claude-code` or `/opt/codex`): `gateway/` is root-owned (gateway code, terminal launcher, the pinned SDK); `.atlas/` holds `.env`, `model.env`, `workspace/` and `sessions.json`. The init script rewrites `gateway.mjs` on every (re)provision, so gateway fixes ship by reprovisioning. Claude Code's workspace `CLAUDE.md` imports the shared `AGENTS.md`/`IDENTITY.md`; Codex reads `AGENTS.md` natively.
@@ -79,7 +81,9 @@ Both are CLIs with no server of their own, so one factory (`createCliRuntime`) g
 - **Models** go through OpenRouter on the per-instance key, so metering is unchanged: Claude Code via the Anthropic-compatible endpoint (`ANTHROPIC_BASE_URL=https://openrouter.ai/api`, `ANTHROPIC_AUTH_TOKEN`), Codex as a custom `model_providers.openrouter` in `$CODEX_HOME/config.toml` (`CODEX_WIRE_API` flips `responses` ↔ `chat`). Tier ladders: Claude Code Haiku / Sonnet / Opus 5.5; Codex gpt-5.1-codex-mini / gpt-5.3-codex / gpt-5.5 (`CLAUDE_CODE_MODELS`, `CODEX_MODELS` in [`model-router.ts`](../src/lib/model-router.ts)). Mid and high tiers cost several times the Hermes ladder — check plan margins before turning the flag on. **The production allowlist lives in the DB**: add the six slugs in `/admin/models` (the code constant only seeds an empty table).
 - **Fatal provider errors fail fast.** Both harnesses retry 401/402/403 with backoff for minutes; the gateway stops at the first one and tells the user why (a rejected key, or exhausted credits).
 - **Known noise.** Codex logs "Model metadata … not found" for OpenRouter slugs (it ships no metadata for them) and Claude Code logs `unrecognized_model`; both still send the request, and the gateway keeps these out of the reply.
-- **Not yet:** warm pool (no pool targets, so claims fall back to a cold provision), BYOS prebake, the Free plan, catalog tools (browser etc. are unsupported on these engines — they bring their own built-in tools), BYO non-OpenRouter keys.
+- **OpenCode and Pi** use any OpenRouter model on the Hermes ladder by default. OpenCode's `opencode.json` enables only the `openrouter` provider; Pi's `settings.json` sets `quietStartup` (else `pi-acp` sends Pi's version banner as reply text) and the gateway env sets `npm_config_offline` (else `pi-acp` adds an "update available" line). With an invalid key `pi-acp` ends the turn with an empty reply rather than an error.
+- **Warm pool:** served by the universal image (see *Warm pool* below).
+- **Not yet:** BYOS prebake, the Free plan, catalog tools (browser etc. are unsupported on these engines — they bring their own built-in tools), BYO non-OpenRouter keys.
 
 ### Version pinning ([`src/lib/runtime-versions.ts`](../src/lib/runtime-versions.ts))
 
@@ -161,12 +165,30 @@ The chat UI of every Hermes, Claude Code and Codex agent. It replaced Open WebUI
 
 - **What runs.** One small Python app (`aiohttp` only) in `/opt/agentwebui-lite`, as the **runtime's own user** with the runtime's env files in its environment (the agents it starts inherit them), on loopback `:8080`. It talks to the engine over ACP: `hermes acp`, or the pinned ACP adapter for Claude Code / Codex (installed under `/opt/agentwebui-lite/acp`). OpenClaw keeps its own UI.
 - **Its own settings stay in its `.env`** (`agentwebui-lite.env`, read through `AWL_ENV_FILE`), never in the unit's environment, so the agent processes never see Lite's password or embed secret. Lite lets the environment win over its `.env`, so a runtime env file must not set a key Lite reads (`LITE_SETTING_KEYS`, enforced by a test).
-- **No accounts.** Lite's password is the agent's admin password, and its `EMBED_SECRET` is derived per agent from `INSTANCE_ENCRYPTION_KEY` (`liteEmbedSecret`). Nothing is seeded after boot, and nothing is prewarmed: the warm pool and the BYOS prebake only warm the engine.
-- **Inside the dashboard.** The agent page's Chat card calls `POST /api/instances/[id]/chat-embed` (Operator+), which returns a one-time, one-minute `/embed` link; Lite signs the browser in with it and lets only the dashboard (and the team's white-label domain) frame it (`FRAME_ANCESTORS`). Needs the agent on HTTPS.
-- **The dashboard owns the model.** Lite runs with `LOCK_MODEL` and `LOCK_FOLDER`: no model menu, and chats always work in the agent's workspace. A model change rewrites `ATLAS_PINNED_MODEL` in Lite's env and restarts Lite, because the agent processes it starts inherit its environment.
+- **Sign-in.** Lite asks for the agent's generated admin email and password (`LOGIN_EMAIL` + `PASSWORD`, Lite 0.2.0+), the same pair Open WebUI's admin had; the dashboard shows them under **Access → Chat Login**. Customers open the chat at the agent's own URL (or its IP). There is no embedded chat in the dashboard any more, and so no embed secret or framing origins. Nothing is seeded after boot.
+- **The models an admin enabled.** `AGENT_<ID>_MODELS` (Lite 0.2.0+) lists the admin-enabled models for the engine (`/admin/models`, `selectableModelsForRuntime`), the default first; Lite's model menu offers exactly those, and the Controls tab no longer has a Model card. Only for the `openrouter` provider: any other (BYOS own key, NVIDIA) keeps its configured model, with `LOCK_MODEL` on. Each engine's ACP server must accept the ids, which were checked against each pinned release:
+
+  | Engine | Id Lite sends | What makes the engine accept it |
+  |---|---|---|
+  | Hermes | `openrouter:<slug>` | A pinned patch to `acp_adapter/server.py` ([`hermes-acp-patch.ts`](../src/lib/runtimes/hermes-acp-patch.ts)): Hermes 0.19.0 re-detects the provider on a switch and moves slugs that another provider's static catalog lists (e.g. `anthropic/claude-sonnet-4.6` → GMI). The patch skips that when the id names the current provider. Idempotent; warns (does not fail) when a Hermes release no longer has the line. |
+  | Claude Code | `<slug>` | `availableModels` in `~/.claude/settings.json` (else the adapter accepts only its aliases and `ANTHROPIC_MODEL`). |
+  | Codex | `<slug>` | `model_catalog_json` → `$CODEX_HOME/atlas-models.json`, built at provision from the installed Codex's own catalog (`codex debug models`), one entry per slug (else only OpenAI's presets). |
+  | OpenCode | `openrouter/<slug>` | `provider.openrouter.whitelist` in `opencode.json`. |
+  | Pi | `openrouter/<slug>` | Nothing: Pi accepts any OpenRouter model, and Lite's list trims its menu. |
+
+  A change in `/admin/models` reaches a box on its next reprovision, which rewrites Lite's whole env and restarts Lite when a key moved.
+- **No `AGENT_IDLE_MINUTES`.** Lite 0.1.0 read it as an agent named "idle" and exited at start, which failed every deploy; 0.2.0 fixes the parser, and we still leave Lite's default (10 minutes).
 - **Install source.** PyPI: `agentwebui-lite==LITE_PINNED_VERSION`, published from `SovereignML/AgentWebUI-Lite` when a `v*` tag is pushed (trusted publishing, no stored token). A prebuilt wheel, so no clone and no `git` on the box. The package is public on PyPI but proprietary (its LICENSE grants no use). `AGENTWEBUI_LITE_PIP_SPEC` overrides the requirement.
 
-**Agents made before Lite** (`Instance.chatUi` NULL) still run Open WebUI. Their next reprovision moves them (`migrateChatUiToLite`): it installs Lite, then stops and deletes Open WebUI (unit, venv, env, user, **and its chat history**) and starts Lite on the same port. Lite is installed before Open WebUI is touched, so a failed install leaves the old chat working and the next reprovision retries. To move them all at once: `npm run chat-ui:migrate` (dry run), then `npm run chat-ui:migrate -- --apply`. A full re-provision of such a box also removes Open WebUI's unit before starting Lite.
+**Boxes on an older Lite** (`Instance.sidecarVersion` is not the pin; every box on 0.1.0 is crash-looping) are reinstalled by the same path on their next reprovision, with a fresh env, and `chat-ui:migrate` selects them too. A warm-pool claim records the baked versions, so a claimed agent is not reinstalled.
+
+**Agents made before Lite** (`Instance.chatUi` NULL) still run Open WebUI. Their next reprovision moves them (`migrateChatUiToLite`): it installs Lite, then stops and deletes Open WebUI (unit, venv, env, user, **and its chat history**) and starts Lite on the same port. Lite is installed before Open WebUI is touched, so a failed install leaves the old chat working and the next reprovision retries. To move them all at once: `npm run chat-ui:migrate` (dry run), then `npm run chat-ui:migrate -- --apply`. Every provision also removes Open WebUI from its box (`buildOpenWebuiRemovalSteps`: the unit, `/opt/open-webui`, its env file and user), which covers a re-provisioned old box and a BYOS server prebaked with it, unless another agent on the same BYOS server still uses Open WebUI.
+
+### Warm pool: the universal image ([`universal.ts`](../src/lib/runtimes/universal.ts))
+
+Every engine the chat UI fronts shares one warm pool. A **universal** pool VM bakes Hermes, Claude Code, Codex, OpenCode and Pi, each at its pin, plus Lite and every engine's ACP side, inside one bootstrap framing (`buildPrereqScript`, every engine's system account; about 30 KB of user-data, under DigitalOcean's 64 KB cap). Its finalize runs only Hermes' `setup --quick` / `doctor --fix` warm-up and enables no unit. A deploy of any of the five (with its chat UI) claims a universal VM (`poolRuntimeFor` in [`warm-pool-key.ts`](../src/lib/warm-pool-key.ts)); the claim writes and starts only the chosen engine's env, config and units (Phase A / B), so the other engines stay installed with no units, env or keys. The pool key folds in every engine's version and Lite's, so a bump to any pin retires the pool. OpenClaw keeps its own pool. Sizes: `POOL_SIZE_UNIVERSAL` (default 2; `POOL_SIZE_HERMES` still read), `POOL_SIZE_OPENCLAW`.
+
+The deploy's completion log says how long it took and whether it came from the pool (`Deployment complete in 38s (warm pool)`); a warm claim is what keeps a deploy under a minute, and a cold install cannot. The start phase fails a service that crashes at start at once, with its journal, instead of retrying it.
 
 ### Credentials & switching
 

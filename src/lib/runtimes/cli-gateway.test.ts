@@ -27,6 +27,8 @@ type Gateway = {
   sseChunk(id: string, model: string, delta: object, finish?: string): string
   fatalProviderError(status: unknown): string | null
   codexStreamError(message: unknown): string | null
+  acpAllowOption(options: unknown): { outcome: { outcome: string; optionId?: string } }
+  acpUpdateEvent(update: unknown): Ev | null
   createSessionStore(path: string, max: number): Store
   completeTurn(args: {
     messages: Msg[]
@@ -341,5 +343,33 @@ describe("completeTurn()", () => {
         emit: () => {},
       }),
     ).rejects.toThrow("no user message")
+  })
+})
+
+describe("ACP engines (OpenCode, Pi)", () => {
+  it("answers a permission request with the most lasting allow, else cancels", () => {
+    const opts = [
+      { optionId: "once", kind: "allow_once" },
+      { optionId: "always", kind: "allow_always" },
+      { optionId: "no", kind: "reject_once" },
+    ]
+    expect(gw.acpAllowOption(opts)).toEqual({ outcome: { outcome: "selected", optionId: "always" } })
+    expect(gw.acpAllowOption(opts.slice(0, 1))).toEqual({ outcome: { outcome: "selected", optionId: "once" } })
+    expect(gw.acpAllowOption([{ optionId: "no", kind: "reject_once" }])).toEqual({ outcome: { outcome: "cancelled" } })
+    expect(gw.acpAllowOption(undefined)).toEqual({ outcome: { outcome: "cancelled" } })
+  })
+
+  it("streams the agent's message text and names its tool calls, ignoring the rest", () => {
+    expect(gw.acpUpdateEvent({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hi" } })).toEqual({
+      type: "text",
+      text: "Hi",
+    })
+    expect(gw.acpUpdateEvent({ sessionUpdate: "tool_call", title: "Write hello.txt" })).toEqual({
+      type: "activity",
+      text: "Using `Write hello.txt`",
+    })
+    expect(gw.acpUpdateEvent({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "hmm" } })).toBeNull()
+    expect(gw.acpUpdateEvent({ sessionUpdate: "agent_message_chunk", content: { type: "image" } })).toBeNull()
+    expect(gw.acpUpdateEvent(null)).toBeNull()
   })
 })

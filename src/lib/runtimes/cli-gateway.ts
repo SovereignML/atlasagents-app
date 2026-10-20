@@ -1,11 +1,12 @@
 /**
  * The Atlas CLI gateway — the small HTTP server that turns a coding-agent CLI
- * (Claude Code, Codex) into the same shape as Hermes: an OpenAI-compatible
+ * (Claude Code, Codex, OpenCode, Pi) into the same shape as Hermes: an OpenAI-compatible
  * `/v1/chat/completions` + `/v1/models` on loopback behind the gateway token,
  * which external bots and API clients talk to (the chat UI talks to the CLI
- * over ACP instead). Neither CLI ships a server of its
- * own, so this one drives them through their official SDKs
- * (`@anthropic-ai/claude-agent-sdk`'s `query()`, `@openai/codex-sdk`'s threads).
+ * over ACP instead). None of the CLIs ships a server of its
+ * own, so this one drives them: Claude Code and Codex through their official
+ * SDKs (`@anthropic-ai/claude-agent-sdk`'s `query()`, `@openai/codex-sdk`'s
+ * threads), OpenCode and Pi over ACP, the same protocol the chat UI uses.
  *
  * It is written to `<installDir>/gateway/gateway.mjs` by the runtime's init
  * script on every provision and reprovision, so a fix here reaches running
@@ -18,7 +19,7 @@
  * `ATLAS_GATEWAY_NO_LISTEN=1` defines everything without binding a port.
  *
  * Contract with the box (all from the runtime's `.env`, via EnvironmentFile):
- *   ATLAS_ENGINE          "claude-code" | "codex"
+ *   ATLAS_ENGINE          "claude-code" | "codex" | "opencode" | "pi"
  *   API_SERVER_HOST/PORT  loopback bind (PORT = the runtime's gatewayPort)
  *   API_SERVER_KEY        bearer token — same name Hermes uses, so the
  *                         provisioner's `/v1/models` check works unchanged
@@ -29,6 +30,8 @@
  *   TERMINAL_AUTH_SHA256  `forward_auth` (sha256 of a random 24-char password)
  *   ATLAS_CODEX_BIN       Codex only: the globally installed `codex` binary,
  *                         so the API and the terminal run the same build
+ *   ATLAS_ACP_COMMAND     OpenCode / Pi: the ACP command line, space-separated
+ *                         (paths only, no quoting: systemd strips quotes)
  *
  * Sessions: an OpenAI-style client resends the whole history every turn, and
  * clients have no conversation id. After each turn the gateway records
@@ -74,6 +77,7 @@ const SESSIONS_PATH = env.ATLAS_SESSIONS_PATH || ""
 const TERMINAL_USER = env.TERMINAL_AUTH_USER || ""
 const TERMINAL_SHA256 = env.TERMINAL_AUTH_SHA256 || ""
 const CODEX_BIN = env.ATLAS_CODEX_BIN || ""
+const ACP_COMMAND = (env.ATLAS_ACP_COMMAND || "").split(/\s+/).filter(Boolean)
 const MAX_CONCURRENT = Math.max(1, Number(env.ATLAS_MAX_CONCURRENT || 2))
 const MAX_SESSIONS = 500
 const MAX_BODY_BYTES = 8 * 1024 * 1024
@@ -436,7 +440,134 @@ async function* runCodex({ prompt, resumeId, signal }) {
   if (thread.id) yield { type: "session", id: thread.id }
 }
 
-const ENGINES = { "claude-code": runClaude, codex: runCodex }
+/*
+ * ACP agents (OpenCode, Pi): one agent process per turn, spoken to over stdio
+ * as newline-delimited JSON-RPC. Resuming loads the agent's own session when
+ * it can (its replayed history is not streamed again); otherwise the turn
+ * fails before any output and completeTurn replays the history into a fresh
+ * session. Permission requests are allowed: like the SDK engines, the agent
+ * runs as an unprivileged user on its own box, and nobody is there to answer.
+ */
+export function acpAllowOption(options) {
+  const list = Array.isArray(options) ? options : []
+  const pick = list.find((o) => o && o.kind === "allow_always") || list.find((o) => o && o.kind === "allow_once")
+  return pick ? { outcome: { outcome: "selected", optionId: pick.optionId } } : { outcome: { outcome: "cancelled" } }
+}
+
+export function acpUpdateEvent(update) {
+  if (!update) return null
+  if (update.sessionUpdate === "agent_message_chunk") {
+    const c = update.content
+    return c && c.type === "text" && c.text ? { type: "text", text: c.text } : null
+  }
+  if (update.sessionUpdate === "tool_call") return { type: "activity", text: "Using " + code(update.title || update.kind || "a tool") }
+  return null
+}
+
+async function* runAcp({ prompt, resumeId, signal }) {
+  if (ACP_COMMAND.length === 0) {
+    yield { type: "error", message: "ATLAS_ACP_COMMAND is not set" }
+    return
+  }
+  const { spawn } = await import("node:child_process")
+  const child = spawn(ACP_COMMAND[0], ACP_COMMAND.slice(1), { cwd: WORKSPACE, stdio: ["pipe", "pipe", "inherit"] })
+  const queue = []
+  let wake = null
+  const push = (ev) => {
+    queue.push(ev)
+    if (wake) {
+      wake()
+      wake = null
+    }
+  }
+  const pending = new Map()
+  let nextId = 0
+  let replaying = false
+  let sessionId = resumeId
+  const send = (msg) => {
+    if (!child.stdin.destroyed) child.stdin.write(JSON.stringify(msg) + "\n")
+  }
+  const request = (method, params) =>
+    new Promise((resolve, reject) => {
+      const id = ++nextId
+      pending.set(id, { resolve, reject })
+      send({ jsonrpc: "2.0", id, method, params })
+    })
+  const failAll = (why) => {
+    for (const p of pending.values()) p.reject(new Error(why))
+    pending.clear()
+  }
+  let buf = ""
+  child.stdout.setEncoding("utf8")
+  child.stdout.on("data", (chunk) => {
+    buf += chunk
+    let i
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, i).trim()
+      buf = buf.slice(i + 1)
+      if (!line) continue
+      let msg
+      try {
+        msg = JSON.parse(line)
+      } catch {
+        continue
+      }
+      if (msg.id != null && !msg.method) {
+        const p = pending.get(msg.id)
+        pending.delete(msg.id)
+        if (p) msg.error ? p.reject(new Error(msg.error.message || "agent error")) : p.resolve(msg.result)
+      } else if (msg.method === "session/update") {
+        const ev = replaying ? null : acpUpdateEvent(msg.params && msg.params.update)
+        if (ev) push(ev)
+      } else if (msg.method === "session/request_permission" && msg.id != null) {
+        send({ jsonrpc: "2.0", id: msg.id, result: acpAllowOption(msg.params && msg.params.options) })
+      } else if (msg.id != null) {
+        send({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "not supported by the gateway" } })
+      }
+    }
+  })
+  child.on("error", (e) => failAll("could not start the agent: " + (e && e.message)))
+  child.on("exit", (code) => failAll("the agent exited (" + code + ")"))
+  const onAbort = () => {
+    if (sessionId) send({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId } })
+    setTimeout(() => child.kill(), 2000).unref()
+  }
+  if (signal) signal.addEventListener("abort", onAbort, { once: true })
+  ;(async () => {
+    const init = await request("initialize", { protocolVersion: 1, clientCapabilities: {} })
+    if (resumeId) {
+      if (!(init && init.agentCapabilities && init.agentCapabilities.loadSession)) throw new Error("this agent cannot resume a session")
+      replaying = true
+      try {
+        await request("session/load", { sessionId: resumeId, cwd: WORKSPACE, mcpServers: [] })
+      } finally {
+        replaying = false
+      }
+    } else {
+      sessionId = (await request("session/new", { cwd: WORKSPACE, mcpServers: [] })).sessionId
+    }
+    push({ type: "session", id: sessionId })
+    const r = await request("session/prompt", { sessionId, prompt: [{ type: "text", text: prompt }] })
+    const stop = r && r.stopReason
+    if (stop && stop !== "end_turn" && stop !== "cancelled") push({ type: "error", message: "The agent stopped: " + stop })
+  })()
+    .catch((e) => push({ type: "error", message: (e && e.message) || String(e) }))
+    .finally(() => push(null))
+  try {
+    for (;;) {
+      if (queue.length === 0) await new Promise((r) => (wake = r))
+      const ev = queue.shift()
+      if (ev === null) break
+      yield ev
+    }
+  } finally {
+    if (signal) signal.removeEventListener("abort", onAbort)
+    child.stdin.end()
+    child.kill()
+  }
+}
+
+const ENGINES = { "claude-code": runClaude, codex: runCodex, opencode: runAcp, pi: runAcp }
 
 /* ---------------- HTTP ---------------- */
 

@@ -54,16 +54,20 @@ export const CLI_TERMINAL_AUTH_PATH = "/_atlas/terminal-auth"
 export const CLI_VPS_MIN_NODE = "24.16.0"
 
 export type CliRuntimeSpec = {
-  id: "claude-code" | "codex"
+  id: "claude-code" | "codex" | "opencode" | "pi"
   displayName: string
   /** The CLI users run in the terminal, installed globally with npm. */
   cliPackage: string
   cliVersion: () => string
   /** Absolute path of the globally installed CLI (NodeSource prefix is /usr). */
   cliBinary: string
-  /** The SDK the gateway drives, installed (pinned) into `<installDir>/gateway`. */
-  sdkPackage: string
-  sdkVersion: () => string
+  /**
+   * The package the gateway drives, installed (pinned) into `<installDir>/gateway`:
+   * the engine's SDK (Claude Code, Codex) or its ACP adapter (Pi). Absent for an
+   * engine whose own CLI speaks ACP (OpenCode).
+   */
+  sdkPackage?: string
+  sdkVersion?: () => string
   gatewayPort: number
   installDir: string
   systemUser: string
@@ -79,7 +83,18 @@ export type CliRuntimeSpec = {
    * files under the user's HOME. Must be idempotent and must not put secrets on
    * a command line.
    */
-  renderEngineConfig(args: { model: string; installDir: string; workspaceDir: string; systemUser: string }): string
+  renderEngineConfig(args: {
+    model: string
+    /**
+     * The models the chat UI may switch to (the default first): the engine is
+     * told about them so its ACP server accepts them. Empty when the agent's
+     * models do not go through OpenRouter.
+     */
+    models: string[]
+    installDir: string
+    workspaceDir: string
+    systemUser: string
+  }): string
 }
 
 /**
@@ -124,6 +139,12 @@ export function renderTerminalCaddyHandle(gatewayPort: number): string {
       header_up X-Real-IP {remote_host}
     }
   }`
+}
+
+/** The models the chat UI offers an engine: the default first, OpenRouter slugs only. */
+export function chatModels(args: Pick<RenderInitScriptArgs, "provider" | "model" | "selectableModels">): string[] {
+  if (args.provider !== "openrouter") return []
+  return [...new Set([args.model, ...(args.selectableModels ?? [])].map((s) => s.trim()))].filter(Boolean)
 }
 
 export function createCliRuntime(spec: CliRuntimeSpec): RuntimeEngine {
@@ -260,10 +281,10 @@ WantedBy=multi-user.target
 `
     },
 
-    renderBootstrap(args: BootstrapRenderArgs): string {
+    renderInstallSteps(args: BootstrapRenderArgs): string {
       const cliSpec = npmSpec(spec.cliPackage, args.runtimeVersion ?? spec.cliVersion())
-      const sdkVersion = spec.sdkVersion()
-      const pkgJson = cliGatewayPackageJson({ [spec.sdkPackage]: sdkVersion })
+      const sdk = spec.sdkPackage && spec.sdkVersion ? { pkg: spec.sdkPackage, version: spec.sdkVersion() } : null
+      const pkgJson = cliGatewayPackageJson(sdk ? { [sdk.pkg]: sdk.version } : {})
       const installSteps = `
 CLI_PKG_SPEC=${bashSingleQuote(cliSpec)}
 
@@ -298,8 +319,8 @@ ${bashSingleQuote(spec.cliBinary)} --version
 step "install_gateway_sdk"
 install -d -m 0755 ${bashSingleQuote(gatewayDir)}
 echo ${bashSingleQuote(b64(pkgJson))} | base64 -d > ${bashSingleQuote(`${gatewayDir}/package.json`)}
-npm_retry ${bashSingleQuote(`${spec.sdkPackage}@${sdkVersion}`)} npm install --prefix ${bashSingleQuote(gatewayDir)} --omit=dev --no-audit --no-fund --loglevel=warn
-chmod -R a+rX ${bashSingleQuote(gatewayDir)}
+${sdk ? `npm_retry ${bashSingleQuote(`${sdk.pkg}@${sdk.version}`)} npm install --prefix ${bashSingleQuote(gatewayDir)} --omit=dev --no-audit --no-fund --loglevel=warn
+` : ""}chmod -R a+rX ${bashSingleQuote(gatewayDir)}
 
 step "atlas_dirs"
 install -d -m 0750 -o ${user} -g ${user} ${bashSingleQuote(atlasDir)}
@@ -310,6 +331,11 @@ step "terminal_deps"
 # its API and the chat UI are unaffected.
 apt-get $APT_OPTS install -y tmux ttyd || echo "WARNING: could not install ttyd/tmux — the browser terminal will be unavailable" >&2
 ${args.webuiEnabled ? buildLiteInstallSteps(engine, args) : ""}`
+      return installSteps
+    },
+
+    renderBootstrap(args: BootstrapRenderArgs): string {
+      const installSteps = engine.renderInstallSteps!(args)
       return buildBootstrapFraming(
         {
           installDir: spec.installDir,
@@ -347,11 +373,11 @@ echo ${bashSingleQuote(b64(CLI_GATEWAY_SOURCE))} | base64 -d > ${bashSingleQuote
 echo ${bashSingleQuote(b64(launcher))} | base64 -d > ${bashSingleQuote(terminalLauncher)}
 chmod 0644 ${bashSingleQuote(`${gatewayDir}/${CLI_GATEWAY_FILE}`)}
 chmod 0755 ${bashSingleQuote(terminalLauncher)}
-if [ ! -d ${bashSingleQuote(`${gatewayDir}/node_modules/${spec.sdkPackage}`)} ]; then
+${spec.sdkPackage ? `if [ ! -d ${bashSingleQuote(`${gatewayDir}/node_modules/${spec.sdkPackage}`)} ]; then
   echo "${spec.sdkPackage} is missing from ${gatewayDir} — the bootstrap did not finish" >&2
   exit 1
 fi
-
+` : ""}
 echo "=== provision: ${spec.id}_dirs ==="
 install -d -m 0750 -o ${user} -g ${user} ${bashSingleQuote(atlasDir)}
 install -d -m 0750 -o ${user} -g ${user} ${bashSingleQuote(workspaceDir)}
@@ -362,7 +388,7 @@ chmod 0600 ${bashSingleQuote(modelEnvPath)}
 chown ${user}:${user} ${bashSingleQuote(modelEnvPath)}
 
 echo "=== provision: ${spec.id}_config ==="
-${spec.renderEngineConfig({ model: args.model, installDir: spec.installDir, workspaceDir, systemUser: spec.systemUser })}
+${spec.renderEngineConfig({ model: args.model, models: chatModels(args), installDir: spec.installDir, workspaceDir, systemUser: spec.systemUser })}
 
 echo "=== provision: ${spec.id}_cli_check ==="
 sudo -u ${user} env HOME=${bashSingleQuote(spec.installDir)} ${bashSingleQuote(spec.cliBinary)} --version
