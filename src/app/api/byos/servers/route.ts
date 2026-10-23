@@ -54,10 +54,10 @@ export async function POST(req: NextRequest) {
       port: body.port,
       sshUser: body.sshUser,
       label: body.label,
-      prebakeConsent: byosPrebakeEnabled() && body.prebakeConsent === true,
     })
-    // Prebake after the response: it takes minutes and must never hold up the
-    // connect. runPrebake re-checks the flag, consent and conflicts itself.
+    // Warm the server the moment it is connected: install the universal image
+    // after the response, since it takes minutes and must never hold up the
+    // connect. runPrebake re-checks disk and web-server conflicts itself.
     if (byosPrebakeEnabled()) after(() => runPrebake(server.id, verdict.facts))
     // Conflicts are returned alongside a successful connect: they describe what
     // installing an agent would disturb, which the user decides about at

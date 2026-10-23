@@ -749,14 +749,14 @@ export const byosServers = pgTable(
      * not `latest` — re-resolving `latest` at deploy would miss the warm cache
      * and waste the entire prefetch. See src/lib/runtime-versions.ts.
      */
+    /** Null since BYOS stopped offering OpenClaw; set only on servers prebaked before. */
     prebakedOpenclawVersion: text(),
     prebakedHermesVersion: text(),
     prebakedWebuiVersion: text(),
     /**
-     * When the operator accepted, on the connect form, that we preinstall
-     * packages on this server. No consent, no prebake — the preflight is
-     * otherwise strictly read-only and unprivileged, and this is the moment
-     * that stops being true.
+     * When the operator ticked "preinstall" on the connect form, back when the
+     * prebake was opt-in. No longer written or read: connecting a server now
+     * starts the prebake by itself. Kept so a schema push drops no column.
      */
     prebakeConsentAt: timestamp({ mode: "date", withTimezone: false }),
 

@@ -62,51 +62,57 @@ The defining difference from the managed-VPS path: **no provider VM is allocated
 
 ### Prebake at connect ([`src/lib/byos-prebake.ts`](../src/lib/byos-prebake.ts))
 
-> **Off unless `BYOS_PREBAKE_ENABLED=true`.** Two product questions in plan 007
-> are open: which engine is the default (the prebake favours Hermes while the
-> deploy wizard defaults to OpenClaw), and the terms wording for preinstalling
-> on a customer's server. With the flag off, the connect form shows no consent
-> checkbox, nothing runs, and the BYOS deploy script is unchanged.
+> **On by default** (2026-10-23); `BYOS_PREBAKE_ENABLED=false` turns it off,
+> and the BYOS deploy then installs everything itself, as before.
 >
-> Wired in [`byos-prebake-job.ts`](../src/lib/byos-prebake-job.ts): the connect
-> form records consent, `POST /api/byos/servers` schedules `runPrebake()` with
-> `after()` once the response is sent, and `provisionByosBot()` calls
-> `checkPrebakedServer()` before the bootstrap. Prebake and deploy share an
-> `flock` on `/var/lock/atlas-install.lock`: the prebake gives up if anything
-> else is installing, and a deploy waits up to 10 minutes for a running
-> prebake.
+> Wired in [`byos-prebake-job.ts`](../src/lib/byos-prebake-job.ts):
+> `POST /api/byos/servers` (connect) and `POST /api/byos/servers/[id]`
+> (Refresh, for a server never prebaked or whose prebake failed) schedule
+> `runPrebake()` with `after()` once the response is sent, and
+> `provisionByosBot()` calls `checkPrebakedServer()` before the bootstrap.
+> Prebake and deploy share an `flock` on `/var/lock/atlas-install.lock`: the
+> prebake gives up if anything else is installing, and a deploy waits up to 10
+> minutes for a running prebake. The server card shows the prebake's progress.
 
-A BYOS box gets no warm pool and no golden image, so historically every deploy
-built from scratch inside the window the customer sat watching — an estimated
-6–10 minutes for OpenClaw and 10–15 for Hermes with its old chat UI (Open
-WebUI, since replaced by the much smaller AgentWebUI Lite).
+A BYOS box gets no warm pool, so without this every deploy built from scratch
+inside the window the customer sat watching.
 
-Work that does **not** depend on which engine they eventually pick now runs in
-the background as soon as the server is connected:
+The moment a server is connected, it is warmed with the **same universal image
+the warm pool bakes** ([`runtimes/universal.ts`](../src/lib/runtimes/universal.ts)):
 
 | | at connect | at deploy |
 |---|---|---|
-| apt, Caddy, Node, swap, both runtimes' accounts | installed | no-ops |
-| `hermes-agent` | installed, its CLI warmed | restart only |
-| chat UI (AgentWebUI Lite) | — | installed (one small package, seconds) |
-| `openclaw` | **downloaded into the npm cache only** | installed from cache |
-| config, secrets, systemd, health checks, DNS | — | per-instance, always |
+| apt, Caddy, Node, swap, every engine's account | installed | no-ops |
+| Hermes, Claude Code, Codex, OpenCode, Pi, Gemini CLI, Grok | installed (Hermes' CLI warmed) | reused |
+| chat UI (AgentWebUI Lite) and every engine's ACP side | installed | reused |
+| config, secrets, systemd units, health checks, DNS | — | per-instance, always |
 
-OpenClaw is the genuine either/or, and its 225MB / 11,428-file *extract* is what
-makes it expensive, so only the download moves. Hermes is installed outright,
-which is what makes a Hermes deploy faster than an OpenClaw one. The chat UI is
-small enough to install at deploy.
+No engine's unit is written at connect: which engine runs is decided at
+deploy, exactly as at a pool claim.
 
-**Consent is required and is not implied by connecting.** The preflight is
-read-only and unprivileged by design; prebake is the moment that stops being
-true, so it runs only against a recorded `byosServers.prebakeConsentAt`.
+**OpenClaw is not offered on BYOS** (2026-10-23). The install form lists
+`BYOS_RUNTIME_IDS` ([`runtimes/ids.ts`](../src/lib/runtimes/ids.ts)), which a
+test keeps equal to the universal image's engines, and
+`POST /api/byos/deploy` refuses any other. Existing OpenClaw agents on BYOS
+servers keep running.
 
-**A box already serving the web is skipped, not prebaked.** The preflight
-deliberately does not block on a busy `:443`, an existing Caddyfile, nginx or
-apache — it surfaces them and tells the owner they are their call. Installing
-Caddy in the background moments later would answer that call for them, so those
-servers defer everything to deploy time, where the customer has just asked for
-it. Tight disk skips too (deploying still works, it is just slower).
+**Connecting is the go-ahead.** There is no opt-in checkbox any more; the
+connect form says the engines install in the background.
+`byosServers.prebakeConsentAt` is no longer written or read.
+
+**A box already serving the web gets everything but Caddy.** The preflight
+deliberately does not block on a busy `:443`, nginx or apache — it surfaces
+them and tells the owner they are their call. Installing Caddy in the
+background would answer that call for them, so on those servers the prebake
+leaves Caddy out (`installCaddy: false`) and the deploy installs it. An
+existing Caddy is kept as is. Tight disk (under 12 GB free) skips the prebake;
+deploying still works, it is just slower.
+
+**Python 3.14 (Ubuntu 26.04).** `hermes-agent` requires Python `<3.14`.
+`verify_python` ([`runtimes/python-install.ts`](../src/lib/runtimes/python-install.ts))
+uses the system `python3` when it fits, then any `python3.X` on PATH, and
+otherwise has `uv` download CPython 3.13 into `/opt/uv-python` and builds the
+venvs from it. Before 2026-10-23 such a box failed at `verify_python`.
 
 **`prebakeStatus` is for the UI, never for control flow.** The deploy re-runs
 the full bootstrap regardless and relies on its idempotency; a separate probe
@@ -229,6 +235,6 @@ BYOS deploys preflight these and return `503` if any are missing:
 | `SSH_FLEET_PRIVATE_KEY` | Used to connect to the user's server. |
 | `INSTANCE_ENCRYPTION_KEY` | Encrypts the gateway token, admin password, and the optional own API key. |
 
-Optional: `BYOS_PREBAKE_ENABLED=true` turns on the connect-time prebake (above).
+Optional: `BYOS_PREBAKE_ENABLED=false` turns off the connect-time prebake (above), which is on by default.
 
 BYOS deliberately does **not** require `OPENROUTER_API_KEY`: `managed_credits` instances mint per-instance keys via `OPENROUTER_PROVISIONING_KEY` (see [BILLING.md](BILLING.md)), and `own_key` instances bring their own.

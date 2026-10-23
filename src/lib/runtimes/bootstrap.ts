@@ -50,6 +50,11 @@ export type BootstrapFramingOpts = {
   sshPort?: number
   /** False on BYOS — add allow-rules but never turn the firewall on. */
   manageFirewall?: boolean
+  /**
+   * False leaves Caddy out. The BYOS prebake uses it on a server that already
+   * runs a web server: installing Caddy there is the deploy's call, not ours.
+   */
+  installCaddy?: boolean
 }
 
 function shellEscape(value: string): string {
@@ -277,6 +282,7 @@ export function buildPrereqScript(opts: {
   minNodeVersion: string
   sshPort?: number
   manageFirewall?: boolean
+  installCaddy?: boolean
   /** Install steps to run inside the framing, after swap. */
   payloadSteps?: string
 }): string {
@@ -291,6 +297,7 @@ export function buildPrereqScript(opts: {
       gatewayPort: 0,
       sshPort: opts.sshPort,
       manageFirewall: opts.manageFirewall,
+      installCaddy: opts.installCaddy,
     },
     opts.payloadSteps ?? "",
   )
@@ -439,8 +446,12 @@ if [ "\${NODE_MAJOR_HAVE}" != "\${NODE_MAJOR_WANTED}" ] || ! command -v npm >/de
 fi
 node -v && npm -v
 
-step "install_caddy"
-${caddyInstallCommands("$APT_OPTS")}
+${
+  opts.installCaddy === false
+    ? `# install_caddy skipped: this server already runs a web server; the deploy installs Caddy.`
+    : `step "install_caddy"
+${caddyInstallCommands("$APT_OPTS")}`
+}
 
 step "verify_node"
 node <<'VERIFYNODE'

@@ -13,24 +13,22 @@ export { withInstallLock }
 import type { PreflightFacts } from "@/lib/byos-preflight-parse"
 import { sshTargetForServer } from "@/lib/byos-server"
 import { getRuntime } from "@/lib/runtimes"
+import { LITE_ENGINES } from "@/lib/runtimes/universal"
 import { isPinned, resolveForRegistry } from "@/lib/runtime-versions"
 import { sshRunScript, type SshTarget } from "@/lib/ssh"
 
 /**
- * The connect-time prebake job (plan 007, W7): after a customer connects a
- * server and agrees to it, install the engine-independent prerequisites and
- * the Hermes stack in the background, so the later deploy only writes config
- * and restarts. The decision logic, script and deploy-time check live in
- * byos-prebake.ts; this file runs them.
+ * The connect-time prebake job (plan 007, W7): the moment a customer connects
+ * a server, install the universal image (every BYOS engine, the chat UI and
+ * the shared prerequisites) in the background, so the later deploy only
+ * writes config and starts the chosen engine. The decision logic, script and
+ * deploy-time check live in byos-prebake.ts; this file runs them.
  *
- * Off unless BYOS_PREBAKE_ENABLED=true. Two product questions in plan 007 are
- * still open (which engine is the default, and the terms wording for
- * preinstalling on a customer's server), so shipping this switched on is the
- * operator's call. With it off, nothing here runs and the BYOS deploy is
- * unchanged.
+ * On by default; BYOS_PREBAKE_ENABLED=false turns it off, and the BYOS deploy
+ * then installs everything itself, as before.
  */
 export function byosPrebakeEnabled(): boolean {
-  return process.env.BYOS_PREBAKE_ENABLED?.trim().toLowerCase() === "true"
+  return process.env.BYOS_PREBAKE_ENABLED?.trim().toLowerCase() !== "false"
 }
 
 /** A prebake left "running" longer than this is presumed dead and may restart. */
@@ -39,9 +37,9 @@ const PREBAKE_TIMEOUT_MS = 30 * 60 * 1000
 
 /**
  * Decide, then (maybe) prebake the server. Safe to call after every connect or
- * re-probe: it does nothing without consent, on a box with a web-server
- * conflict or too little disk, or while another prebake of the same server is
- * running. Never throws; the outcome is on the server row.
+ * re-probe: it does nothing on a box with too little disk, on one already
+ * prebaked, or while another prebake of the same server is running. Never
+ * throws; the outcome is on the server row.
  */
 export async function runPrebake(serverId: string, facts: PreflightFacts): Promise<void> {
   if (!byosPrebakeEnabled()) return
@@ -50,11 +48,11 @@ export async function runPrebake(serverId: string, facts: PreflightFacts): Promi
     if (!server) return
     if (server.prebakeStatus === "ready") return
 
-    const decision = prebakeDecision({ facts, consentAt: server.prebakeConsentAt })
+    const decision = prebakeDecision({ facts })
     if (!decision.run) {
       await db
         .update(byosServers)
-        .set({ prebakeStatus: decision.status, prebakeError: decision.status === "skipped" ? decision.reason : null })
+        .set({ prebakeStatus: decision.status, prebakeError: decision.reason })
         .where(eq(byosServers.id, serverId))
       return
     }
@@ -76,23 +74,23 @@ export async function runPrebake(serverId: string, facts: PreflightFacts): Promi
     if (!claimed) return
 
     const hermes = getRuntime("hermes")
-    const openclaw = getRuntime("openclaw")
-    const [openclawVersion, hermesVersion] = await Promise.all([
-      resolveForRegistry(openclaw.registry, openclaw.npmPackage, openclaw.version()),
-      resolveForRegistry(hermes.registry, hermes.npmPackage, hermes.version()),
-    ])
+    const hermesVersion = await resolveForRegistry(hermes.registry, hermes.npmPackage, hermes.version())
     await db
       .update(byosServers)
       .set({
-        prebakedOpenclawVersion: openclawVersion,
+        // OpenClaw is not offered on BYOS and is no longer prebaked.
+        prebakedOpenclawVersion: null,
         prebakedHermesVersion: hermesVersion,
-        // The chat UI is no longer prebaked (AgentWebUI Lite installs at deploy).
-        prebakedWebuiVersion: null,
+        prebakedWebuiVersion: hermes.sidecar?.version() ?? null,
       })
       .where(eq(byosServers.id, serverId))
 
     const script = withInstallLock(
-      buildPrebakeScript({ openclawVersion, hermesVersion, sshPort: server.port }),
+      buildPrebakeScript({
+        hermesVersion,
+        sshPort: server.port,
+        installCaddy: decision.installCaddy,
+      }),
       0,
     )
     let res: Awaited<ReturnType<typeof sshRunScript>>
@@ -150,14 +148,17 @@ export async function checkPrebakedServer(
   target: SshTarget,
 ): Promise<PrebakeDeployCheck | null> {
   if (!byosPrebakeEnabled() || !byosServerId) return null
-  if (runtimeId !== "hermes" && runtimeId !== "openclaw") return null
+  if (!(LITE_ENGINES as readonly string[]).includes(runtimeId)) return null
   const server = await db.query.byosServers.findFirst({ where: eq(byosServers.id, byosServerId) })
   if (!server?.prebakedAt) return null
 
   const runtime = getRuntime(runtimeId)
   const pins: PrebakeDeployCheck["pins"] = {}
-  const prebakedRuntime = runtimeId === "hermes" ? server.prebakedHermesVersion : server.prebakedOpenclawVersion
-  if (prebakedRuntime && !isPinned(runtime.version())) pins.runtimeVersion = prebakedRuntime
+  // Only Hermes' resolved version is recorded; the other engines were baked at
+  // their code pins, which is what the deploy installs too.
+  if (runtimeId === "hermes" && server.prebakedHermesVersion && !isPinned(runtime.version())) {
+    pins.runtimeVersion = server.prebakedHermesVersion
+  }
 
   let facts
   try {

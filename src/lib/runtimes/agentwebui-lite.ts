@@ -221,9 +221,8 @@ export function buildLiteInstallSteps(
 step "python_deps"
 apt-get $APT_OPTS install -y python3 python3-venv python3-pip
 
-${buildVerifyPythonStep(LITE_PYTHON_MAX_EXCLUSIVE)}
-
-${buildPyInstallPrelude()}`
+${buildPyInstallPrelude()}
+${buildVerifyPythonStep(LITE_PYTHON_MAX_EXCLUSIVE)}`
   const adapter = ACP_ADAPTERS[engine.id]
   // A fresh Hermes install already has the `acp` extra (hermes.ts); a box
   // being migrated may predate it.

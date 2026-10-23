@@ -68,7 +68,7 @@ export default async function ByosPage({
   const agentIds = plans.flatMap((p) => (p.instanceId ? [p.instanceId] : []))
   const agents = agentIds.length
     ? await db
-        .select({ id: instances.id, name: instances.name })
+        .select({ id: instances.id, name: instances.name, runtime: instances.runtime })
         .from(instances)
         .where(inArray(instances.id, agentIds))
     : []
@@ -104,6 +104,8 @@ export default async function ByosPage({
     hwKernel: s.hwKernel,
     capacityAgents: s.capacityAgents,
     agentCount: s.agentCount,
+    prebakeStatus: s.prebakeStatus,
+    prebakeError: s.prebakeError,
     legacyPlan: (() => {
       const p = legacyPlans.get(s.id)
       return p
@@ -152,8 +154,8 @@ export default async function ByosPage({
                 <EmptyTitle>No connected servers yet</EmptyTitle>
                 <EmptyDescription>
                   Add our SSH key to a server you own and we&apos;ll check it over and show you
-                  exactly what it can run. It costs nothing, and nothing is installed until you
-                  choose an agent.
+                  exactly what it can run. Connecting costs nothing; you pay only for the
+                  agents you add.
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
