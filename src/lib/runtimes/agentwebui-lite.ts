@@ -1,3 +1,4 @@
+import crypto from "node:crypto"
 import { BRANDING } from "@/configs/branding"
 import { isPinned, npmSpec, pypiSpec } from "@/lib/runtime-versions"
 import { APT_OPTS_LITERAL } from "./bootstrap"
@@ -29,11 +30,14 @@ import type { BootstrapRenderArgs, RuntimeEngine, SidecarEnvArgs, SidecarSpec } 
  *    the environment the agent processes inherit;
  *  - loopback :8080, where Caddy sends everything but `/v1/*` (the gateway).
  *
- * Customers open it at the agent's own address and sign in with the email and
- * password the dashboard shows (LOGIN_EMAIL + PASSWORD, the same generated
- * pair Open WebUI's admin had). The model menu offers only the models an admin
- * enabled (AGENT_<ID>_MODELS, see liteModelId), and the agent works only in its
- * workspace (LOCK_FOLDER).
+ * Customers chat in the dashboard, which frames the page and signs the
+ * browser in with a one-time `/embed` link signed with EMBED_SECRET (only the
+ * dashboard's origins may frame it: FRAME_ANCESTORS). They can also open it at
+ * the agent's own address or IP and sign in with the email and password the
+ * dashboard shows (LOGIN_EMAIL + PASSWORD). The model is the dashboard's
+ * choice (Controls → Model rewrites AGENT_<ID>_MODEL, see liteModelId, and
+ * restarts Lite; LOCK_MODEL), and the agent works only in its workspace
+ * (LOCK_FOLDER).
  *
  * Agents made before Lite run Open WebUI until their box is migrated
  * (buildLiteMigrationScript); `Instance.chatUi` says which a box has.
@@ -64,9 +68,12 @@ const LITE_PYTHON_MAX_EXCLUSIVE = "3.15"
 /**
  * The Lite release new boxes install, from PyPI (`agentwebui-lite`). Lite's
  * repo (SovereignML/AgentWebUI-Lite) publishes a release when a `v*` tag is
- * pushed; bump this on purpose after a test deploy.
+ * pushed; bump this on purpose after a test deploy. 0.2.1: the framed sign-in
+ * cookie is Partitioned on HTTPS and plain on HTTP (so signing in at the IP
+ * works on a box the dashboard frames), and the page tells the dashboard
+ * whether the framed sign-in took.
  */
-export const LITE_PINNED_VERSION = "0.2.0"
+export const LITE_PINNED_VERSION = "0.2.1"
 
 /** pip requirement for Lite. `AGENTWEBUI_LITE_PIP_SPEC` overrides it (e.g. `agentwebui-lite==0.1.1`). */
 export function litePipSpec(): string {
@@ -126,7 +133,7 @@ export function acpCommand(engine: Pick<RuntimeEngine, "id" | "cliBinary">): str
 
 /**
  * The id an engine's ACP server knows an OpenRouter model by, which is what
- * Lite's model menu sends (checked against each engine's pinned release):
+ * Lite sends as the agent's model (checked against each engine's pinned release):
  *  - Hermes lists `openrouter:<slug>`, and only that prefix keeps a switch on
  *    OpenRouter (with the patch in hermes.ts; a bare slug can be taken to
  *    another provider whose catalog also lists it);
@@ -152,6 +159,46 @@ export const LITE_SETTING_KEYS = /^(HOST|PORT|PASSWORD|LOGIN_EMAIL|USER_NAME|DAT
 /** Lite's env-file prefix for the one agent it serves: AGENT_<ID>_COMMAND, AGENT_<ID>_NAME. */
 function liteAgentKey(engine: Pick<RuntimeEngine, "id">): string {
   return `AGENT_${engine.id.replace(/[^a-z0-9]/gi, "").toUpperCase()}`
+}
+
+/**
+ * The per-agent embed secret. Derived from the platform's encryption key and
+ * the instance id, so the dashboard can sign `/embed` links without storing
+ * anything, and every agent's secret is different.
+ */
+export function liteEmbedSecret(instanceId: string): string {
+  const key = process.env.INSTANCE_ENCRYPTION_KEY?.trim()
+  if (!key) throw new Error("INSTANCE_ENCRYPTION_KEY is not set, so no embed secret can be derived")
+  return crypto.createHmac("sha256", key).update(`agentwebui-lite-embed:${instanceId}`).digest("hex")
+}
+
+/**
+ * A one-time `/embed` link that signs the browser in to an agent's chat page
+ * (Lite's format: base64url JSON {exp, nonce}, a dot, the hex HMAC-SHA256 of
+ * that text). Lives 60 seconds; Lite accepts each link once.
+ */
+export function buildLiteEmbedUrl(publicUrl: string, secret: string, nowMs = Date.now()): string {
+  const payload = JSON.stringify({
+    exp: Math.floor(nowMs / 1000) + 60,
+    nonce: crypto.randomBytes(16).toString("hex"),
+  })
+  const text = Buffer.from(payload, "utf8").toString("base64url")
+  const signature = crypto.createHmac("sha256", secret).update(text).digest("hex")
+  return `${publicUrl.replace(/\/+$/, "")}/embed?token=${text}.${signature}`
+}
+
+/**
+ * Whether a Lite page lets `origin` frame it, read from the
+ * Content-Security-Policy Lite puts on every response (`frame-ancestors 'self'
+ * <FRAME_ANCESTORS>`). False when the header is missing.
+ */
+export function liteAllowsFraming(csp: string | null | undefined, origin: string): boolean {
+  if (!csp) return false
+  const directive = csp
+    .split(";")
+    .map((d) => d.trim().split(/\s+/))
+    .find(([name]) => name?.toLowerCase() === "frame-ancestors")
+  return Boolean(directive?.slice(1).includes(origin.replace(/\/+$/, "")))
 }
 
 /**
@@ -242,9 +289,10 @@ export function makeLiteSidecar(engine: RuntimeEngine): SidecarSpec {
         TRUST_PROXY: "true",
         WORKSPACE_DIR: engine.paths.workspaceDir,
         FILES_ROOTS: engine.paths.workspaceDir,
-        // With no list (a provider other than OpenRouter), the engine keeps the
-        // model it was configured with and the page offers no choice.
-        LOCK_MODEL: args.selectableModels?.length ? "false" : "true",
+        // The model is chosen in the dashboard (Controls → Model), which
+        // rewrites this env and restarts Lite, so the page offers no choice:
+        // one place to change it, and every new chat starts on it.
+        LOCK_MODEL: "true",
         LOCK_FOLDER: "true",
         // No AGENT_IDLE_MINUTES: Lite 0.1.0 reads any AGENT_<ID>_<FIELD> key
         // as an agent, so it takes that one for an agent "idle" with no
@@ -261,6 +309,14 @@ export function makeLiteSidecar(engine: RuntimeEngine): SidecarSpec {
       if (args.selectableModels?.length) {
         if (model) env[`${key}_MODEL`] = liteModelId(engine.id, model)
         env[`${key}_MODELS`] = models.map((s) => liteModelId(engine.id, s)).join(",")
+      }
+      // The dashboard shows this page in a frame and signs the browser in with
+      // a one-time /embed link (see buildLiteEmbedUrl). Lite needs both keys;
+      // without them the page still works at the agent's own address.
+      const ancestors = (args.frameAncestors ?? []).filter((o) => /^https?:\/\/[^/\s]+$/.test(o))
+      if (args.embedSecret && ancestors.length > 0) {
+        env.EMBED_SECRET = args.embedSecret
+        env.FRAME_ANCESTORS = ancestors.join(" ")
       }
       // Read by nothing in Lite; recorded so a reprovision can tell whether the
       // model moved and Lite (whose agents inherit the engine's config at

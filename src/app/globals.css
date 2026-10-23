@@ -1258,3 +1258,12 @@ html {
     scroll-behavior: auto !important;
   }
 }
+
+/* An open agent chat (components/agent-chat) covers the bottom-right corner,
+   where Chatwoot's live-support bubble would sit on top of the chat's send
+   button. Hide the bubble and its hide control until the chat is minimized. */
+body.agent-chat-open .woot--bubble-holder,
+body.agent-chat-open .woot-widget-bubble,
+body.agent-chat-open [data-live-chat-control] {
+  display: none !important;
+}

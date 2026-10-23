@@ -227,6 +227,14 @@ export type SidecarEnvArgs = {
    */
   selectableModels?: string[]
   /**
+   * Lets the dashboard show the chat page in a frame: the secret it signs
+   * one-time sign-in links with, and the dashboard origins allowed to frame
+   * the page (the canonical app, plus a team's white-label domain). Both are
+   * needed; without them the page only opens at the agent's own address.
+   */
+  embedSecret?: string
+  frameAncestors?: string[]
+  /**
    * The model slug the gateway is pinned to (same value the runtime writes as its
    * own default). A chat UI sidecar needs this to pre-select a model for a fresh
    * account — without it the first message has no model attached. Should match an

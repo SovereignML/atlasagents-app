@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowUpRight, Bot, Loader2, MoreHorizontal, Search, Trash2 } from "lucide-react"
+import { ArrowUpRight, Bot, Globe, Loader2, MessageSquare, MoreHorizontal, Search, Server, Trash2 } from "lucide-react"
 
 import {
   AlertDialog,
@@ -21,7 +21,10 @@ import { DemoCountdown } from "@/components/instances/demo-countdown"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -35,6 +38,8 @@ import {
 } from "@/components/ui/select"
 import { runtimeLabel } from "@/lib/runtimes/labels"
 import { RuntimeLogo } from "@/components/dashboard/runtime-logo"
+import { useAgentChat } from "@/components/agent-chat/agent-chat-provider"
+import { addressLabel, chatAgentFor, hasDashboardChat } from "@/lib/chat-windows"
 
 type InstanceStatus =
   | "pending"
@@ -74,6 +79,11 @@ type Item = {
   status: string
   ipAddress: string | null
   runtime: string | null
+  domain: string | null
+  managedSubdomain: string | null
+  tlsStatus: string | null
+  webuiEnabled: boolean
+  chatUi: string | null
   deploymentTarget: string | null
   expiresAt: string | null
   serverLabel: string
@@ -114,6 +124,11 @@ function mapRowsToItems(
     status: string
     ipAddress: string | null
     runtime?: string | null
+    domain?: string | null
+    managedSubdomain?: string | null
+    tlsStatus?: string | null
+    webuiEnabled?: boolean | null
+    chatUi?: string | null
     deploymentTarget?: string | null
     expiresAt?: string | Date | null
     serverConfig: { label: string; vcpu: number; ramGb: number; priceMonthly?: number }
@@ -129,6 +144,11 @@ function mapRowsToItems(
       status: row.status,
       ipAddress: row.ipAddress,
       runtime: row.runtime ?? null,
+      domain: row.domain ?? null,
+      managedSubdomain: row.managedSubdomain ?? null,
+      tlsStatus: row.tlsStatus ?? null,
+      webuiEnabled: Boolean(row.webuiEnabled),
+      chatUi: row.chatUi ?? null,
       deploymentTarget: row.deploymentTarget ?? null,
       expiresAt: row.expiresAt
         ? typeof row.expiresAt === "string"
@@ -161,6 +181,7 @@ export function InstancesFilter({ items: initialItems }: { items: Item[] }) {
   const [sort, setSort] = useState<Sort>("newest")
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<Item | null>(null)
+  const { openChat } = useAgentChat()
 
   const handleConfirmDelete = useCallback(async () => {
     if (!pendingDelete) return
@@ -205,6 +226,11 @@ export function InstancesFilter({ items: initialItems }: { items: Item[] }) {
           status: string
           ipAddress: string | null
           runtime?: string | null
+          domain?: string | null
+          managedSubdomain?: string | null
+          tlsStatus?: string | null
+          webuiEnabled?: boolean | null
+          chatUi?: string | null
           deploymentTarget?: string | null
           region: { flag: string; name: string }
           serverConfig: { label: string; vcpu: number; ramGb: number; priceMonthly?: number }
@@ -307,6 +333,12 @@ export function InstancesFilter({ items: initialItems }: { items: Item[] }) {
             const isRunning = instance.status === "running"
             const canDelete = DELETABLE_STUCK_STATES.has(instance.status)
             const runtimeId = instance.runtime ?? "openclaw"
+            const chatAgent = chatAgentFor(instance)
+            // In-dashboard chat needs the agent's HTTPS hostname; the agent's
+            // page explains why when it isn't ready.
+            const canChat =
+              isRunning && hasDashboardChat(instance) && Boolean(chatAgent.publicUrl?.startsWith("https://"))
+            const hasAddresses = isRunning && Boolean(chatAgent.publicUrl || chatAgent.ipUrl)
             return (
               <div
                 key={instance.id}
@@ -345,15 +377,29 @@ export function InstancesFilter({ items: initialItems }: { items: Item[] }) {
                       {instance.ipAddress ? ` · ${instance.ipAddress}` : ""}
                     </p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Link
-                      href={`/dashboard/instances/${instance.id}`}
-                      className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-                    >
-                      Manage
-                      <ArrowUpRight className="size-4" />
-                    </Link>
-                    {canDelete && (
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    {canChat && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openChat(chatAgent)}
+                        title={`Chat with ${instance.name} here in the dashboard`}
+                      >
+                        <MessageSquare data-icon="inline-start" />
+                        Chat
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      render={
+                        <Link href={`/dashboard/instances/${instance.id}`}>
+                          Manage
+                          <ArrowUpRight data-icon="inline-end" />
+                        </Link>
+                      }
+                    />
+                    {(hasAddresses || canDelete) && (
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           render={
@@ -372,14 +418,38 @@ export function InstancesFilter({ items: initialItems }: { items: Item[] }) {
                             </Button>
                           }
                         />
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onClick={() => setPendingDelete(instance)}
-                          >
-                            <Trash2 />
-                            Delete agent
-                          </DropdownMenuItem>
+                        <DropdownMenuContent align="end" className="min-w-56">
+                          {hasAddresses && (
+                            <DropdownMenuGroup>
+                              <DropdownMenuLabel>Open directly</DropdownMenuLabel>
+                              {chatAgent.publicUrl && (
+                                <DropdownMenuItem
+                                  render={<a href={chatAgent.publicUrl} target="_blank" rel="noopener noreferrer" />}
+                                >
+                                  <Globe />
+                                  <span className="truncate font-mono text-xs">{addressLabel(chatAgent.publicUrl)}</span>
+                                </DropdownMenuItem>
+                              )}
+                              {chatAgent.ipUrl && (
+                                <DropdownMenuItem
+                                  render={<a href={chatAgent.ipUrl} target="_blank" rel="noopener noreferrer" />}
+                                >
+                                  <Server />
+                                  <span className="truncate font-mono text-xs">{addressLabel(chatAgent.ipUrl)}</span>
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuGroup>
+                          )}
+                          {hasAddresses && canDelete && <DropdownMenuSeparator />}
+                          {canDelete && (
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onClick={() => setPendingDelete(instance)}
+                            >
+                              <Trash2 />
+                              Delete agent
+                            </DropdownMenuItem>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     )}
