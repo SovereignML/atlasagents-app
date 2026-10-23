@@ -171,6 +171,7 @@ export function ChatwootWidget() {
       // Sits just above the Chatwoot bubble's top-right corner. Chatwoot's
       // launcher uses z-index 2147483000, so layer one above it.
       style={{ zIndex: 2147483001 }}
+      data-live-chat-control
       className="fixed bottom-[76px] right-[18px] flex size-5 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-md transition-colors hover:bg-muted hover:text-foreground"
     >
       <X className="size-3" />

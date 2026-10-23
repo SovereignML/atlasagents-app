@@ -26,7 +26,6 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
 import { PageContainer } from "@/components/layout/page-container"
 import { RuntimeLogo } from "@/components/dashboard/runtime-logo"
 import { buildPublicGatewayUrl } from "@/lib/instance-gateway-access"
@@ -35,6 +34,8 @@ import { getEffectiveUserId } from "@/lib/effective-user"
 import { getInstanceAccessLevel, levelAtLeast } from "@/lib/instance-access"
 import { getRuntime } from "@/lib/runtimes"
 import { AgentName } from "./agent-name"
+import { AgentAccessCard } from "./agent-access-card"
+import { chatAgentFor, hasDashboardChat } from "@/lib/chat-windows"
 import { InstanceTabs } from "./instance-tabs"
 
 function statusBadgeVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
@@ -198,82 +199,28 @@ export default async function InstanceDetailPage({
       </div>
 
       {(instance.status === "running" || instance.status === "stopped") && (
-        <Card>
-        <CardHeader>
-          <CardDescription className="font-mono text-[10px] tracking-[0.1em] uppercase">
-            Access
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {access ? (
-            <>
-              <div className="rounded-lg border bg-muted/40 p-3">
-                <p className="font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">
-                  {instance.domain
-                    ? "Primary · Custom domain"
-                    : instance.managedSubdomain
-                      ? "Primary · Managed hostname"
-                      : "Primary · Direct IP"}
-                </p>
-                <a
-                  href={access.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-1 block break-all font-mono text-sm text-foreground hover:text-primary"
-                >
-                  {access.url}
-                </a>
-                {access.scheme === "http" && instance.domain && (
-                  <p className="mt-1.5 font-mono text-xs text-amber-500">
-                    TLS certificate pending. Accessed over HTTP until Let&apos;s Encrypt completes.
-                  </p>
-                )}
-                {access.scheme === "http" && !instance.domain && !instance.managedSubdomain && (
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    Raw IP access over HTTP. A managed hostname or custom domain enables HTTPS.
-                  </p>
-                )}
-                {access.scheme === "https" && instance.domain && (
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    {instance.tlsStatus === "issued"
-                      ? "Served with Let's Encrypt certificate."
-                      : "TLS certificate pending. Check DNS for your custom domain."}
-                  </p>
-                )}
-                {access.scheme === "https" && instance.managedSubdomain && !instance.domain && (
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    HTTPS via Cloudflare to your agent hostname.
-                  </p>
-                )}
-              </div>
-              {instance.ipAddress &&
-                (instance.managedSubdomain || instance.domain) &&
-                access.url !== `http://${instance.ipAddress}` && (
-                  <div className="rounded-lg border bg-muted/40 p-3">
-                    <p className="font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">
-                      Backup · Direct IP
-                    </p>
-                    <a
-                      href={`http://${instance.ipAddress}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-1 block break-all font-mono text-sm text-foreground hover:text-primary"
-                    >
-                      http://{instance.ipAddress}:80
-                    </a>
-                    <p className="mt-1.5 text-xs text-muted-foreground">
-                      Fallback when the managed hostname is unavailable. HTTP only; allow port 80 on the VM firewall.
-                    </p>
-                  </div>
-                )}
-            </>
-          ) : (
-            <p className="font-mono text-sm text-muted-foreground">
-              Provisioning… no public access yet.
-            </p>
-          )}
-        </CardContent>
-        </Card>
+        <AgentAccessCard
+          agent={chatAgentFor(instance)}
+          dashboardChat={hasDashboardChat(instance)}
+          canChat={isPlatformAdmin || accessControl.canOperate}
+          hostname={
+            access && (instance.domain || instance.managedSubdomain)
+              ? { url: access.url, kind: instance.domain ? "domain" : "managed" }
+              : null
+          }
+          ipAddress={instance.ipAddress}
+          hostnameNote={
+            !access
+              ? null
+              : instance.domain
+                ? access.scheme === "http"
+                  ? "TLS certificate pending. Served over HTTP until Let's Encrypt completes."
+                  : instance.tlsStatus === "issued"
+                    ? "Served with a Let's Encrypt certificate."
+                    : "TLS certificate pending. Check DNS for your custom domain."
+                : "HTTPS via Cloudflare."
+          }
+        />
       )}
 
       <InstanceTabs

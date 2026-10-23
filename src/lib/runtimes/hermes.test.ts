@@ -140,9 +140,10 @@ describe("hermesRuntime.sidecar.renderEnv()", () => {
     expect(env.PASSWORD).toBe("pw")
   })
 
-  it("offers the enabled models by their openrouter: ids, and locks the model when there are none", () => {
+  it("starts chats on the dashboard's model by its openrouter: id, and offers no choice in the chat", () => {
     const env = hermesRuntime.sidecar!.renderEnv({ ...baseArgs, selectableModels: ["z-ai/glm-5.1"] })
-    expect(env.LOCK_MODEL).toBe("false")
+    expect(env.LOCK_MODEL).toBe("true")
+    expect(env.AGENT_HERMES_MODEL).toBe("openrouter:deepseek/deepseek-v4-pro")
     expect(env.AGENT_HERMES_MODELS).toBe("openrouter:deepseek/deepseek-v4-pro,openrouter:z-ai/glm-5.1")
     expect(hermesRuntime.sidecar!.renderEnv(baseArgs).LOCK_MODEL).toBe("true")
   })
