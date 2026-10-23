@@ -35,10 +35,11 @@ ufw --force enable
 ## 2. Install dependencies
 
 ```bash
-# Node 22 (NodeSource) for the control plane itself. Note this is NOT the
-# Node the agent VPS bootstrap installs — that is derived from each runtime's
-# own floor and is currently 24 (see docs/RUNTIMES.md).
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+# Node 24 (NodeSource) for the control plane itself, at least the version in
+# .nvmrc (package.json "engines" says the same). Note this is NOT the Node the
+# agent VPS bootstrap installs — that is derived from each runtime's own floor
+# (see docs/RUNTIMES.md).
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt-get install -y nodejs postgresql postgresql-client caddy git
 
 # pm2 for process management

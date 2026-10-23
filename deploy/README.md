@@ -23,10 +23,11 @@ box. Don't create a second env file.
 ## 1. Prerequisites on the VPS
 
 ```bash
-# Node 22 (NodeSource) for the control plane itself. This is NOT the Node the
-# agent VPS bootstrap installs — that is derived from each runtime's own floor
-# and is currently 24 (see docs/RUNTIMES.md).
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+# Node 24 (NodeSource) for the control plane itself, at least the version in
+# .nvmrc (package.json "engines" says the same). This is NOT the Node the agent
+# VPS bootstrap installs — that is derived from each runtime's own floor (see
+# docs/RUNTIMES.md).
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt-get install -y nodejs postgresql
 
 # pm2 for process management
@@ -135,6 +136,19 @@ reload from the file instead, then save:
 ```bash
 pm2 reload deploy/pm2.config.cjs --update-env && pm2 save
 ss -ltn | grep ':3000 '             # expect 127.0.0.1:3000, not 0.0.0.0:3000
+```
+
+When `.nvmrc` moves past the box's `node -v` (a Node security release, or a
+box still on the old `setup_22.x` repo), upgrade Node before `npm ci`. The
+entrypoint `exec`s whatever `node` is on `PATH`, so the restart at the end of
+the upgrade is what moves the app onto the new binary:
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+sudo apt-get install -y nodejs
+node -v                             # expect >= the version in .nvmrc
+# ...then the upgrade steps above, ending in the pm2 restart
+ls -l /proc/$(pm2 pid redesigned-giggle)/exe   # "(deleted)" = still on the old binary
 ```
 
 ## 7. Reverse proxy
