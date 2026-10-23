@@ -15,6 +15,7 @@ import {
   Loader2,
   MemoryStick,
   RefreshCw,
+  Sparkles,
   RotateCcw,
   Trash2,
   Unlink,
@@ -71,6 +72,8 @@ import Plan from "@/components/ui/agent-plan"
 import { buildDeploymentTasks } from "@/lib/deployment-stages"
 import { AutoRefresh } from "@/components/dashboard/auto-refresh"
 import { HeartbeatBar, type HeartbeatSample } from "@/components/dashboard/heartbeat-bar"
+import { useAgentChat } from "@/components/agent-chat/agent-chat-provider"
+import { chatAgentFor, hasDashboardChat } from "@/lib/chat-windows"
 import { AccessTab } from "./instance-access-tab"
 import { ToolsTab } from "./instance-tools-tab"
 import { SkillsTab } from "./instance-skills-tab"
@@ -279,6 +282,38 @@ function useInstancePolling(initialInstance: InstanceLite, initialLogs: LogLite[
   }
 }
 
+/** How long after creation a running agent still opens its chat on its own, once. */
+const WELCOME_CHAT_WINDOW_MS = 30 * 60_000
+
+/**
+ * Open the chat as soon as a new agent goes live: the first thing to do with
+ * an agent is talk to it. Once per agent per browser, and only for an agent
+ * that finished deploying while this page was open or in the last 30 minutes
+ * (a paid deploy can finish before the customer is back from checkout).
+ */
+function useWelcomeChat(instance: InstanceLite, access: AccessControl) {
+  const { openChat } = useAgentChat()
+  const watchedDeploy = useRef(instance.status !== "running")
+  const httpsReady = Boolean(instance.managedSubdomain || (instance.domain && instance.tlsStatus === "issued"))
+  const eligible = instance.status === "running" && access.canOperate && httpsReady && hasDashboardChat(instance)
+
+  useEffect(() => {
+    if (!eligible) return
+    const fresh = Date.now() - new Date(instance.createdAt).getTime() < WELCOME_CHAT_WINDOW_MS
+    if (!watchedDeploy.current && !fresh) return
+    const key = `atlas.agent-chat.welcomed.${instance.id}`
+    try {
+      if (window.localStorage.getItem(key)) return
+      window.localStorage.setItem(key, "1")
+    } catch {
+      /* no storage: open it this time anyway */
+    }
+    openChat(chatAgentFor(instance), { size: "full", welcome: true })
+    // Opens once, when the agent becomes eligible; later prop changes don't reopen it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eligible, instance.id])
+}
+
 export function InstanceTabs({
   active,
   access,
@@ -301,6 +336,7 @@ export function InstanceTabs({
   const { instance, logs } = useInstancePolling(initialInstance, initialLogs)
   const router = useRouter()
   const pathname = usePathname()
+  useWelcomeChat(instance, access)
 
   function goTab(id: string) {
     router.push(`${pathname}?tab=${id}`)
@@ -894,12 +930,6 @@ function ManagedHostnameCard({ instance }: { instance: InstanceLite }) {
   )
 }
 
-/* ───────────── AGENT CHAT (AgentWebUI Lite) ───────────── */
-/**
- * The agent's chat page inside the dashboard. Every open asks the server for a
- * fresh one-time sign-in link (POST /api/instances/[id]/chat-embed), so no
- * password reaches the browser and a copied link is useless a minute later.
- */
 /* ───────────── CREDENTIALS CARD ───────────── */
 function CredentialsCard({
   instanceId,
@@ -965,7 +995,7 @@ function CredentialsCard({
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
             {liteChat
-              ? `Chat with your ${runtimeLabel} agent at its address above. Sign in there with this email and password.${
+              ? `The chat in the dashboard signs you in by itself. To open your ${runtimeLabel} agent's chat at its own address or IP, sign in there with this email and password.${
                   terminal ? " The same login opens its browser terminal." : ""
                 }`
               : webui
@@ -1926,6 +1956,7 @@ function ControlsTab({
           </AlertDialog>
         </div>
       </SectionCard>
+      <ModelCard instance={instance} />
       <CustomInstructionsCard instance={instance} />
       <AgentTypeCard instance={instance} />
       {!isVps && (
@@ -1958,6 +1989,236 @@ function ControlsTab({
       {instance.hasRootPassword && instance.status === "running" && (
         <ServerAccessCard instanceId={instance.id} ipAddress={instance.ipAddress} />
       )}
+    </div>
+  )
+}
+
+/* ───────────── MODEL CARD ───────────── */
+const PLAN_DEFAULT = "__plan_default__"
+
+type ModelTag = "cheap" | "quality" | "allrounder"
+type ModelOption = { slug: string; label: string; contextLength: number | null; tag: ModelTag | null }
+type ModelInfo = { current: string | null; tierDefault: string; runtime: string; options: ModelOption[] }
+
+// At-a-glance positioning for each model: label + accent color per tag.
+const MODEL_TAG_META: Record<ModelTag, { label: string; className: string }> = {
+  cheap: {
+    label: "Cheap",
+    className: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  },
+  quality: {
+    label: "Best output",
+    className: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  },
+  allrounder: {
+    label: "All-rounder",
+    className: "border-sky-500/40 bg-sky-500/10 text-sky-600 dark:text-sky-400",
+  },
+}
+
+function formatContext(ctx: number | null): string | null {
+  if (ctx == null) return null
+  return ctx >= 1000 ? `${Math.round(ctx / 1000)}k context` : `${ctx} context`
+}
+
+function ModelTagBadge({ tag }: { tag: ModelTag | null }) {
+  if (!tag) return null
+  const meta = MODEL_TAG_META[tag]
+  return (
+    <Badge variant="outline" className={cn("px-1.5 py-0 text-[10px]", meta.className)}>
+      {meta.label}
+    </Badge>
+  )
+}
+
+/**
+ * The model the agent runs. Applying a new one writes it into the agent's
+ * environment and restarts the agent (and its chat page), so the dashboard is
+ * the one place the model is chosen: the chat page shows it but offers no
+ * choice of its own.
+ */
+function ModelCard({ instance }: { instance: InstanceLite }) {
+  const [info, setInfo] = useState<ModelInfo | null>(null)
+  const [loadError, setLoadError] = useState(false)
+  const [selected, setSelected] = useState<string>(PLAN_DEFAULT)
+  const [confirming, setConfirming] = useState(false)
+  const [applying, setApplying] = useState(false)
+  const router = useRouter()
+
+  useEffect(() => {
+    let active = true
+    fetch(`/api/instances/${instance.id}/model`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((j: ModelInfo) => {
+        if (!active) return
+        setInfo(j)
+        setSelected(j.current ?? PLAN_DEFAULT)
+      })
+      .catch(() => active && setLoadError(true))
+    return () => {
+      active = false
+    }
+  }, [instance.id])
+
+  const optionFor = (slug: string) => info?.options.find((o) => o.slug === slug)
+  const labelFor = (slug: string) => optionFor(slug)?.label ?? slug
+  const runningSlug = info ? (info.current ?? info.tierDefault) : null
+  const chosenSlug = info ? (selected === PLAN_DEFAULT ? info.tierDefault : selected) : null
+  const isDirty = info !== null && selected !== (info.current ?? PLAN_DEFAULT)
+  const running = instance.status === "running"
+  const hasChat = hasDashboardChat(instance)
+
+  async function apply() {
+    if (!info) return
+    setApplying(true)
+    try {
+      const modelSlug = selected === PLAN_DEFAULT ? null : selected
+      const r = await fetch(`/api/instances/${instance.id}/model`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelSlug }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        toast.error(j.error || "Couldn't change the model.")
+        return
+      }
+      setInfo({ ...info, current: modelSlug })
+      if (j.warning) toast.warning(j.warning)
+      else
+        toast.success(
+          running
+            ? `${instance.name} restarted on ${labelFor(chosenSlug!)}.`
+            : `Saved. ${instance.name} uses ${labelFor(chosenSlug!)} when it starts.`,
+        )
+      router.refresh()
+    } finally {
+      setApplying(false)
+      setConfirming(false)
+    }
+  }
+
+  const runningOption = runningSlug ? optionFor(runningSlug) : undefined
+
+  return (
+    <div id="model" className="scroll-mt-24">
+      <SectionCard
+        title="Model"
+        description="The AI model your agent thinks with. Changing it updates the agent's environment and restarts it."
+      >
+        {loadError ? (
+          <p className="text-sm text-muted-foreground">Couldn&apos;t load the models. Refresh the page to try again.</p>
+        ) : !info || !runningSlug ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            Loading models…
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-muted/30 p-3">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Sparkles className="size-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-mono text-[10px] tracking-[0.1em] text-muted-foreground uppercase">
+                  {running ? "Running on" : "Set to"}
+                  {info.current === null ? " · plan default" : ""}
+                </p>
+                <p className="truncate text-sm font-semibold text-foreground">{labelFor(runningSlug)}</p>
+                <p className="truncate font-mono text-[11px] text-muted-foreground">
+                  {runningSlug}
+                  {formatContext(runningOption?.contextLength ?? null) ? ` · ${formatContext(runningOption?.contextLength ?? null)}` : ""}
+                </p>
+              </div>
+              <ModelTagBadge tag={runningOption?.tag ?? null} />
+            </div>
+
+            {info.options.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No other models are available for this engine yet. An admin enables them in Admin → Models.
+              </p>
+            ) : (
+              <Field>
+                <FieldLabel>Switch to</FieldLabel>
+                <Select value={selected} onValueChange={(v) => v && setSelected(v)} disabled={applying}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue>
+                      {(v: string) => (v === PLAN_DEFAULT ? `Plan default · ${labelFor(info.tierDefault)}` : labelFor(v))}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value={PLAN_DEFAULT}>Plan default · {labelFor(info.tierDefault)}</SelectItem>
+                      {info.options.map((m) => (
+                        <SelectItem key={m.slug} value={m.slug}>
+                          <span className="flex w-full items-center gap-2">
+                            <span className="truncate">{m.label}</span>
+                            {formatContext(m.contextLength) && (
+                              <span className="font-mono text-[10px] text-muted-foreground">
+                                {formatContext(m.contextLength)}
+                              </span>
+                            )}
+                            <ModelTagBadge tag={m.tag} />
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
+
+            {isDirty && (
+              <div className="flex flex-wrap items-center gap-3">
+                <Button size="sm" onClick={() => (running ? setConfirming(true) : void apply())} disabled={applying}>
+                  {applying ? (
+                    <Loader2 data-icon="inline-start" className="animate-spin" />
+                  ) : (
+                    <RotateCcw data-icon="inline-start" />
+                  )}
+                  {applying ? (running ? "Restarting…" : "Saving…") : running ? "Apply & restart" : "Save"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setSelected(info.current ?? PLAN_DEFAULT)}
+                  disabled={applying}
+                >
+                  Cancel
+                </Button>
+                {applying && (
+                  <p className="text-xs text-muted-foreground">Updating the environment and restarting the agent…</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </SectionCard>
+
+      <AlertDialog open={confirming} onOpenChange={(open) => !applying && setConfirming(open)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Restart {instance.name} on {chosenSlug ? labelFor(chosenSlug) : "the new model"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              The agent restarts with the new model, which takes up to a minute. A reply in progress stops.
+              {hasChat
+                ? " New chats use the new model; existing chats keep the model they started with."
+                : " New conversations use the new model."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel variant="outline" disabled={applying}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={() => void apply()} disabled={applying}>
+              {applying && <Loader2 data-icon="inline-start" className="animate-spin" />}
+              {applying ? "Restarting…" : "Apply & restart"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

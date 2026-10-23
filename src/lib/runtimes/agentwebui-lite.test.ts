@@ -1,3 +1,4 @@
+import crypto from "node:crypto"
 import { afterEach, describe, expect, it } from "vitest"
 import {
   LITE_BRAND_NAME,
@@ -11,6 +12,9 @@ import {
   LITE_SETTING_KEYS,
   buildLiteMigrationScript,
   buildOpenWebuiRemovalSteps,
+  buildLiteEmbedUrl,
+  liteAllowsFraming,
+  liteEmbedSecret,
   liteModelId,
   litePipSpec,
   liteVersion,
@@ -19,7 +23,7 @@ import {
 import { getRuntime } from "./index"
 import { bakeIdentity } from "@/lib/warm-pool-key"
 
-const VARS = ["AGENTWEBUI_LITE_PIP_SPEC"] as const
+const VARS = ["AGENTWEBUI_LITE_PIP_SPEC", "INSTANCE_ENCRYPTION_KEY"] as const
 const saved = Object.fromEntries(VARS.map((k) => [k, process.env[k]]))
 afterEach(() => {
   for (const k of VARS) {
@@ -65,7 +69,7 @@ describe("Lite as the sidecar", () => {
     expect(sidecar.seedAdmin).toBeUndefined()
   })
 
-  it("starts Hermes over ACP behind the agent's email and password, offering the enabled models", () => {
+  it("starts Hermes over ACP behind the agent's email and password, on the dashboard's model", () => {
     const env = getRuntime("hermes").sidecar!.renderEnv(envArgs())
     expect(env).toMatchObject({
       HOST: "127.0.0.1",
@@ -73,7 +77,8 @@ describe("Lite as the sidecar", () => {
       LOGIN_EMAIL: "admin+inst_1@hermes.local",
       PASSWORD: "pw",
       TRUST_PROXY: "true",
-      LOCK_MODEL: "false",
+      // The model is chosen in the dashboard (Controls → Model), not the chat.
+      LOCK_MODEL: "true",
       LOCK_FOLDER: "true",
       AGENT_HERMES_COMMAND: "/opt/hermes/venv/bin/hermes acp",
       AGENT_HERMES_NAME: "Research bot",
@@ -87,6 +92,19 @@ describe("Lite as the sidecar", () => {
     expect(Object.keys(env).some((k) => k.startsWith("PROVIDER_"))).toBe(false)
     expect(env).not.toHaveProperty("EMBED_SECRET")
     expect(env).not.toHaveProperty("FRAME_ANCESTORS")
+  })
+
+  it("lets only the dashboard frame the page, and only with a secret to sign it in", () => {
+    const sidecar = getRuntime("hermes").sidecar!
+    const env = sidecar.renderEnv(
+      envArgs({ embedSecret: "e".repeat(64), frameAncestors: ["https://app.atlasagents.dev", "nope", "https://x/y"] }),
+    )
+    expect(env).toMatchObject({ EMBED_SECRET: "e".repeat(64), FRAME_ANCESTORS: "https://app.atlasagents.dev" })
+    // Either one alone does nothing: Lite needs both to sign a framed page in.
+    expect(sidecar.renderEnv(envArgs({ embedSecret: "e".repeat(64) }))).not.toHaveProperty("EMBED_SECRET")
+    expect(sidecar.renderEnv(envArgs({ frameAncestors: ["https://app.atlasagents.dev"] }))).not.toHaveProperty(
+      "FRAME_ANCESTORS",
+    )
   })
 
   it("locks the model when no models are enabled (a provider other than OpenRouter)", () => {
@@ -260,3 +278,34 @@ describe("removing Open WebUI from a box", () => {
   })
 })
 
+
+describe("signing the dashboard in", () => {
+  it("derives a different, stable embed secret per agent", () => {
+    process.env.INSTANCE_ENCRYPTION_KEY = "k".repeat(64)
+    expect(liteEmbedSecret("a")).toBe(liteEmbedSecret("a"))
+    expect(liteEmbedSecret("a")).not.toBe(liteEmbedSecret("b"))
+    expect(liteEmbedSecret("a")).toHaveLength(64) // Lite wants 32+ characters
+    delete process.env.INSTANCE_ENCRYPTION_KEY
+    expect(() => liteEmbedSecret("a")).toThrow(/INSTANCE_ENCRYPTION_KEY/)
+  })
+
+  it("makes a one-minute link in Lite's format: base64url claims, a dot, the hex HMAC", () => {
+    const now = Date.UTC(2026, 9, 20)
+    const url = new URL(buildLiteEmbedUrl("https://a.atlasdeploy.xyz/", "s".repeat(64), now))
+    expect(url.origin + url.pathname).toBe("https://a.atlasdeploy.xyz/embed")
+    const [text, signature] = url.searchParams.get("token")!.split(".")
+    expect(signature).toBe(crypto.createHmac("sha256", "s".repeat(64)).update(text).digest("hex"))
+    const claims = JSON.parse(Buffer.from(text, "base64url").toString("utf8"))
+    expect(claims.exp).toBe(now / 1000 + 60)
+    expect(claims.nonce).toMatch(/^[0-9a-f]{32}$/)
+  })
+
+  it("reads whether a page lets the dashboard frame it from Lite's frame policy", () => {
+    const csp = "frame-ancestors 'self' https://app.atlasagents.dev https://agents.example.com"
+    expect(liteAllowsFraming(csp, "https://app.atlasagents.dev")).toBe(true)
+    expect(liteAllowsFraming(`default-src 'self'; ${csp}`, "https://agents.example.com/")).toBe(true)
+    expect(liteAllowsFraming("frame-ancestors 'self'", "https://app.atlasagents.dev")).toBe(false)
+    expect(liteAllowsFraming(csp, "https://app.atlasagents.dev.evil.com")).toBe(false)
+    expect(liteAllowsFraming(null, "https://app.atlasagents.dev")).toBe(false)
+  })
+})

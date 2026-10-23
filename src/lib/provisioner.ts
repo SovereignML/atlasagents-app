@@ -51,6 +51,7 @@ import {
   runsLite,
 } from "@/lib/runtimes/agentwebui-lite"
 import { runtimeAcceptsModel } from "@/lib/runtimes/labels"
+import { chatUiFramingArgs } from "@/lib/chat-ui-origins"
 import { selectableModelsForRuntime } from "@/lib/allowed-models"
 import { FREE_DEMO_TTL_MS } from "@/configs/plans"
 import { isPinned, isSafeVersion, resolveForRegistry } from "@/lib/runtime-versions"
@@ -2341,6 +2342,7 @@ async function configureRuntimeOverSsh(
       // Same slug the runtime pins as its own default: new chats start on it.
       model: llmConfig.model,
       selectableModels: await chatUiModelSlugs(instance.runtime, llmConfig.providerToken),
+      ...(await chatUiFramingArgs(instance)),
     })
     sidecarEnvB64 = Buffer.from(renderEnvFile(sidecarEnv), "utf8").toString("base64")
     sidecarEnvPath = runtime.sidecar.envPath
@@ -3832,6 +3834,7 @@ export async function migrateChatUiToLite(
       adminPassword,
       model,
       selectableModels: await chatUiModelSlugs(instance.runtime, providerToken),
+      ...(await chatUiFramingArgs(instance)),
     })
     const step = await sshRunScriptLogged(
       target,
@@ -3870,6 +3873,91 @@ export async function migrateChatUiToLite(
     })
     return false
   }
+}
+
+/**
+ * Keep an agent's chat UI (AgentWebUI Lite) in step with the dashboard. A box
+ * made before Lite, or on an older Lite release, is moved or upgraded first.
+ * Otherwise every key of Lite's env is rewritten (the model the dashboard
+ * chose, the enabled models, the in-dashboard framing) and Lite restarts only
+ * when one moved, because a restart drops in-flight chat streams.
+ *
+ * Best-effort: a stale model is a worse experience, not a broken agent, so it
+ * never throws. Returns whether the chat UI is current.
+ */
+async function syncChatUi(
+  instance: Instance,
+  runtime: RuntimeEngine,
+  target: SshTarget,
+  llmConfig: { model: string; providerToken: string },
+): Promise<boolean> {
+  const sidecar = runtime.sidecar
+  if (!sidecar) return false
+  if (!liteIsCurrent(instance, sidecar)) {
+    return migrateChatUiToLite(instance, runtime, target, llmConfig.model, llmConfig.providerToken)
+  }
+  if (!instance.openclawAdminPasswordEnc) return false
+  try {
+    const liteEnv = sidecar.renderEnv({
+      instance,
+      gatewayToken: "",
+      gatewayPort: runtime.gatewayPort,
+      enableSignup: false,
+      adminEmail: agentAdminEmail(instance, runtime.id),
+      adminPassword: decryptSecret(instance.openclawAdminPasswordEnc),
+      model: llmConfig.model,
+      selectableModels: await chatUiModelSlugs(instance.runtime, llmConfig.providerToken),
+      ...(await chatUiFramingArgs(instance)),
+    })
+    const liteStep = await sshRunScriptLogged(
+      target,
+      buildEnvKeyUpsertScript({
+        envPath: sidecar.envPath,
+        entries: Object.entries({ ATLAS_PINNED_MODEL: "default", ...liteEnv }).map(([key, value]) => ({ key, value })),
+      }),
+      "writing_config",
+      "reprovision:chat ui env",
+      { timeoutMs: 30_000 },
+    )
+    await logSshStep(instance.id, liteStep)
+    if (liteStep.exitCode !== 0 && liteStep.exitCode !== null) {
+      await db.insert(instanceLogs).values({
+        instanceId: instance.id,
+        level: "warn",
+        message: `Could not update the chat UI (exit ${liteStep.exitCode}); chats may keep the previous model until it restarts.`,
+      })
+      return false
+    }
+    if (liteStep.stdout.includes(ENV_KEY_CHANGED)) {
+      await sshSystemctlRestart(target, sidecar.serviceName)
+      await db.insert(instanceLogs).values({
+        instanceId: instance.id,
+        level: "info",
+        message: `Chat UI restarted so new chats use ${llmConfig.model || "the default model"}.`,
+      })
+    }
+    return true
+  } catch (err) {
+    await db.insert(instanceLogs).values({
+      instanceId: instance.id,
+      level: "warn",
+      message: `Could not update the chat UI: ${err instanceof Error ? err.message : String(err)}`,
+    })
+    return false
+  }
+}
+
+/**
+ * Bring a running agent's chat UI in step with the dashboard without touching
+ * its engine. The in-dashboard chat calls it when the agent's page does not
+ * yet let the dashboard frame it (a box set up before in-dashboard chat, or a
+ * team that added a white-label domain since). Returns whether it is current.
+ */
+export async function refreshChatUi(instance: Instance): Promise<boolean> {
+  const runtime = getRuntime(instance.runtime)
+  if (!instance.webuiEnabled || !runtime.sidecar) return false
+  const llmConfig = await resolveRuntimeLlmConfig(instance, runtime)
+  return syncChatUi(instance, runtime, sshTargetFor(instance), llmConfig)
 }
 
 /**
@@ -4105,52 +4193,7 @@ export async function reprovisionBotEnv(instance: Instance): Promise<void> {
     //
     // Best-effort throughout: a stale model is a worse experience, not a broken
     // agent, so nothing here fails the surrounding reprovision.
-    if (webuiEnabled && runtime.sidecar && !liteIsCurrent(instance, runtime.sidecar)) {
-      await migrateChatUiToLite(instance, runtime, target, llmConfig.model, llmConfig.providerToken)
-    } else if (webuiEnabled && runtime.sidecar && instance.openclawAdminPasswordEnc) {
-      // AgentWebUI Lite's agent processes inherit its environment and read the
-      // engine's config when they start, so a new model (or a change to the
-      // models an admin enabled) only reaches chats once Lite restarts. Rewrite
-      // every key Lite's env is made of and restart only when one moved.
-      const sidecar = runtime.sidecar
-      const liteEnv = sidecar.renderEnv({
-        instance,
-        gatewayToken: "",
-        gatewayPort: runtime.gatewayPort,
-        enableSignup: false,
-        adminEmail: agentAdminEmail(instance, runtime.id),
-        adminPassword: decryptSecret(instance.openclawAdminPasswordEnc),
-        model: llmConfig.model,
-        selectableModels: await chatUiModelSlugs(instance.runtime, llmConfig.providerToken),
-      })
-      const liteStep = await sshRunScriptLogged(
-        target,
-        buildEnvKeyUpsertScript({
-          envPath: sidecar.envPath,
-          entries: Object.entries({ ATLAS_PINNED_MODEL: "default", ...liteEnv }).map(([key, value]) => ({ key, value })),
-        }),
-        "writing_config",
-        "reprovision:chat ui model pin",
-        { timeoutMs: 30_000 },
-      )
-      await logSshStep(instance.id, liteStep)
-      if (liteStep.exitCode === 0 || liteStep.exitCode === null) {
-        if (liteStep.stdout.includes(ENV_KEY_CHANGED)) {
-          await sshSystemctlRestart(target, sidecar.serviceName)
-          await db.insert(instanceLogs).values({
-            instanceId: instance.id,
-            level: "info",
-            message: `Chat UI restarted so new chats use ${llmConfig.model || "the default model"}.`,
-          })
-        }
-      } else {
-        await db.insert(instanceLogs).values({
-          instanceId: instance.id,
-          level: "warn",
-          message: `Could not update the chat UI (exit ${liteStep.exitCode}); chats may keep the previous model until it restarts.`,
-        })
-      }
-    }
+    if (webuiEnabled) await syncChatUi(instance, runtime, target, llmConfig)
 
   } else if (instance.containerName && instance.containerPort) {
     await sshDockerRun(

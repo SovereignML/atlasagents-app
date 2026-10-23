@@ -7,6 +7,7 @@ import { DashboardTopbar } from "@/components/layout/dashboard-topbar"
 import { ConsoleThemePortalSync } from "@/components/layout/console-theme-portal-sync"
 import { ImpersonationBanner } from "@/components/layout/impersonation-banner"
 import { VerifyEmailBanner } from "@/components/dashboard/verify-email-banner"
+import { AgentChatProvider } from "@/components/agent-chat/agent-chat-provider"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { getEffectiveUserId, getHonoredImpersonatedUserId, getEffectiveTeam } from "@/lib/effective-user"
 import { getUserTeam, canManageTeam, listUserTeams } from "@/lib/team"
@@ -130,6 +131,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     >
       <ConsoleThemePortalSync theme={consoleTheme} />
       {brandingCss && <style dangerouslySetInnerHTML={{ __html: brandingCss }} />}
+      <AgentChatProvider>
       <SidebarProvider defaultOpen={defaultOpen} className="flex-1">
         <DashboardSidebar
           brandName={branding.brandName}
@@ -178,6 +180,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </main>
         </SidebarInset>
       </SidebarProvider>
+      </AgentChatProvider>
     </div>
   )
 }
