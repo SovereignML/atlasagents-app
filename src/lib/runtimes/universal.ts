@@ -53,28 +53,58 @@ function highestMinNode(versions: string[]): string {
   })
 }
 
+/** Options for a universal bootstrap that is not a pooled VM: the BYOS connect-time prebake. */
+export type UniversalBootstrapOpts = {
+  /** The customer's sshd port, for the firewall allow-rule. */
+  sshPort?: number
+  /** False on BYOS: allow-rules only, never `ufw enable`. */
+  manageFirewall?: boolean
+  /** Bake Chrome and agent-browser. Default true, as on every pool VM. */
+  browserDeps?: boolean
+  /** False leaves Caddy out (a BYOS server that already runs a web server). */
+  installCaddy?: boolean
+  /** Per-engine version pins; an engine without one installs its code pin. */
+  versions?: Partial<Record<(typeof LITE_ENGINES)[number], string>>
+  /** Steps run after every engine's install, inside the framing. */
+  extraSteps?: string
+}
+
 /**
- * The cloud-init bootstrap of a universal VM: the shared framing once (with
- * every engine's system account), then each engine's own install steps with
- * its chat UI, at each engine's pinned version. Browser tools are baked in, as
- * on every pool VM (bake time is ours, and a claim cannot add them quickly).
+ * The bootstrap of a universal VM: the shared framing once (with every
+ * engine's system account), then each engine's own install steps with its chat
+ * UI, at each engine's pinned version. On a pool VM browser tools are baked in
+ * (bake time is ours, and a claim cannot add them quickly); the BYOS prebake
+ * passes its own options.
  */
-export function renderUniversalBootstrap(): string {
+export function renderUniversalBootstrap(opts: UniversalBootstrapOpts = {}): string {
   const engines = liteEngines()
   const payload = engines
     .map((e) => {
       if (!e.renderInstallSteps) throw new Error(`${e.id} has no install steps to share`)
       return `
 echo "=== universal: ${e.id} ==="
-${e.renderInstallSteps({ gatewayPort: e.gatewayPort, webuiEnabled: true, browserDeps: true })}`
+${e.renderInstallSteps({
+  gatewayPort: e.gatewayPort,
+  webuiEnabled: true,
+  browserDeps: opts.browserDeps !== false,
+  runtimeVersion: opts.versions?.[e.id as (typeof LITE_ENGINES)[number]],
+})}`
     })
     .join("\n")
   const [primary, ...rest] = engines.map((e) => ({ installDir: e.paths.installDir, systemUser: e.paths.systemUser }))
   return buildPrereqScript({
     accounts: [primary, ...rest],
-    minNodeVersion: highestMinNode(engines.map((e) => e.minNode)),
-    payloadSteps: payload,
+    minNodeVersion: universalMinNode(),
+    sshPort: opts.sshPort,
+    manageFirewall: opts.manageFirewall,
+    installCaddy: opts.installCaddy,
+    payloadSteps: payload + (opts.extraSteps ?? ""),
   })
+}
+
+/** The Node a universal box gets: the highest floor across its engines. */
+export function universalMinNode(): string {
+  return highestMinNode(liteEngines().map((e) => e.minNode))
 }
 
 /** What a universal VM is baked with: every engine's version and Lite's (for the pool key). */

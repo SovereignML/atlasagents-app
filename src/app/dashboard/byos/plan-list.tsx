@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
+import { RuntimeLogo } from "@/components/dashboard/runtime-logo"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -17,7 +18,7 @@ export type PlanRowData = {
   /** Paid up — false while Stripe is retrying a failed payment. */
   allowsInstall: boolean
   /** The agent this plan covers, or null while it is available. */
-  agent: { id: string; name: string } | null
+  agent: { id: string; name: string; runtime: string | null } | null
   /** Set on a grandfathered per-server plan, which covers a whole server. */
   serverLabel: string | null
 }
@@ -78,7 +79,11 @@ export function PlanList({ plans }: { plans: PlanRowData[] }) {
                 {plan.serverLabel ? (
                   <>Server plan · every agent on {plan.serverLabel}</>
                 ) : plan.agent ? (
-                  <Link href={`/dashboard/instances/${plan.agent.id}`} className="hover:underline">
+                  <Link
+                    href={`/dashboard/instances/${plan.agent.id}`}
+                    className="inline-flex items-center gap-2 hover:underline"
+                  >
+                    <RuntimeLogo runtime={plan.agent.runtime} size={16} className="size-4" />
                     {plan.agent.name}
                   </Link>
                 ) : (

@@ -38,6 +38,7 @@ import { readJsonBody } from "@/lib/request-body"
 import { byosDeploySchema } from "@/lib/validations"
 import { getTeamAgentLimit, countTeamAgents } from "@/lib/seats"
 import { runtimeCaps } from "@/lib/runtimes/labels"
+import { BYOS_RUNTIME_IDS } from "@/lib/runtimes/ids"
 import { runtimeDeployDenial } from "@/lib/runtime-access"
 import {
   getByoProvider,
@@ -252,13 +253,21 @@ async function handleByosDeploy(req: NextRequest) {
   const rawCfg =
     agentConfigInput && typeof agentConfigInput === "object"
       ? { ...(agentConfigInput as Record<string, unknown>), deployment_target: "byos" }
-      : { use_case: "default", deployment_target: "byos", runtime: "openclaw" }
+      : { use_case: "default", deployment_target: "byos", runtime: "hermes" }
 
   const parsedAgentConfig = parseAgentConfig(rawCfg)
   if (!parsedAgentConfig.ok) {
     return NextResponse.json({ error: `Invalid agentConfig: ${parsedAgentConfig.error}` }, { status: 400 })
   }
   const cfg = parsedAgentConfig.data
+  // OpenClaw is not offered on BYOS: the connect-time prebake installs the
+  // universal image, which every other engine deploys onto (runtimes/ids.ts).
+  if (!(BYOS_RUNTIME_IDS as readonly string[]).includes(cfg.runtime)) {
+    return NextResponse.json(
+      { error: "That engine isn't available on your own server. Pick Hermes or another engine." },
+      { status: 400 },
+    )
+  }
   const runtimeDenial = runtimeDeployDenial(cfg.runtime, session)
   if (runtimeDenial) return NextResponse.json({ error: runtimeDenial }, { status: 403 })
   // Derive the shared agent columns the same way the managed deploy path does

@@ -268,6 +268,18 @@ describe("Hermes bootstrap — Python install strategy", () => {
       expect(script).toContain("(3, 11) <= sys.version_info[:2]")
     }
   })
+
+  // Ubuntu 26.04 ships Python 3.14: rather than failing, uv fetches the newest
+  // CPython hermes-agent accepts, and every venv is built from it.
+  it("fetches CPython 3.13 with uv when the system Python is past the ceiling", () => {
+    const script = render(true)
+    expect(script).toContain("for cand in python3 python3.13 python3.12 python3.11; do")
+    expect(script).toContain("uv python install 3.13")
+    expect(script).toContain("UV_PYTHON_INSTALL_DIR='/opt/uv-python'")
+    expect(script).toContain('uv venv --python "$py" "$venv"')
+    // uv has to be installed before verify_python can use it.
+    expect(script.indexOf('step "install_uv"')).toBeLessThan(script.indexOf('step "verify_python"'))
+  })
 })
 
 /**

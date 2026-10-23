@@ -2,43 +2,24 @@
  * BYOS connect-time prebake — the work that does not depend on which agent the
  * customer eventually deploys, moved off the deploy path.
  *
- * A BYOS box gets no warm pool and no golden image: today every deploy builds
- * from scratch inside the window the customer is sitting and watching. This
- * module does that work earlier, in the background, right after they connect
- * the server — so the later deploy is close to what a warm-pool claim already
- * is: write config, restart, health-check.
+ * A BYOS box gets no warm pool: without this, every deploy builds from scratch
+ * inside the window the customer is sitting and watching. This installs the
+ * same universal image the warm pool bakes (runtimes/universal.ts: Hermes, the
+ * CLI engines, AgentWebUI Lite and every engine's ACP side) in the background,
+ * the moment the customer connects the server, so the later deploy only writes
+ * config, starts the chosen engine and health-checks.
  *
- * The managed-VM equivalent is `buildBakeFinalizeScript` in warm-pool.ts, whose
- * own comment states the shape: *"the slow-once, per-instance-INDEPENDENT work,
- * run once the box has bootstrapped so the eventual claim is fast. Idempotent."*
- *
- * What gets installed vs merely downloaded is a deliberate, asymmetric choice:
- *
- *   - **Shared prerequisites** (apt, Caddy, Node, swap, accounts) — installed.
- *     Identical for both runtimes.
- *   - **Hermes** (hermes-agent, with its ACP extra) — installed, its systemd
- *     unit written and enabled, and its CLI warmed (see `prebake_finalize`).
- *     The chat UI (AgentWebUI Lite) is small and installed by the deploy.
- *   - **OpenClaw** — downloaded into the npm cache only, never installed. It is
- *     the genuine either/or choice, and its 225MB / 11,428-file extract is what
- *     makes it expensive — the extract stays at deploy.
- *
- * Consequence, recorded honestly: a Hermes deploy ends up faster than an
- * OpenClaw one. That is a bet on which engine customers pick, taken while the
- * platform's own default is unresolved (the deploy wizard provisions OpenClaw;
- * the marketing site markets Hermes). See plans/007-byos-fast-deploy.md.
- *
- * NOTHING here runs without recorded consent — see `prebakeDecision`.
+ * OpenClaw is not offered on BYOS, so it is not prebaked. No engine's unit is
+ * written: which one runs is decided at deploy, exactly as at a pool claim.
  */
 
-import { buildPrereqScript } from "@/lib/runtimes/bootstrap"
-import {
-  HERMES_VPS_MIN_NODE,
-  buildHermesPrebakeSteps,
-} from "@/lib/runtimes/hermes"
-import { OPENCLAW_VERSION, OPENCLAW_VPS_MIN_NODE } from "@/lib/runtimes/openclaw"
 import { buildBakeFinalizeScript } from "@/lib/runtimes/finalize"
-import { npmSpec } from "@/lib/runtime-versions"
+import {
+  UNIVERSAL_POOL_RUNTIME,
+  renderUniversalBootstrap,
+  universalMinNode,
+} from "@/lib/runtimes/universal"
+import { LITE_BIN } from "@/lib/runtimes/agentwebui-lite"
 import type { PreflightFacts } from "@/lib/byos-preflight-parse"
 
 /** Mirrors `byosServers.prebakeStatus`. */
@@ -46,75 +27,39 @@ export type PrebakeStatus = "none" | "running" | "ready" | "failed" | "skipped"
 
 /**
  * Disk a prebaked box needs beyond the preflight's general floor: shared
- * prereqs + Chrome + the Hermes venv + the OpenClaw tarball in
- * the npm cache, on a machine that is also running whatever the customer
- * already runs.
+ * prereqs + the universal image (every engine but OpenClaw, and Lite), on a
+ * machine that is also running whatever the customer already runs.
  */
 export const PREBAKE_DISK_REQUIRED_GB = 12
 
-/**
- * The Node major every prebaked box gets. Both runtimes must accept it,
- * because at connect time the engine is not chosen yet — a box that gets one
- * runtime's major and is later handed the other's would be downgraded mid
- * deploy. They are equal by construction (see HERMES_VPS_MIN_NODE); this
- * picks the higher of the two so raising either one stays safe.
- */
+/** The Node major every prebaked box gets: the universal image's, which every BYOS engine accepts. */
 export function prebakeMinNode(): string {
-  const parts = (v: string) => v.split(".").map((n) => Number.parseInt(n, 10) || 0)
-  const [a, b] = [OPENCLAW_VPS_MIN_NODE, HERMES_VPS_MIN_NODE]
-  const [pa, pb] = [parts(a), parts(b)]
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    if ((pa[i] ?? 0) > (pb[i] ?? 0)) return a
-    if ((pa[i] ?? 0) < (pb[i] ?? 0)) return b
-  }
-  return a
+  return universalMinNode()
 }
 
 export type PrebakeDecision =
-  | { run: true }
-  | { run: false; status: Exclude<PrebakeStatus, "running" | "ready">; reason: string }
+  | { run: true; installCaddy: boolean }
+  | { run: false; status: "skipped"; reason: string }
 
 /**
- * Whether to prebake this server, and if not, why not.
+ * Whether to prebake this server, and how.
  *
  * Pure so it can be unit-tested and so the connect UI can explain itself
  * before anything is touched.
  *
- * The conflict rules are the important part. The preflight deliberately does
- * NOT block on a busy :443, an active firewall, or an existing Caddyfile — it
- * surfaces them and tells the owner they are their call. Installing Caddy in
- * the background moments later would answer that call for them. So a conflict
- * defers the work to deploy time, where it is explicit and the customer has
- * just asked for it. The consent checkbox does not override this: it covers
- * "you may preinstall packages", not "you may reconfigure my web server".
+ * Connecting a server is the go-ahead: there is no separate opt-in. The one
+ * thing held back is Caddy on a box that already serves the web (a busy :443,
+ * or Caddy, nginx or Apache present). The preflight surfaces those as the
+ * owner's call at install time, and installing Caddy in the background would
+ * answer it for them; everything else still installs.
  */
 export function prebakeDecision(opts: {
   facts: Pick<
     PreflightFacts,
     "port443Busy" | "hasCaddy" | "hasNginx" | "hasApache" | "diskAvailGb"
   >
-  consentAt: Date | null | undefined
 }): PrebakeDecision {
-  if (!opts.consentAt) {
-    return {
-      run: false,
-      status: "none",
-      reason: "The server owner has not agreed to have packages preinstalled.",
-    }
-  }
-
   const { facts } = opts
-  if (facts.hasCaddy || facts.hasNginx || facts.hasApache || facts.port443Busy) {
-    return {
-      run: false,
-      status: "skipped",
-      reason:
-        "This server already runs a web server or has :443 in use. We will " +
-        "install everything at deploy time instead, so nothing changes on it " +
-        "until you ask for an agent.",
-    }
-  }
-
   if (facts.diskAvailGb != null && facts.diskAvailGb < PREBAKE_DISK_REQUIRED_GB) {
     return {
       run: false,
@@ -126,79 +71,14 @@ export function prebakeDecision(opts: {
     }
   }
 
-  return { run: true }
-}
-
-/**
- * Warm the npm cache with OpenClaw's whole dependency tree, without installing
- * it and without unpacking anything.
- *
- * Three steps, none of which extract a file:
- *   1. `npm install --package-lock-only` resolves the full tree from registry
- *      metadata alone — no tarballs, no node_modules.
- *   2. The lockfile is read for every resolved `name@version`.
- *   3. `npm cache add` pulls each tarball into the shared npm cache and stops
- *      there.
- *
- * The obvious alternative — installing into a throwaway prefix — would warm
- * the same tarballs but pay OpenClaw's 11,428-file extract twice: once here
- * and again at deploy. This gets the same cache for one download and no
- * extract. The extract itself stays at deploy and is irreducible without
- * actually installing the package, which is the one thing the prebake is not
- * allowed to do for OpenClaw.
- *
- * Entirely best-effort. Every failure path leaves the cache as it was and the
- * deploy simply downloads, exactly as it does today.
- */
-function buildOpenclawCacheStep(pin: string | null): string {
-  // Unresolved falls back to the same code pin the deploy installs — not to
-  // `latest`, which would warm a cache the deploy then misses.
-  const spec = shellEscape(npmSpec("openclaw", pin ?? OPENCLAW_VERSION()))
-  return `
-step "cache_openclaw"
-# Download only — deliberately never installed here. See buildOpenclawCacheStep.
-OC_WARM=/var/tmp/openclaw-warm
-rm -rf "$OC_WARM" && mkdir -p "$OC_WARM"
-if (
-  cd "$OC_WARM" || exit 1
-  npm init -y >/dev/null 2>&1 || exit 1
-  # Resolve the tree from metadata alone: no tarballs, no node_modules.
-  npm install --package-lock-only --no-audit --no-fund ${spec} >/dev/null 2>&1 || exit 1
-  cat > warm.js <<'WARMJS'
-const lock = require("./package-lock.json")
-const out = new Set()
-for (const [path, meta] of Object.entries(lock.packages || {})) {
-  if (!path || !meta || !meta.version) continue
-  const name = meta.name || path.split("node_modules/").pop()
-  if (!name) continue
-  out.add(name + "@" + meta.version)
-}
-process.stdout.write([...out].join("\\n") + "\\n")
-WARMJS
-  node warm.js > specs.txt 2>/dev/null || exit 1
-  # Pull every tarball into the cache. Batched, because one npm invocation per
-  # package would dominate the runtime; a failing batch is retried singly so a
-  # single bad spec cannot cost us the whole tree.
-  while read -r batch; do
-    npm cache add $batch >/dev/null 2>&1 || for one in $batch; do npm cache add "$one" >/dev/null 2>&1 || true; done
-  done < <(xargs -n 20 < specs.txt)
-  echo "warmed $(wc -l < specs.txt) package specs into the npm cache"
-); then
-  :
-else
-  echo "openclaw cache warm failed — the deploy will download it instead"
-fi
-rm -rf "$OC_WARM"
-`
-}
-
-function shellEscape(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`
+  // An existing Caddy is fine to keep (the bootstrap keeps a new enough one);
+  // nginx, Apache or something else on :443 means Caddy waits for the deploy.
+  const servesWeb = facts.hasNginx || facts.hasApache || (facts.port443Busy && !facts.hasCaddy)
+  return { run: true, installCaddy: !servesWeb && !facts.hasCaddy }
 }
 
 export type PrebakeScriptOpts = {
-  /** Resolved pins. Null falls back to the runtime's code pin, as the deploy does. */
-  openclawVersion: string | null
+  /** Resolved Hermes pin. Null falls back to its code pin, as the deploy does. */
   hermesVersion: string | null
   /** The customer's sshd port — the firewall rules must name the real one. */
   sshPort?: number
@@ -210,42 +90,34 @@ export type PrebakeScriptOpts = {
    * demand when somebody actually turns the browser tool on.
    */
   browserDeps?: boolean
+  /** False on a server that already runs a web server (see prebakeDecision). */
+  installCaddy?: boolean
 }
 
 /**
- * The full connect-time script. Runs as one SSH session, reports through the
- * same status file and log the real bootstrap uses.
+ * The full connect-time script: the universal bootstrap, then the universal
+ * bake-finalize (Hermes' CLI warm-up). Runs as one SSH session and reports
+ * through the same status file and log the real bootstrap uses.
  */
 export function buildPrebakeScript(opts: PrebakeScriptOpts): string {
-  const payload = [
-    buildHermesPrebakeSteps({
-      browserDeps: opts.browserDeps === true,
-      pin: opts.hermesVersion ?? undefined,
-    }),
-    buildOpenclawCacheStep(opts.openclawVersion),
-    // Install + enable the gateway unit and warm Hermes' CLI, so the deploy
-    // only rewrites config and restarts. This is the same script the warm pool
-    // runs after a bake, for the same reason.
-    //
-    // Hermes only: OpenClaw is merely cached here, so writing its unit would
-    // point systemd at a binary that does not exist yet. The deploy writes it.
-    `
-step "prebake_finalize"
-${buildBakeFinalizeScript("hermes")}`,
-  ].join("\n")
-
-  return buildPrereqScript({
-    accounts: [
-      { installDir: "/opt/hermes", systemUser: "hermes" },
-      { installDir: "/opt/openclaw", systemUser: "openclaw" },
-    ],
-    minNodeVersion: prebakeMinNode(),
+  return renderUniversalBootstrap({
     sshPort: opts.sshPort,
     // Never ours to turn on. The box belongs to the customer and may already
     // be serving unrelated traffic; the allow-rules still go in so an agent is
     // reachable when a firewall is already active.
     manageFirewall: false,
-    payloadSteps: payload,
+    browserDeps: opts.browserDeps === true,
+    installCaddy: opts.installCaddy !== false,
+    versions: opts.hermesVersion ? { hermes: opts.hermesVersion } : {},
+    // Hermes' CLI warm-up, as after a pool bake. A subshell, so the finalize's
+    // own `set -uo pipefail` (best-effort, no -e) does not leak into the
+    // framing's `set -e`.
+    extraSteps: `
+step "prebake_finalize"
+(
+${buildBakeFinalizeScript(UNIVERSAL_POOL_RUNTIME).replace(/^#!.*\n/, "")}
+)
+`,
   })
 }
 
@@ -272,8 +144,7 @@ echo "caddy=$(command -v caddy >/dev/null 2>&1 && echo 1 || echo 0)"
 echo "uv=$(command -v uv >/dev/null 2>&1 && echo 1 || echo 0)"
 hermes_v="$(/opt/hermes/venv/bin/hermes --version 2>/dev/null | tr -d '\\n' | grep -oE '[0-9]+(\\.[0-9]+)+' | head -1)"
 echo "hermes=\${hermes_v}"
-echo "openclaw_cached=$(npm cache ls openclaw 2>/dev/null | grep -c . || echo 0)"
-echo "hermes_unit=$(systemctl list-unit-files hermes-gateway.service 2>/dev/null | grep -c hermes-gateway || echo 0)"
+echo "lite=$([ -x ${LITE_BIN} ] && echo 1 || echo 0)"
 echo "disk_avail_gb=$(df -BG --output=avail / 2>/dev/null | tail -1 | tr -dc '0-9')"
 `
 
@@ -282,7 +153,8 @@ export type PrebakeVerifyFacts = {
   hasCaddy: boolean
   hasUv: boolean
   hermesVersion: string | null
-  hermesUnitInstalled: boolean
+  /** AgentWebUI Lite, which every BYOS engine's deploy uses. */
+  liteInstalled: boolean
   diskAvailGb: number | null
 }
 
@@ -310,7 +182,7 @@ export function parsePrebakeVerify(stdout: string): PrebakeVerifyFacts {
     hasCaddy: flag("caddy"),
     hasUv: flag("uv"),
     hermesVersion: str("hermes"),
-    hermesUnitInstalled: flag("hermes_unit"),
+    liteInstalled: flag("lite"),
     diskAvailGb: num("disk_avail_gb"),
   }
 }
@@ -330,7 +202,7 @@ export type PrebakeUsability = {
  * bootstrap, which is what would have run anyway.
  */
 export function prebakeUsability(opts: {
-  runtime: "openclaw" | "hermes"
+  runtime: string
   facts: PrebakeVerifyFacts
   /** The version persisted at connect, which the deploy intends to install. */
   hermesPin?: string | null
@@ -346,6 +218,7 @@ export function prebakeUsability(opts: {
   }
 
   if (!facts.hasCaddy) misses.push("caddy is not installed")
+  if (!facts.liteInstalled) misses.push("the chat UI is not installed")
 
   if (opts.runtime === "hermes") {
     if (!facts.hermesVersion) misses.push("hermes is not installed")
@@ -355,11 +228,6 @@ export function prebakeUsability(opts: {
       // no longer honest.
       misses.push(`hermes is ${facts.hermesVersion}, pinned to ${opts.hermesPin}`)
     }
-    // The prebake writes and enables both units so the deploy only has to
-    // restart. A missing unit means the finalize step did not run (or was
-    // undone), which is exactly the drift this probe exists to catch — it was
-    // being collected and then ignored.
-    if (!facts.hermesUnitInstalled) misses.push("the hermes-gateway unit is not installed")
   }
 
   return { fastPath: misses.length === 0, misses }

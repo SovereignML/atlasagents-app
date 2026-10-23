@@ -88,7 +88,7 @@ All six are CLIs with no server of their own, so one factory (`createCliRuntime`
 - **Grok** (Grok Build) speaks ACP itself (`grok agent stdio`) and takes custom OpenAI-compatible models. `~/.grok/config.toml` overrides each of the agent's xAI models under its own name (`[model."grok-4.7"]`, `model = "x-ai/grok-4.7"`) with OpenRouter's `base_url` and `env_key = "OPENROUTER_API_KEY"`, limits the picker with `allowed_models`, pins Grok's helper models (`session_summary`, `web_search`, `image_description`, `prompt_suggestion`) to the agent's model (they default to built-in xAI names OpenRouter does not know), and turns off auto-update and telemetry (also `GROK_DISABLE_AUTOUPDATER`, `GROK_TELEMETRY_ENABLED=false`). No xAI login is needed. npm's postinstall unpacks the ~190 MB native binary next to the package. Checked end to end with Grok 1.0.61 over ACP against a stub: every call, titles included, went out as `x-ai/grok-4.7`.
 - **Warm pool:** served by the universal image (see *Warm pool* below).
 - **Free plan:** Gemini CLI and Grok are offered on Free (`allowedOnFree`), one live free agent per engine like OpenClaw and Hermes; the other CLI engines are paid-only.
-- **Not yet:** BYOS prebake, catalog tools (browser etc. are unsupported on these engines — they bring their own built-in tools), BYO non-OpenRouter keys.
+- **Not yet:** catalog tools (browser etc. are unsupported on these engines — they bring their own built-in tools), BYO non-OpenRouter keys.
 
 ### Version pinning ([`src/lib/runtime-versions.ts`](../src/lib/runtime-versions.ts))
 

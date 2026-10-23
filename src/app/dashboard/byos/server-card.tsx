@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Cpu, HardDrive, Loader2, MemoryStick, Plus, RefreshCw, Trash2 } from "lucide-react"
@@ -27,6 +27,9 @@ export type ServerCardData = {
   hwKernel: string | null
   capacityAgents: number
   agentCount: number
+  /** The connect-time prebake (byos-prebake-job.ts): "none" | "running" | "ready" | "failed" | "skipped". */
+  prebakeStatus: string
+  prebakeError: string | null
   /**
    * A grandfathered per-server plan covering every agent here, or null. New
    * plans are per agent and are not shown on a server.
@@ -43,6 +46,25 @@ function legacyPlanLine(plan: NonNullable<ServerCardData["legacyPlan"]>): string
   if (!plan.allowsInstall) return "Server plan · payment failed — update your card in Billing"
   if (plan.cancelAtPeriodEnd) return `Server plan · covers every agent here until ${date ?? "period end"}`
   return `Server plan · covers every agent here${date ? `, renews ${date}` : ""}`
+}
+
+/** One line on the connect-time prebake, or null when there is nothing to say. */
+function prebakeLine(server: ServerCardData): { text: string; tone: "muted" | "ok" | "warn" } | null {
+  switch (server.prebakeStatus) {
+    case "running":
+      return { text: "Installing the agent engines in the background…", tone: "muted" }
+    case "ready":
+      return { text: "Ready: agents on this server start in a couple of minutes.", tone: "ok" }
+    case "failed":
+      return {
+        text: "Preinstall didn't finish. Click Refresh to retry; installing an agent still works, it just takes longer.",
+        tone: "warn",
+      }
+    case "skipped":
+      return server.prebakeError ? { text: server.prebakeError, tone: "muted" } : null
+    default:
+      return null
+  }
 }
 
 function gb(mb: number | null): string {
@@ -69,6 +91,15 @@ export function ServerCard({ server }: { server: ServerCardData }) {
   const reachable = server.status === "reachable"
   const probed = server.hwCpuCores != null
   const free = Math.max(0, server.capacityAgents - server.agentCount)
+  const prebake = reachable ? prebakeLine(server) : null
+  const prebakeRunning = server.prebakeStatus === "running"
+
+  // Pick up the prebake's outcome without a manual reload; it takes minutes.
+  useEffect(() => {
+    if (!prebakeRunning) return
+    const t = setInterval(() => router.refresh(), 15_000)
+    return () => clearInterval(t)
+  }, [prebakeRunning, router])
 
   async function refresh() {
     setBusy("refresh")
@@ -150,6 +181,20 @@ export function ServerCard({ server }: { server: ServerCardData }) {
       {!reachable && server.lastError && (
         <p className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
           {server.lastError}
+        </p>
+      )}
+
+      {prebake && (
+        <p
+          className={cn(
+            "mt-3 flex items-center gap-2 text-sm",
+            prebake.tone === "ok" && "text-emerald-600 dark:text-emerald-400",
+            prebake.tone === "warn" && "text-amber-600 dark:text-amber-500",
+            prebake.tone === "muted" && "text-muted-foreground",
+          )}
+        >
+          {prebakeRunning && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />}
+          {prebake.text}
         </p>
       )}
 

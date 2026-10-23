@@ -29,7 +29,7 @@ export function ConnectServerForm({
   prebakeEnabled = false,
 }: {
   fleetPublicKey: string | null
-  /** BYOS_PREBAKE_ENABLED: offer to preinstall in the background after connecting. */
+  /** Prebake is on (BYOS_PREBAKE_ENABLED is not "false"): the engines install right after connecting. */
   prebakeEnabled?: boolean
 }) {
   const router = useRouter()
@@ -37,7 +37,6 @@ export function ConnectServerForm({
   const [port, setPort] = useState("22")
   const [sshUser, setSshUser] = useState("root")
   const [label, setLabel] = useState("")
-  const [prebakeConsent, setPrebakeConsent] = useState(false)
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
   const [blockers, setBlockers] = useState<Issue[]>([])
@@ -72,7 +71,6 @@ export function ConnectServerForm({
           port: portNum,
           sshUser: sshUser.trim() || "root",
           label: label.trim() || undefined,
-          ...(prebakeEnabled ? { prebakeConsent } : {}),
         }),
       })
       const data = await res.json()
@@ -84,8 +82,8 @@ export function ConnectServerForm({
       }
       setConflicts(data.conflicts ?? [])
       toast.success(
-        prebakeEnabled && prebakeConsent
-          ? "Server connected — preinstalling in the background, nothing charged"
+        prebakeEnabled
+          ? "Server connected — installing the agent engines in the background, nothing charged"
           : "Server connected — nothing was installed or charged",
       )
       router.push("/dashboard/byos")
@@ -138,8 +136,19 @@ export function ConnectServerForm({
         <div className="rounded-2xl border border-border bg-card p-6">
           <h2 className="text-lg font-semibold text-foreground">2. Where is it?</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            We&apos;ll connect, check the machine, and show you its specs. Nothing is installed
-            and nothing is charged at this step.
+            {prebakeEnabled ? (
+              <>
+                We&apos;ll connect, check the machine and show you its specs, then install the
+                agent engines in the background so your first agent is up in a couple of minutes.
+                If the server already runs a web server or uses port 443, we leave it alone and
+                set up Caddy only when you add an agent. Nothing is charged at this step.
+              </>
+            ) : (
+              <>
+                We&apos;ll connect, check the machine, and show you its specs. Nothing is installed
+                and nothing is charged at this step.
+              </>
+            )}
           </p>
 
           <FieldGroup className="mt-4">
@@ -195,26 +204,6 @@ export function ConnectServerForm({
             </Field>
           </FieldGroup>
 
-          {prebakeEnabled && (
-            <label className="mt-5 flex items-start gap-3 rounded-lg border border-border p-4 text-sm">
-              <input
-                type="checkbox"
-                className="mt-0.5 h-4 w-4 accent-primary"
-                checked={prebakeConsent}
-                onChange={(e) => setPrebakeConsent(e.target.checked)}
-              />
-              <span>
-                <span className="font-medium text-foreground">Preinstall now so deploying is faster</span>
-                <span className="mt-1 block text-muted-foreground">
-                  We&apos;ll install system packages, Caddy, Node.js and the Hermes engine on this server in the
-                  background, before you add an agent. Only tick this if the server isn&apos;t running anything else
-                  you depend on: Atlas Agents can&apos;t take full responsibility for software already on a shared
-                  machine. If the server already runs a web server or uses port 443, we skip this and install at
-                  deploy time instead.
-                </span>
-              </span>
-            </label>
-          )}
 
           {blockers.length > 0 && (
             <div className="mt-5 rounded-lg border border-destructive/40 bg-destructive/10 p-4">
