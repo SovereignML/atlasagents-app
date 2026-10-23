@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextRequest, NextResponse, after } from "next/server"
 import { auth } from "@/auth"
 import { db, byosServers, instances, and, eq, ne, sql } from "@/db"
 import { getEffectiveTeam } from "@/lib/effective-user"
-import { refreshServer } from "@/lib/byos-server"
+import { refreshServerWithVerdict } from "@/lib/byos-server"
+import { byosPrebakeEnabled, runPrebake } from "@/lib/byos-prebake-job"
 import { findLegacyServerPlan } from "@/lib/byos-plan"
 import { apiError } from "@/lib/api-error"
 
@@ -22,7 +23,12 @@ async function loadOwned(serverId: string) {
   })
 }
 
-/** Re-probe a connected server and refresh its hardware snapshot. */
+/**
+ * Re-probe a connected server and refresh its hardware snapshot. Also starts
+ * the prebake when it never ran or failed (a server connected before prebake
+ * was on, or one whose last attempt broke); runPrebake skips a ready or
+ * running one itself.
+ */
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ serverId: string }> },
@@ -36,7 +42,10 @@ export async function POST(
   if (!owned) return NextResponse.json({ error: "Server not found" }, { status: 404 })
 
   try {
-    const server = await refreshServer(serverId)
+    const { server, verdict } = await refreshServerWithVerdict(serverId)
+    if (verdict && byosPrebakeEnabled() && server?.status === "reachable") {
+      after(() => runPrebake(serverId, verdict.facts))
+    }
     return NextResponse.json({ server })
   } catch (err) {
     return apiError("byos/servers:refresh", err)

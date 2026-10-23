@@ -75,6 +75,9 @@ export const HERMES_PYTHON_MIN = "3.11"
  * Ubuntu 25.x ship Python 3.13. Those boxes sailed past verify_python and then
  * died several minutes later at `install_pkgs_parallel`, after the apt work,
  * the venvs and most of a 900s timeout had already been spent.
+ *
+ * Ubuntu 26.04 ships 3.14, past the ceiling. verify_python then has `uv`
+ * download CPython 3.13 for the venv instead of failing (python-install.ts).
  */
 export const HERMES_PYTHON_MAX_EXCLUSIVE = "3.14"
 
@@ -139,9 +142,8 @@ RUNTIME_PKG_SPEC=${bashSingleQuote(pipPackageSpec(pin))}
 step "python_deps"
 apt-get $APT_OPTS install -y python3 python3-venv python3-pip ripgrep ffmpeg
 
-${buildVerifyPythonStep(HERMES_PYTHON_MAX_EXCLUSIVE)}
-
 ${buildPyInstallPrelude()}
+${buildVerifyPythonStep(HERMES_PYTHON_MAX_EXCLUSIVE)}
 step "create_hermes_venv"
 mkdir -p ${bashSingleQuote(HERMES_INSTALL_DIR)}
 venv_create ${bashSingleQuote(HERMES_VENV)}

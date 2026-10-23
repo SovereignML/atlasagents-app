@@ -118,12 +118,6 @@ export type ConnectServerInput = {
   port?: number
   sshUser?: string
   label?: string
-  /**
-   * The owner ticked "preinstall" (src/lib/byos-prebake-job.ts). Recorded as
-   * `prebakeConsentAt`; leaving it unticked on a re-probe keeps an earlier
-   * consent rather than revoking it.
-   */
-  prebakeConsent?: boolean
 }
 
 export type ConnectServerResult = {
@@ -241,7 +235,6 @@ export async function connectServer(input: ConnectServerInput): Promise<ConnectS
       ramTotalMb: f.ramTotalMb,
       diskTotalGb: f.diskTotalGb,
     }),
-    ...(input.prebakeConsent ? { prebakeConsentAt: new Date() } : {}),
   }
 
   const [server] = existing
@@ -260,10 +253,21 @@ export async function connectServer(input: ConnectServerInput): Promise<ConnectS
 
 /** Re-probe a connected server and update its snapshot. Best-effort. */
 export async function refreshServer(serverId: string): Promise<ByosServer | null> {
+  return (await refreshServerWithVerdict(serverId)).server
+}
+
+/**
+ * `refreshServer`, plus the preflight verdict when the probe succeeded (null
+ * when it did not), for a caller that acts on it: the Refresh button starts a
+ * prebake from it.
+ */
+export async function refreshServerWithVerdict(
+  serverId: string,
+): Promise<{ server: ByosServer | null; verdict: PreflightVerdict | null }> {
   const server = await db.query.byosServers.findFirst({ where: eq(byosServers.id, serverId) })
-  if (!server) return null
+  if (!server) return { server: null, verdict: null }
   try {
-    const { server: updated } = await connectServer({
+    const { server: updated, verdict } = await connectServer({
       teamId: server.teamId,
       userId: server.userId,
       host: server.host,
@@ -271,7 +275,7 @@ export async function refreshServer(serverId: string): Promise<ByosServer | null
       sshUser: server.sshUser,
       label: server.label,
     })
-    return updated
+    return { server: updated, verdict }
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err)
     const [updated] = await db
@@ -279,7 +283,7 @@ export async function refreshServer(serverId: string): Promise<ByosServer | null
       .set({ status: "unreachable", lastError: detail.slice(0, 500), lastCheckedAt: new Date() })
       .where(eq(byosServers.id, serverId))
       .returning()
-    return updated ?? null
+    return { server: updated ?? null, verdict: null }
   }
 }
 

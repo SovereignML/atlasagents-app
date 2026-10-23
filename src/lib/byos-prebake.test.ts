@@ -9,7 +9,9 @@ import {
   prebakeUsability,
 } from "./byos-prebake"
 import { HERMES_PINNED_VERSION, HERMES_VPS_MIN_NODE } from "./runtimes/hermes"
-import { OPENCLAW_PINNED_VERSION, OPENCLAW_VPS_MIN_NODE } from "./runtimes/openclaw"
+import { BYOS_RUNTIME_IDS } from "./runtimes/ids"
+import { LITE_ENGINES } from "./runtimes/universal"
+import { getRuntime } from "./runtimes"
 
 const CLEAN = {
   port443Busy: false,
@@ -19,49 +21,34 @@ const CLEAN = {
   diskAvailGb: 40,
 }
 
-const CONSENTED = new Date("2026-09-20T00:00:00Z")
-
 describe("prebakeDecision()", () => {
-  it("runs on a clean, consented server", () => {
-    expect(prebakeDecision({ facts: CLEAN, consentAt: CONSENTED })).toEqual({ run: true })
+  // Connecting the server is the go-ahead: there is no opt-in to wait for.
+  it("runs on a clean server, with Caddy", () => {
+    expect(prebakeDecision({ facts: CLEAN })).toEqual({ run: true, installCaddy: true })
   })
 
-  // The preflight is read-only and unprivileged by design, and the connect
-  // flow says so. Prebake is the moment that stops being true, so it does not
-  // happen on an unrecorded consent — ever.
-  it("refuses without recorded consent", () => {
-    for (const consentAt of [null, undefined]) {
-      const d = prebakeDecision({ facts: CLEAN, consentAt })
-      expect(d.run).toBe(false)
-      if (!d.run) expect(d.status).toBe("none")
-    }
-  })
-
-  // The preflight deliberately does NOT block on these — it surfaces them and
-  // tells the owner they are their call. Installing Caddy in the background
-  // moments later would answer that call for them. Consent covers "you may
-  // preinstall packages", not "you may reconfigure my web server".
-  it("defers to deploy time when the box already serves the web", () => {
-    for (const conflict of [
-      { hasCaddy: true },
-      { hasNginx: true },
-      { hasApache: true },
-      { port443Busy: true },
-    ]) {
-      const d = prebakeDecision({
-        facts: { ...CLEAN, ...conflict },
-        consentAt: CONSENTED,
+  // The preflight leaves a busy :443 or another web server to the owner, at
+  // install time. Installing Caddy in the background would answer that for
+  // them, so it waits for the deploy; everything else still installs.
+  it("installs everything but Caddy when the box already serves the web", () => {
+    for (const conflict of [{ hasNginx: true }, { hasApache: true }, { port443Busy: true }]) {
+      expect(prebakeDecision({ facts: { ...CLEAN, ...conflict } })).toEqual({
+        run: true,
+        installCaddy: false,
       })
-      expect(d.run).toBe(false)
-      if (!d.run) expect(d.status).toBe("skipped")
     }
+  })
+
+  // An existing Caddy (on :443 or not) is kept by the bootstrap itself.
+  it("leaves an existing Caddy alone", () => {
+    expect(prebakeDecision({ facts: { ...CLEAN, hasCaddy: true, port443Busy: true } })).toEqual({
+      run: true,
+      installCaddy: false,
+    })
   })
 
   it("skips rather than fails when disk is tight", () => {
-    const d = prebakeDecision({
-      facts: { ...CLEAN, diskAvailGb: PREBAKE_DISK_REQUIRED_GB - 1 },
-      consentAt: CONSENTED,
-    })
+    const d = prebakeDecision({ facts: { ...CLEAN, diskAvailGb: PREBAKE_DISK_REQUIRED_GB - 1 } })
     expect(d.run).toBe(false)
     // Deploying must still be possible — just slower. A tight disk is not a
     // reason to refuse the customer's server.
@@ -74,19 +61,24 @@ describe("prebakeDecision()", () => {
   it("proceeds when disk is unknown", () => {
     // The probe can come back without a figure; that is not evidence of a
     // problem, and the bootstrap fails loudly on its own if space runs out.
-    expect(
-      prebakeDecision({ facts: { ...CLEAN, diskAvailGb: null }, consentAt: CONSENTED }),
-    ).toEqual({ run: true })
+    expect(prebakeDecision({ facts: { ...CLEAN, diskAvailGb: null } }).run).toBe(true)
+  })
+})
+
+describe("BYOS engines", () => {
+  // Every engine BYOS offers must be on the prebaked image, or its deploy
+  // would install from scratch on a server the customer was told is ready.
+  it("are exactly the universal image's engines", () => {
+    expect([...BYOS_RUNTIME_IDS].sort()).toEqual([...LITE_ENGINES].sort())
+    expect(BYOS_RUNTIME_IDS).not.toContain("openclaw")
   })
 })
 
 describe("prebakeMinNode()", () => {
-  // At connect the engine is not chosen. A box given one runtime's major and
-  // later handed the other's would be downgraded mid-deploy, so the prebake
-  // must install a Node that satisfies both.
-  it("picks a Node that satisfies both runtimes", () => {
+  // At connect the engine is not chosen, so the Node must satisfy every one.
+  it("picks a Node that satisfies every BYOS engine", () => {
     const chosen = prebakeMinNode()
-    for (const floor of [OPENCLAW_VPS_MIN_NODE, HERMES_VPS_MIN_NODE]) {
+    for (const floor of [HERMES_VPS_MIN_NODE, ...LITE_ENGINES.map((id) => getRuntime(id).minNode)]) {
       const [c, f] = [chosen.split(".").map(Number), floor.split(".").map(Number)]
       const satisfies =
         c[0] > f[0] || (c[0] === f[0] && (c[1] > f[1] || (c[1] === f[1] && c[2] >= f[2])))
@@ -96,61 +88,24 @@ describe("prebakeMinNode()", () => {
 })
 
 describe("buildPrebakeScript()", () => {
-  const script = buildPrebakeScript({
-    openclawVersion: "2026.9.5",
-    hermesVersion: "0.19.0",
-    sshPort: 2222,
+  const script = buildPrebakeScript({ hermesVersion: "0.19.0", sshPort: 2222 })
+
+  it("creates every BYOS engine's account, since the engine is unchosen", () => {
+    for (const id of LITE_ENGINES) {
+      expect(script).toContain(`useradd --system --home-dir '${getRuntime(id).paths.installDir}'`)
+    }
   })
 
-  it("creates both runtimes' accounts, since the engine is unchosen", () => {
-    expect(script).toContain("useradd --system --home-dir '/opt/hermes'")
-    expect(script).toContain("useradd --system --home-dir '/opt/openclaw'")
-  })
-
-  it("installs Hermes outright, and leaves the chat UI to the deploy", () => {
+  it("installs the universal image: every engine and the chat UI", () => {
     expect(script).toContain("hermes-agent[acp,messaging]==0.19.0")
-    expect(script).not.toContain("open-webui")
-    expect(script).not.toContain("agentwebui-lite")
+    expect(script).toContain("agentwebui-lite")
+    for (const id of LITE_ENGINES) expect(script).toContain(`=== universal: ${id} ===`)
   })
 
-  // OpenClaw is the genuine either/or. Its 225MB / 11,428-file extract is the
-  // expensive half and stays at deploy; only the download moves here.
-  it("downloads OpenClaw without installing it", () => {
-    expect(script).toContain("--package-lock-only")
-    expect(script).toContain("'openclaw@2026.9.5'")
-    expect(script).toContain("npm cache add")
-    expect(script).not.toContain("npm install -g")
-    expect(script).not.toContain("install_runtime")
-  })
-
-  // Resolving via --package-lock-only and feeding `npm cache add` warms the
-  // full dependency tree for one download and unpacks nothing. Installing into
-  // a throwaway prefix would warm the same tarballs but pay OpenClaw's
-  // 11,428-file extract twice — here and again at deploy.
-  it("warms the dependency tree without extracting anything", () => {
-    expect(script).toContain("package-lock.json")
-    expect(script).not.toContain("--prefix")
-    expect(script).not.toContain("npm ci")
-  })
-
-  // This nearly shipped broken: the heredoc body is JavaScript written inside
-  // a TS template literal, where a single-backslash escape becomes a REAL
-  // newline — a syntax error inside a JS string. node would have failed, the
-  // `|| exit 1` would have swallowed it, and the cache warm would have
-  // silently done nothing.
-  it("emits a syntactically valid lockfile reader", () => {
-    const open = "cat > warm.js <<'WARMJS'\n"
-    const body = script.slice(
-      script.indexOf(open) + open.length,
-      script.indexOf("\nWARMJS"),
-    )
-    expect(body).toContain("package-lock.json")
-    expect(() => new Function(body)).not.toThrow()
-  })
-
-  it("cleans up its scratch directory either way", () => {
-    expect(script).toContain('rm -rf "$OC_WARM"')
-    expect(script).toContain("cache warm failed")
+  it("installs nothing of OpenClaw", () => {
+    expect(script).not.toContain("openclaw@")
+    expect(script).not.toContain("/opt/openclaw")
+    expect(script).not.toContain("npm cache add")
   })
 
   it("never turns the customer's firewall on, and opens their real ssh port", () => {
@@ -158,27 +113,27 @@ describe("buildPrebakeScript()", () => {
     expect(script).not.toContain("ufw enable")
   })
 
-  it("omits Chrome unless explicitly asked for", () => {
-    expect(script).not.toContain("google-chrome-stable")
-    const withBrowser = buildPrebakeScript({
-      openclawVersion: null,
-      hermesVersion: null,
-      browserDeps: true,
-    })
-    expect(withBrowser).toContain("google-chrome-stable")
+  it("leaves Caddy out when asked to", () => {
+    expect(script).toContain('step "install_caddy"')
+    const noCaddy = buildPrebakeScript({ hermesVersion: null, installCaddy: false })
+    expect(noCaddy).not.toContain('step "install_caddy"')
+    expect(noCaddy).toContain("install_caddy skipped")
   })
 
-  // Nothing resolved must still warm exactly what the deploy installs: the
-  // runtimes' code pins. Falling back to `latest` here would fetch a version
-  // the deploy never asks for, and the prefetch would buy nothing.
-  it("falls back to the code pins when nothing is resolved", () => {
-    const unpinned = buildPrebakeScript({
-      openclawVersion: null,
-      hermesVersion: null,
-    })
-    expect(unpinned).toContain(`'openclaw@${OPENCLAW_PINNED_VERSION}'`)
-    expect(unpinned).toContain(`RUNTIME_PKG_SPEC='hermes-agent[acp,messaging]==${HERMES_PINNED_VERSION}'`)
-    expect(unpinned).not.toContain("openclaw@latest")
+  it("omits Chrome unless explicitly asked for", () => {
+    expect(script).not.toContain("google-chrome-stable")
+    expect(buildPrebakeScript({ hermesVersion: null, browserDeps: true })).toContain(
+      "google-chrome-stable",
+    )
+  })
+
+  // Nothing resolved must still install exactly what the deploy installs: the
+  // code pin. Falling back to `latest` would bake a version the deploy never
+  // asks for.
+  it("falls back to the Hermes code pin when nothing is resolved", () => {
+    expect(buildPrebakeScript({ hermesVersion: null })).toContain(
+      `RUNTIME_PKG_SPEC='hermes-agent[acp,messaging]==${HERMES_PINNED_VERSION}'`,
+    )
   })
 
   it("reuses the real bootstrap framing, so progress is reported the same way", () => {
@@ -187,24 +142,18 @@ describe("buildPrebakeScript()", () => {
     expect(script).toContain('echo "done" > "$STATUS"')
   })
 
-  // The snippet bakes in a single gatewayPort and the engine is unknown here.
-  it("installs and enables the Hermes gateway unit", () => {
+  // Warming the CLI is what makes the deploy fast; it runs before "done".
+  it("warms the Hermes CLI before reporting done", () => {
     expect(script).toContain("prebake_finalize")
-    expect(script).toContain("/etc/systemd/system/hermes-gateway.service")
-    expect(script).toContain("systemctl enable 'hermes-gateway'")
-  })
-
-  // Warming the CLI is the other half of what makes a claim fast; it can only
-  // run because hermes is genuinely installed here, not merely downloaded.
-  it("warms the Hermes CLI", () => {
     expect(script).toContain("setup --non-interactive --quick")
     expect(script).toContain("doctor --fix")
+    expect(script.indexOf("prebake_finalize")).toBeLessThan(script.indexOf('echo "done" > "$STATUS"'))
   })
 
-  // OpenClaw is only cached, so its unit would point systemd at a binary that
-  // does not exist. The deploy writes it.
-  it("does not write an OpenClaw unit it has no binary for", () => {
-    expect(script).not.toContain("openclaw-gateway.service")
+  // Which engine runs is decided at deploy, as at a pool claim: no unit is
+  // written for any of them here.
+  it("writes no engine's systemd unit", () => {
+    expect(script).not.toContain("/etc/systemd/system/hermes-gateway.service")
   })
 
   it("writes no Cloudflare origin-cert snippet", () => {
@@ -221,8 +170,7 @@ describe("parsePrebakeVerify()", () => {
         "caddy=1",
         "uv=1",
         "hermes=0.19.0",
-        "openclaw_cached=1",
-        "hermes_unit=1",
+        "lite=1",
         "disk_avail_gb=40",
       ].join("\n"),
     )
@@ -231,7 +179,7 @@ describe("parsePrebakeVerify()", () => {
       hasCaddy: true,
       hasUv: true,
       hermesVersion: "0.19.0",
-      hermesUnitInstalled: true,
+      liteInstalled: true,
       diskAvailGb: 40,
     })
   })
@@ -256,7 +204,7 @@ describe("prebakeUsability()", () => {
     hasCaddy: true,
     hasUv: true,
     hermesVersion: "0.19.0",
-    hermesUnitInstalled: true,
+    liteInstalled: true,
     diskAvailGb: 40,
   }
 
@@ -285,20 +233,19 @@ describe("prebakeUsability()", () => {
     expect(r.misses).toContain("caddy is not installed")
   })
 
-  it("notices a missing systemd unit", () => {
+  it("notices a missing chat UI", () => {
     const r = prebakeUsability({
-      runtime: "hermes",
-      facts: { ...READY, hermesUnitInstalled: false },
-      hermesPin: "0.19.0",
+      runtime: "claude-code",
+      facts: { ...READY, liteInstalled: false },
       minNodeVersion: "24.16.0",
     })
     expect(r.fastPath).toBe(false)
-    expect(r.misses.join(" ")).toMatch(/hermes-gateway unit/)
+    expect(r.misses).toContain("the chat UI is not installed")
   })
 
   it("notices a Node major that no longer matches", () => {
     const r = prebakeUsability({
-      runtime: "openclaw",
+      runtime: "codex",
       facts: { ...READY, nodeVersion: "22.14.0" },
       minNodeVersion: "24.16.0",
     })
@@ -306,12 +253,11 @@ describe("prebakeUsability()", () => {
     expect(r.misses.join(" ")).toMatch(/wanted major 24/)
   })
 
-  // OpenClaw is only ever cached, never installed, so its absence is normal
-  // and must not be reported as drift.
-  it("does not expect Hermes to be present for an OpenClaw deploy", () => {
+  // Hermes' version only matters to a Hermes deploy.
+  it("does not check Hermes' version for another engine's deploy", () => {
     expect(
       prebakeUsability({
-        runtime: "openclaw",
+        runtime: "claude-code",
         facts: { ...READY, hermesVersion: null },
         minNodeVersion: "24.16.0",
       }).fastPath,

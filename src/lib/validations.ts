@@ -148,8 +148,6 @@ export const byosServerConnectSchema = z.object({
   port: z.number().int().min(1).max(65535).optional(),
   sshUser: z.string().trim().min(1).max(32).regex(/^[a-z_][a-z0-9_.-]*$/i, "Invalid SSH user").optional(),
   label: z.string().trim().max(60).optional(),
-  /** The owner agreed to have packages preinstalled (BYOS_PREBAKE_ENABLED only). */
-  prebakeConsent: z.boolean().optional(),
 })
 
 const secret = z.string().max(512)

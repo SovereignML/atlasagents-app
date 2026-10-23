@@ -23,7 +23,8 @@ import {
   type ByoProviderId,
 } from "@/configs/llm-providers"
 import { cn } from "@/lib/utils"
-import { RUNTIME_IDS } from "@/lib/runtimes/ids"
+import { BYOS_RUNTIME_IDS } from "@/lib/runtimes/ids"
+import { RuntimeLogo } from "@/components/dashboard/runtime-logo"
 import { RUNTIME_CAPS } from "@/lib/runtimes/labels"
 import type { RuntimeId } from "@/lib/runtimes/types"
 import { BRANDING } from "@/configs/branding"
@@ -65,7 +66,9 @@ const STEP_LABELS: Record<Step, string> = {
   review: "Review",
 }
 
-const RUNTIME_OPTIONS: { value: Runtime; label: string; hint: string }[] = RUNTIME_IDS.map(
+// Every engine but OpenClaw: the server is prebaked with the universal image
+// at connect, and these are the engines it carries (runtimes/ids.ts).
+const RUNTIME_OPTIONS: { value: Runtime; label: string; hint: string }[] = BYOS_RUNTIME_IDS.map(
   (id) => ({ value: id, label: RUNTIME_CAPS[id].label, hint: RUNTIME_CAPS[id].hint }),
 )
 
@@ -107,11 +110,11 @@ export function ByosInstallForm({
   const [interval, setInterval] = useState<"month" | "year">("month")
 
   // Agent step
-  const [runtime, setRuntime] = useState<Runtime>("openclaw")
+  const [runtime, setRuntime] = useState<Runtime>("hermes")
   // Engines this account may deploy. Beta engines stay hidden until the server
   // says otherwise (CLI_RUNTIMES_ENABLED, or a platform admin).
   const [availableRuntimes, setAvailableRuntimes] = useState<Runtime[]>(() =>
-    RUNTIME_IDS.filter((id) => !RUNTIME_CAPS[id].beta),
+    BYOS_RUNTIME_IDS.filter((id) => !RUNTIME_CAPS[id].beta),
   )
   useEffect(() => {
     fetch("/api/runtimes")
@@ -147,9 +150,9 @@ export function ByosInstallForm({
   const fitsRuntime = (r: Runtime) => !probed || capacity[runtimeFootprintKey(r)] > 0
   const selectedFootprint = getFootprint(runtimeFootprintKey(runtime))
 
-  // A non-OpenRouter direct key (primary or fallback) only runs on Hermes —
-  // OpenClaw's package is hardwired to OpenRouter. When the user picks one, the
-  // runtime is forced to Hermes and OpenClaw is disabled on the agent step.
+  // A non-OpenRouter direct key (primary or fallback) only runs on an engine
+  // that takes a custom base URL. When the user picks one, the runtime is
+  // forced to Hermes and the engines that can't are disabled on the agent step.
   const ownDef = getByoProvider(ownProvider)
   const forcesHermes =
     llmMode === "own_key" &&
@@ -368,7 +371,7 @@ export function ByosInstallForm({
                   onValueChange={(v) => {
                     if (!v[0]) return
                     // A direct-provider key forces Hermes — ignore attempts to
-                    // switch back to OpenClaw.
+                    // switch to an engine that can't use it.
                     if (forcesHermes && !RUNTIME_CAPS[v[0] as Runtime].supportsCustomBaseUrl) return
                     setRuntime(v[0] as Runtime)
                   }}
@@ -386,17 +389,22 @@ export function ByosInstallForm({
                         variant="outline"
                         disabled={disabled}
                         className={cn(
-                          "h-auto flex-col items-start whitespace-normal p-4 text-left",
+                          "h-auto flex-col items-start gap-2 whitespace-normal p-4 text-left",
                           SELECTED_GLOW,
                           disabled && "opacity-50"
                         )}
                       >
-                        <p className="text-sm font-medium text-foreground">
-                          {r.label}
-                          {RUNTIME_CAPS[r.value].beta && (
-                            <span className="ml-2 text-[10px] font-normal text-muted-foreground uppercase">Beta</span>
-                          )}
-                        </p>
+                        <div className="flex items-center gap-3">
+                          <div className="grid size-10 shrink-0 place-items-center rounded-[10px] border border-border bg-muted">
+                            <RuntimeLogo runtime={r.value} alt={`${r.label} logo`} size={24} className="size-6" />
+                          </div>
+                          <p className="text-sm font-medium text-foreground">
+                            {r.label}
+                            {RUNTIME_CAPS[r.value].beta && (
+                              <span className="ml-2 text-[10px] font-normal text-muted-foreground uppercase">Beta</span>
+                            )}
+                          </p>
+                        </div>
                         <p className="text-xs text-muted-foreground">{r.hint}</p>
                         {fp && (
                           <p
@@ -688,7 +696,10 @@ export function ByosInstallForm({
                     <CardDescription className="text-xs uppercase tracking-wide">
                       Agent
                     </CardDescription>
-                    <p className="font-medium text-foreground">{runtimeLabel}</p>
+                    <div className="flex items-center gap-2">
+                      <RuntimeLogo runtime={runtime} alt={`${runtimeLabel} logo`} size={20} className="size-5" />
+                      <p className="font-medium text-foreground">{runtimeLabel}</p>
+                    </div>
                   </CardHeader>
                   <CardContent>
                     <p className="text-xs text-muted-foreground">Named for you; rename it from its page.</p>
